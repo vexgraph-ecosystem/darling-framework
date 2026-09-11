@@ -82,6 +82,8 @@ const char *Darling_kindName(uint32_t classId) {
         return "LayeredContainer";
     if (classId == ID_SECTION_CONTAINER)
         return "SectionContainer";
+    if (classId == ID_EXPANDABLE_LIST_CONTAINER)
+        return "ExpandableListContainer";
     if (classId == ID_BUTTON)
         return "Button";
     if (classId == ID_SWITCH)

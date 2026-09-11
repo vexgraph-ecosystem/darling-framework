@@ -65,6 +65,7 @@ add_library(darling STATIC
     darling/scene/scene.c
     darling/panel/layered_container.c
     darling/panel/section_container.c
+    darling/panel/expandable_list_container.c
     darling/panel/list_container.c
     darling/panel/grid_container.c
     darling/panel/markdown_panel.c
@@ -244,6 +245,14 @@ if(NOT TARGET scrollbar_test)
         darling/field/scrollbar_test.c
     )
     target_link_libraries(scrollbar_test PRIVATE darling)
+endif()
+
+# ExpandableListContainer artifact (tree/hierarchy §1): headless add, expand/collapse, depth, checklist, remove suite.
+if(NOT TARGET expandable_list_container_test)
+    add_executable(expandable_list_container_test
+        darling/panel/expandable_list_container_test.c
+    )
+    target_link_libraries(expandable_list_container_test PRIVATE darling)
 endif()
 
 # RadioGroup artifact (click §4): headless options, mutual exclusion, pointer click suite.

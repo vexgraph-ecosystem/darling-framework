@@ -12,6 +12,7 @@
 #include "darling/scene/scene.h"
 #include "darling/panel/layered_container.h"
 #include "darling/panel/section_container.h"
+#include "darling/panel/expandable_list_container.h"
 #include "darling/button/button.h"
 #include "darling/button/switch.h"
 #include "darling/field/checkbox.h"
@@ -83,6 +84,8 @@ static inline Panel *Darling_asPanel_Scene3D(Scene3D *s) {
 
 static inline Panel *Darling_asPanel_LayeredContainer(LayeredContainer *p) { return (Panel*) (void*) p; }
 static inline Panel *Darling_asPanel_SectionContainer(SectionContainer *p) { return (Panel*) (void*) p; }
+static inline Panel *Darling_asPanel_ExpandableListContainer(ExpandableListContainer *p) { return (Panel*) (void*) p; }
+
 static inline Panel *Darling_asPanel_Button(Button *p) { return (Panel*) (void*) p; }
 static inline Panel *Darling_asPanel_Switch(Switch *p) { return (Panel*) (void*) p; }
 static inline Panel *Darling_asPanel_Checkbox(Checkbox *p) { return (Panel*) (void*) p; }
@@ -122,6 +125,7 @@ static inline Panel *Darling_asPanel_ColorDialog(ColorDialog *c) {
     Scene3D *: Darling_asPanel_Scene3D, \
     LayeredContainer *: Darling_asPanel_LayeredContainer, \
     SectionContainer *: Darling_asPanel_SectionContainer, \
+    ExpandableListContainer *: Darling_asPanel_ExpandableListContainer, \
     Button *: Darling_asPanel_Button, \
     Switch *: Darling_asPanel_Switch, \
     Checkbox *: Darling_asPanel_Checkbox, \
@@ -179,6 +183,10 @@ static inline void Darling_addLayeredContainer(Panel *parent, LayeredContainer *
 
 static inline void Darling_addSectionContainer(Panel *parent, SectionContainer *child) {
     Darling_addAny(parent, (void*) child, ID_SECTION_CONTAINER);
+}
+
+static inline void Darling_addExpandableListContainer(Panel *parent, ExpandableListContainer *child) {
+    Darling_addAny(parent, (void*) child, ID_EXPANDABLE_LIST_CONTAINER);
 }
 
 static inline void Darling_addButton(Panel *parent, Button *child) {
@@ -275,6 +283,7 @@ static inline void Darling_addColorDialog(Panel *parent, ColorDialog *child) {
     Scene3D *: ID_SCENE3D, \
     LayeredContainer *: ID_LAYERED_CONTAINER, \
     SectionContainer *: ID_SECTION_CONTAINER, \
+    ExpandableListContainer *: ID_EXPANDABLE_LIST_CONTAINER, \
     Button *: ID_BUTTON, \
     Switch *: ID_SWITCH, \
     Checkbox *: ID_CHECKBOX, \
@@ -314,6 +323,7 @@ const char *Darling_kindName(uint32_t classId);
     Scene3D *: Darling_addScene3D, \
     LayeredContainer *: Darling_addLayeredContainer, \
     SectionContainer *: Darling_addSectionContainer, \
+    ExpandableListContainer *: Darling_addExpandableListContainer, \
     Button *: Darling_addButton, \
     Switch *: Darling_addSwitch, \
     Checkbox *: Darling_addCheckbox, \
