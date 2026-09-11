@@ -964,8 +964,8 @@ Cursor *Label_getCursor(const Label *label) {
 
 void Label_getSelection(const Label *label, int32_t *outStart, int32_t *outEnd) {
     if (!label) {
-        (*outStart) = -1;
-        (*outEnd) = -1;
+        if (outStart) (*outStart) = -1;
+        if (outEnd) (*outEnd) = -1;
         return;
     }
     int32_t s0 = (*label).selectionStart;
@@ -975,8 +975,8 @@ void Label_getSelection(const Label *label, int32_t *outStart, int32_t *outEnd) 
         s0 = s1;
         s1 = tmp;
     }
-    (*outStart) = s0;
-    (*outEnd) = s1;
+    if (outStart) (*outStart) = s0;
+    if (outEnd) (*outEnd) = s1;
 }
 
 float Label_getHighlightRadius(const Label *label) {
