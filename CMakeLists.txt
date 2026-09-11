@@ -99,6 +99,7 @@ add_library(darling STATIC
     event/dispatch.c
     event/bridge.c
     text/rich_text.c
+    text/text_select.c
     render/raster.c
     render/surface.c
     io/bake.c
@@ -213,6 +214,14 @@ if(NOT TARGET markdown_panel_test)
         darling/panel/markdown_panel_test.c
     )
     target_link_libraries(markdown_panel_test PRIVATE darling)
+endif()
+
+# TextSelect artifact: shared fixed-anchor selection part state machine suite.
+if(NOT TARGET text_select_test)
+    add_executable(text_select_test
+        text/text_select_test.c
+    )
+    target_link_libraries(text_select_test PRIVATE darling)
 endif()
 
 # Button artifact (click §1): headless click, hover, down/up bounds suite.
