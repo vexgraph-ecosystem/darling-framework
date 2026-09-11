@@ -9,12 +9,7 @@
 #include "event/pointer.h"
 #include "oop/type.h"
 
-#ifndef ID_SCROLLBAR
-#define ID_SCROLLBAR 0x009Fu
-#endif
-#ifndef TYPE_SCROLLBAR_SINGLETON
-#define TYPE_SCROLLBAR_SINGLETON (FORM_SINGLETON | ID_SCROLLBAR)
-#endif
+
 
 #define SCROLL_BAR_GESTURE  0
 #define SCROLL_BAR_POINT    1

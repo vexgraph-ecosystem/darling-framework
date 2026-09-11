@@ -9,12 +9,6 @@
 #include "darling/panel/panel.h"
 #include "oop/type.h"
 
-#ifndef ID_COLORSWATCH
-#define ID_COLORSWATCH 0x009Cu
-#endif
-#ifndef TYPE_COLORSWATCH_SINGLETON
-#define TYPE_COLORSWATCH_SINGLETON (FORM_SINGLETON | ID_COLORSWATCH)
-#endif
 
 #define COLORSWATCH_CAPACITY 16
 

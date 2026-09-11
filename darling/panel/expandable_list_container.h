@@ -26,12 +26,7 @@
 // array keeps thousands of files cache-friendly, the index API keeps tree
 // semantics OOP-ergonomic (Rule 36).
 
-#ifndef ID_EXPANDABLE_LIST_CONTAINER
-#define ID_EXPANDABLE_LIST_CONTAINER 0x006Au
-#endif
-#ifndef TYPE_EXPANDABLE_LIST_CONTAINER_SINGLETON
-#define TYPE_EXPANDABLE_LIST_CONTAINER_SINGLETON (FORM_SINGLETON | ID_EXPANDABLE_LIST_CONTAINER)
-#endif
+
 
 // Root sentinel for ExpandableNode.parentIndex.
 #define EXPANDABLE_LIST_ROOT UINT32_MAX

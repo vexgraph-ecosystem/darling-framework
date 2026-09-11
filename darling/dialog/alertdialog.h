@@ -16,7 +16,6 @@ enum {
     ALERT_DANGER = 2
 };
 
-// ID_ALERTDIALOG 0x00A1 (registered in vexspoke oop/type.h).
 typedef struct AlertDialog {
     Dialog base;
     int32_t variant;      // ALERT_INFO/WARN/DANGER

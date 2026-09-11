@@ -14,10 +14,7 @@
 
 // Central registry owns these once landed; the guard keeps this shell
 // compiling standalone until then.
-#ifndef TYPE_LAYERED_CONTAINER_SINGLETON
-#define ID_LAYERED_CONTAINER              0x0067u
-#define TYPE_LAYERED_CONTAINER_SINGLETON  (FORM_SINGLETON | ID_LAYERED_CONTAINER)
-#endif
+
 
 typedef struct LayeredContainer {
     Panel base;

@@ -10,12 +10,6 @@
 #include "oop/type.h"
 #include "struct/list.h"
 
-#ifndef ID_FILEDIALOG
-#define ID_FILEDIALOG 0x009Du
-#endif
-#ifndef TYPE_FILEDIALOG_SINGLETON
-#define TYPE_FILEDIALOG_SINGLETON (FORM_SINGLETON | ID_FILEDIALOG)
-#endif
 
 #define FILEDIALOG_PATH_MAX    512
 #define FILEDIALOG_FILTER_MAX  64

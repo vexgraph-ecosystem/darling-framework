@@ -14,10 +14,7 @@
 
 // Central registry owns these once landed; the guard keeps this shell
 // compiling standalone until then.
-#ifndef TYPE_SECTION_CONTAINER_SINGLETON
-#define ID_SECTION_CONTAINER              0x0068u
-#define TYPE_SECTION_CONTAINER_SINGLETON  (FORM_SINGLETON | ID_SECTION_CONTAINER)
-#endif
+
 
 typedef struct SectionContainer {
     Panel base;

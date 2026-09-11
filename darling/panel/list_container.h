@@ -19,12 +19,7 @@
 
 // Central registry owns these once landed; the guard keeps this shell
 // compiling standalone until then.
-#ifndef ID_LIST_PANEL
-#define ID_LIST_PANEL 0x006Bu
-#endif
-#ifndef TYPE_LIST_PANEL_SINGLETON
-#define TYPE_LIST_PANEL_SINGLETON (FORM_SINGLETON | ID_LIST_PANEL)
-#endif
+
 
 #define LIST_PANEL_VERTICAL    0
 #define LIST_PANEL_HORIZONTAL  1

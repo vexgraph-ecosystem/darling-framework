@@ -10,12 +10,6 @@
 #include "darling/panel/panel.h"
 #include "oop/type.h"
 
-#ifndef ID_PLOT
-#define ID_PLOT 0x00B9u
-#endif
-#ifndef TYPE_PLOT_SINGLETON
-#define TYPE_PLOT_SINGLETON (FORM_SINGLETON | ID_PLOT)
-#endif
 
 // darling/plot/plot.h — data-first chart: borrowed float buffers + axis
 // ranges + colors + owned labels (ggplot-inspired, single class).

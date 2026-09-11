@@ -8,12 +8,6 @@
 #include "font/font.h"
 #include "oop/type.h"
 
-#ifndef ID_TYPOGRAPHY
-#define ID_TYPOGRAPHY 0x00C0u
-#endif
-#ifndef TYPE_TYPOGRAPHY_SINGLETON
-#define TYPE_TYPOGRAPHY_SINGLETON (FORM_SINGLETON | ID_TYPOGRAPHY)
-#endif
 
 #define TYPOGRAPHY_H1       0
 #define TYPOGRAPHY_H2       1

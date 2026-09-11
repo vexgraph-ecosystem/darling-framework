@@ -19,10 +19,7 @@
 
 // Central registry owns these once landed; the guard keeps this shell
 // compiling standalone until then.
-#ifndef TYPE_RICHTEXT_PANEL_SINGLETON
-#define ID_RICHTEXT_PANEL              0x006Au
-#define TYPE_RICHTEXT_PANEL_SINGLETON  (FORM_SINGLETON | ID_RICHTEXT_PANEL)
-#endif
+
 
 typedef struct RichTextPanel {
     Panel base;

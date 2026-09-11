@@ -11,7 +11,6 @@
 // with the overlay phase). Family root for AlertDialog and ColorDialog:
 // they embed Dialog the way Dialog embeds Panel.
 
-// ID_DIALOG 0x00A0 (registered in vexspoke oop/type.h).
 typedef struct Dialog {
     Panel base;
     char *title;          // owned dialog title (strdup on set)

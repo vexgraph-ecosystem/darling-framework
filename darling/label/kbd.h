@@ -7,12 +7,6 @@
 #include "darling/panel/panel.h"
 #include "oop/type.h"
 
-#ifndef ID_KBD
-#define ID_KBD 0x00B4u
-#endif
-#ifndef TYPE_KBD_SINGLETON
-#define TYPE_KBD_SINGLETON (FORM_SINGLETON | ID_KBD)
-#endif
 
 // darling/label/kbd.h — keyboard-shortcut chip (pure display node).
 

@@ -9,12 +9,7 @@
 #include "darling/panel/panel.h"
 #include "oop/type.h"
 
-#ifndef ID_SCROLL_PANEL
-#define ID_SCROLL_PANEL 0x006Du
-#endif
-#ifndef TYPE_SCROLL_PANEL_SINGLETON
-#define TYPE_SCROLL_PANEL_SINGLETON (FORM_SINGLETON | ID_SCROLL_PANEL)
-#endif
+
 
 // darling/panel/scroll_container.h — viewport over an oversized content panel.
 //

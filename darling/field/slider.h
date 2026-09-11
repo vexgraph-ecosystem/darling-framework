@@ -10,12 +10,6 @@
 #include "event/pointer.h"
 #include "oop/type.h"
 
-#ifndef ID_SLIDER
-#define ID_SLIDER 0x0094u
-#endif
-#ifndef TYPE_SLIDER_SINGLETON
-#define TYPE_SLIDER_SINGLETON (FORM_SINGLETON | ID_SLIDER)
-#endif
 
 // darling/field/slider.h — linear value track with optional range thumb.
 

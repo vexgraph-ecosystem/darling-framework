@@ -63,7 +63,10 @@ typedef struct Canvas Canvas;
 // Panel_addContainer. Deep-copy stays Panel_add(parent, node) — unchanged.
 
 // Runtime attach with explicit class id (null-safe no-op on mismatch).
-void Darling_addAny(Panel *parent, void *child, uint32_t childClass);
+// childClass is a FULL type id (TYPE_*_SINGLETON: PROJ_DARLING | FORM |
+// class) so Type_arch/Type_isA resolve in darling's own registry — bare
+// ID_* numbers mean vexspoke's class space, never darling's.
+void Darling_addAny(Panel *parent, void *child, uint64_t childClass);
 
 // --- parent normalization (any Panel-derived pointer -> Panel *) ------------
 static inline Panel *Darling_asPanel_Panel(Panel *p) { return p; }
@@ -150,123 +153,123 @@ static inline Panel *Darling_asPanel_ColorDialog(ColorDialog *c) {
 
 // --- per-child attach shims (one per accepted child type) -------------------
 static inline void Darling_addPanel(Panel *parent, Panel *child) {
-    Darling_addAny(parent, (void*) child, ID_PANEL);
+    Darling_addAny(parent, (void*) child, TYPE_PANEL_SINGLETON);
 }
 
 static inline void Darling_addLabel(Panel *parent, Label *child) {
-    Darling_addAny(parent, (void*) child, ID_LABEL);
+    Darling_addAny(parent, (void*) child, TYPE_LABEL_SINGLETON);
 }
 
 static inline void Darling_addPicture(Panel *parent, Picture *child) {
-    Darling_addAny(parent, (void*) child, ID_PICTURE);
+    Darling_addAny(parent, (void*) child, TYPE_PICTURE_SINGLETON);
 }
 
 static inline void Darling_addRichLabel(Panel *parent, RichLabel *child) {
-    Darling_addAny(parent, (void*) child, ID_RICH_LABEL);
+    Darling_addAny(parent, (void*) child, TYPE_RICH_LABEL_SINGLETON);
 }
 
 static inline void Darling_addScene(Panel *parent, Scene *child) {
-    Darling_addAny(parent, (void*) child, ID_SCENE);
+    Darling_addAny(parent, (void*) child, TYPE_SCENE_SINGLETON);
 }
 
 static inline void Darling_addScene2D(Panel *parent, Scene2D *child) {
-    Darling_addAny(parent, (void*) child, ID_SCENE2D);
+    Darling_addAny(parent, (void*) child, TYPE_SCENE2D_SINGLETON);
 }
 
 static inline void Darling_addScene3D(Panel *parent, Scene3D *child) {
-    Darling_addAny(parent, (void*) child, ID_SCENE3D);
+    Darling_addAny(parent, (void*) child, TYPE_SCENE3D_SINGLETON);
 }
 
 static inline void Darling_addLayeredContainer(Panel *parent, LayeredContainer *child) {
-    Darling_addAny(parent, (void*) child, ID_LAYERED_CONTAINER);
+    Darling_addAny(parent, (void*) child, TYPE_LAYERED_CONTAINER_SINGLETON);
 }
 
 static inline void Darling_addSectionContainer(Panel *parent, SectionContainer *child) {
-    Darling_addAny(parent, (void*) child, ID_SECTION_CONTAINER);
+    Darling_addAny(parent, (void*) child, TYPE_SECTION_CONTAINER_SINGLETON);
 }
 
 static inline void Darling_addExpandableListContainer(Panel *parent, ExpandableListContainer *child) {
-    Darling_addAny(parent, (void*) child, ID_EXPANDABLE_LIST_CONTAINER);
+    Darling_addAny(parent, (void*) child, TYPE_EXPANDABLE_LIST_CONTAINER_SINGLETON);
 }
 
 static inline void Darling_addButton(Panel *parent, Button *child) {
-    Darling_addAny(parent, (void*) child, ID_BUTTON);
+    Darling_addAny(parent, (void*) child, TYPE_BUTTON_SINGLETON);
 }
 
 static inline void Darling_addSwitch(Panel *parent, Switch *child) {
-    Darling_addAny(parent, (void*) child, ID_SWITCH);
+    Darling_addAny(parent, (void*) child, TYPE_SWITCH_SINGLETON);
 }
 
 static inline void Darling_addCheckbox(Panel *parent, Checkbox *child) {
-    Darling_addAny(parent, (void*) child, ID_CHECKBOX);
+    Darling_addAny(parent, (void*) child, TYPE_CHECKBOX_SINGLETON);
 }
 
 static inline void Darling_addRadioGroup(Panel *parent, RadioGroup *child) {
-    Darling_addAny(parent, (void*) child, ID_RADIOGROUP);
+    Darling_addAny(parent, (void*) child, TYPE_RADIOGROUP_SINGLETON);
 }
 
 static inline void Darling_addSlider(Panel *parent, Slider *child) {
-    Darling_addAny(parent, (void*) child, ID_SLIDER);
+    Darling_addAny(parent, (void*) child, TYPE_SLIDER_SINGLETON);
 }
 
 static inline void Darling_addKnob(Panel *parent, Knob *child) {
-    Darling_addAny(parent, (void*) child, ID_KNOB);
+    Darling_addAny(parent, (void*) child, TYPE_KNOB_SINGLETON);
 }
 
 static inline void Darling_addInput(Panel *parent, Input *child) {
-    Darling_addAny(parent, (void*) child, ID_INPUT);
+    Darling_addAny(parent, (void*) child, TYPE_INPUT_SINGLETON);
 }
 
 static inline void Darling_addTextarea(Panel *parent, Textarea *child) {
-    Darling_addAny(parent, (void*) child, ID_TEXTAREA);
+    Darling_addAny(parent, (void*) child, TYPE_TEXTAREA_SINGLETON);
 }
 
 static inline void Darling_addInputOTP(Panel *parent, InputOTP *child) {
-    Darling_addAny(parent, (void*) child, ID_INPUTOTP);
+    Darling_addAny(parent, (void*) child, TYPE_INPUTOTP_SINGLETON);
 }
 
 static inline void Darling_addSelect(Panel *parent, Select *child) {
-    Darling_addAny(parent, (void*) child, ID_SELECT);
+    Darling_addAny(parent, (void*) child, TYPE_SELECT_SINGLETON);
 }
 
 static inline void Darling_addDatePicker(Panel *parent, DatePicker *child) {
-    Darling_addAny(parent, (void*) child, ID_DATEPICKER);
+    Darling_addAny(parent, (void*) child, TYPE_DATEPICKER_SINGLETON);
 }
 
 static inline void Darling_addColorPicker(Panel *parent, ColorPicker *child) {
-    Darling_addAny(parent, (void*) child, ID_COLORPICKER);
+    Darling_addAny(parent, (void*) child, TYPE_COLORPICKER_SINGLETON);
 }
 
 static inline void Darling_addColorSwatch(Panel *parent, ColorSwatch *child) {
-    Darling_addAny(parent, (void*) child, ID_COLORSWATCH);
+    Darling_addAny(parent, (void*) child, TYPE_COLORSWATCH_SINGLETON);
 }
 
 static inline void Darling_addFileDialog(Panel *parent, FileDialog *child) {
-    Darling_addAny(parent, (void*) child, ID_FILEDIALOG);
+    Darling_addAny(parent, (void*) child, TYPE_FILEDIALOG_SINGLETON);
 }
 
 static inline void Darling_addTypography(Panel *parent, Typography *child) {
-    Darling_addAny(parent, (void*) child, ID_TYPOGRAPHY);
+    Darling_addAny(parent, (void*) child, TYPE_TYPOGRAPHY_SINGLETON);
 }
 
 static inline void Darling_addKbd(Panel *parent, Kbd *child) {
-    Darling_addAny(parent, (void*) child, ID_KBD);
+    Darling_addAny(parent, (void*) child, TYPE_KBD_SINGLETON);
 }
 
 static inline void Darling_addPlot(Panel *parent, Plot *child) {
-    Darling_addAny(parent, (void*) child, ID_PLOT);
+    Darling_addAny(parent, (void*) child, TYPE_PLOT_SINGLETON);
 }
 
 static inline void Darling_addDialog(Panel *parent, Dialog *child) {
-    Darling_addAny(parent, (void*) child, ID_DIALOG);
+    Darling_addAny(parent, (void*) child, TYPE_DIALOG_SINGLETON);
 }
 
 static inline void Darling_addAlertDialog(Panel *parent, AlertDialog *child) {
-    Darling_addAny(parent, (void*) child, ID_ALERTDIALOG);
+    Darling_addAny(parent, (void*) child, TYPE_ALERTDIALOG_SINGLETON);
 }
 
 static inline void Darling_addColorDialog(Panel *parent, ColorDialog *child) {
-    Darling_addAny(parent, (void*) child, ID_COLORDIALOG);
+    Darling_addAny(parent, (void*) child, TYPE_COLORDIALOG_SINGLETON);
 }
 
 // Darling-side type helpers (no registry fork: IDs + Type_* live in
@@ -274,41 +277,41 @@ static inline void Darling_addColorDialog(Panel *parent, ColorDialog *child) {
 // classOf: pointer TYPE -> class ID at compile time (for Darling_addAny).
 // kindName: class ID -> short name for logging/debugging.
 #define Darling_classOf(child) _Generic((child), \
-    Panel *: ID_PANEL, \
-    Label *: ID_LABEL, \
-    Picture *: ID_PICTURE, \
-    RichLabel *: ID_RICH_LABEL, \
-    Scene *: ID_SCENE, \
-    Scene2D *: ID_SCENE2D, \
-    Scene3D *: ID_SCENE3D, \
-    LayeredContainer *: ID_LAYERED_CONTAINER, \
-    SectionContainer *: ID_SECTION_CONTAINER, \
-    ExpandableListContainer *: ID_EXPANDABLE_LIST_CONTAINER, \
-    Button *: ID_BUTTON, \
-    Switch *: ID_SWITCH, \
-    Checkbox *: ID_CHECKBOX, \
-    RadioGroup *: ID_RADIOGROUP, \
-    Slider *: ID_SLIDER, \
-    Knob *: ID_KNOB, \
-    Input *: ID_INPUT, \
-    Textarea *: ID_TEXTAREA, \
-    InputOTP *: ID_INPUTOTP, \
-    Select *: ID_SELECT, \
-    DatePicker *: ID_DATEPICKER, \
-    ColorPicker *: ID_COLORPICKER, \
-    ColorSwatch *: ID_COLORSWATCH, \
-    FileDialog *: ID_FILEDIALOG, \
-    Typography *: ID_TYPOGRAPHY, \
-    Kbd *: ID_KBD, \
-    Plot *: ID_PLOT, \
-    Dialog *: ID_DIALOG, \
-    AlertDialog *: ID_ALERTDIALOG, \
-    ColorDialog *: ID_COLORDIALOG, \
-    Container *: ID_CONTAINER, \
-    Canvas *: ID_CANVAS \
+    Panel *: TYPE_PANEL_SINGLETON, \
+    Label *: TYPE_LABEL_SINGLETON, \
+    Picture *: TYPE_PICTURE_SINGLETON, \
+    RichLabel *: TYPE_RICH_LABEL_SINGLETON, \
+    Scene *: TYPE_SCENE_SINGLETON, \
+    Scene2D *: TYPE_SCENE2D_SINGLETON, \
+    Scene3D *: TYPE_SCENE3D_SINGLETON, \
+    LayeredContainer *: TYPE_LAYERED_CONTAINER_SINGLETON, \
+    SectionContainer *: TYPE_SECTION_CONTAINER_SINGLETON, \
+    ExpandableListContainer *: TYPE_EXPANDABLE_LIST_CONTAINER_SINGLETON, \
+    Button *: TYPE_BUTTON_SINGLETON, \
+    Switch *: TYPE_SWITCH_SINGLETON, \
+    Checkbox *: TYPE_CHECKBOX_SINGLETON, \
+    RadioGroup *: TYPE_RADIOGROUP_SINGLETON, \
+    Slider *: TYPE_SLIDER_SINGLETON, \
+    Knob *: TYPE_KNOB_SINGLETON, \
+    Input *: TYPE_INPUT_SINGLETON, \
+    Textarea *: TYPE_TEXTAREA_SINGLETON, \
+    InputOTP *: TYPE_INPUTOTP_SINGLETON, \
+    Select *: TYPE_SELECT_SINGLETON, \
+    DatePicker *: TYPE_DATEPICKER_SINGLETON, \
+    ColorPicker *: TYPE_COLORPICKER_SINGLETON, \
+    ColorSwatch *: TYPE_COLORSWATCH_SINGLETON, \
+    FileDialog *: TYPE_FILEDIALOG_SINGLETON, \
+    Typography *: TYPE_TYPOGRAPHY_SINGLETON, \
+    Kbd *: TYPE_KBD_SINGLETON, \
+    Plot *: TYPE_PLOT_SINGLETON, \
+    Dialog *: TYPE_DIALOG_SINGLETON, \
+    AlertDialog *: TYPE_ALERTDIALOG_SINGLETON, \
+    ColorDialog *: TYPE_COLORDIALOG_SINGLETON, \
+    Container *: TYPE_CONTAINER_SINGLETON, \
+    Canvas *: TYPE_CANVAS_SINGLETON \
 )
 
-const char *Darling_kindName(uint32_t classId);
+const char *Darling_kindName(uint64_t classId);
 
 // Unified attach: Darling_add(parent, child). Parent accepts any
 // Panel-derived pointer via Darling_asPanel; child picks the shim.

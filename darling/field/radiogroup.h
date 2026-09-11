@@ -11,12 +11,6 @@
 #include "oop/type.h"
 #include "struct/list.h"
 
-#ifndef ID_RADIOGROUP
-#define ID_RADIOGROUP 0x0093u
-#endif
-#ifndef TYPE_RADIOGROUP_SINGLETON
-#define TYPE_RADIOGROUP_SINGLETON (FORM_SINGLETON | ID_RADIOGROUP)
-#endif
 #ifndef TYPE_POINTER
 #define TYPE_POINTER 0u
 #endif

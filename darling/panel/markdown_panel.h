@@ -21,10 +21,7 @@
 
 // Central registry owns these once landed; the guard keeps this shell
 // compiling standalone until then.
-#ifndef TYPE_MARKDOWN_PANEL_SINGLETON
-#define ID_MARKDOWN_PANEL              0x0069u
-#define TYPE_MARKDOWN_PANEL_SINGLETON  (FORM_SINGLETON | ID_MARKDOWN_PANEL)
-#endif
+
 
 struct MarkdownRowSlot;
 

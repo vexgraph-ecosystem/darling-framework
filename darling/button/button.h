@@ -16,10 +16,6 @@
 
 // Central registry owns these once landed; the guard keeps this shell
 // compiling standalone until then.
-#ifndef TYPE_BUTTON_SINGLETON
-#define ID_BUTTON              0x0090u
-#define TYPE_BUTTON_SINGLETON  (FORM_SINGLETON | ID_BUTTON)
-#endif
 
 typedef struct Button {
     Panel base;

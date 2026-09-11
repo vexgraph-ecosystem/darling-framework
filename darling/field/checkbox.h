@@ -9,12 +9,6 @@
 #include "event/pointer.h"
 #include "oop/type.h"
 
-#ifndef ID_CHECKBOX
-#define ID_CHECKBOX 0x0092u
-#endif
-#ifndef TYPE_CHECKBOX_SINGLETON
-#define TYPE_CHECKBOX_SINGLETON (FORM_SINGLETON | ID_CHECKBOX)
-#endif
 
 // darling/field/checkbox.h — boolean toggle with an indeterminate state.
 

@@ -8,12 +8,6 @@
 #include "darling/panel/panel.h"
 #include "oop/type.h"
 
-#ifndef ID_COLORPICKER
-#define ID_COLORPICKER 0x009Bu
-#endif
-#ifndef TYPE_COLORPICKER_SINGLETON
-#define TYPE_COLORPICKER_SINGLETON (FORM_SINGLETON | ID_COLORPICKER)
-#endif
 
 // darling/field/colorpicker.h — packed color with an HSV editing mirror.
 

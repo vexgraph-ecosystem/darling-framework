@@ -19,12 +19,7 @@
 
 // Central registry owns these once landed; the guard keeps this shell
 // compiling standalone until then.
-#ifndef ID_GRID_PANEL
-#define ID_GRID_PANEL 0x006Cu
-#endif
-#ifndef TYPE_GRID_PANEL_SINGLETON
-#define TYPE_GRID_PANEL_SINGLETON (FORM_SINGLETON | ID_GRID_PANEL)
-#endif
+
 
 typedef struct GridContainer {
     Panel base;

@@ -12,7 +12,6 @@
 // widget twin lives in field/colorpicker.h; this is the modal shell that
 // hosts picker-grade state with dialog chrome (title, confirm, cancel).
 
-// ID_COLORDIALOG 0x009E (registered in vexspoke oop/type.h).
 typedef struct ColorDialog {
     Dialog base;
     uint32_t color;       // packed 0xAARRGGBB selection

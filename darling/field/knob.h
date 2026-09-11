@@ -10,12 +10,6 @@
 #include "event/pointer.h"
 #include "oop/type.h"
 
-#ifndef ID_KNOB
-#define ID_KNOB 0x0095u
-#endif
-#ifndef TYPE_KNOB_SINGLETON
-#define TYPE_KNOB_SINGLETON (FORM_SINGLETON | ID_KNOB)
-#endif
 
 // darling/field/knob.h — rotary value dial over an angular sweep.
 
