@@ -4,11 +4,13 @@
 #include "darling/panel/panel.h"
 #include "font/font.h"
 #include "text/text_core.h"
+#include "text/text_select.h"
 #include "darling/cursor/cursor.h"
 #include <stdint.h>
 #include "c23/constructor.h"
 
 #include "event/pointer.h"
+#include "event/keyevent.h"
 
 // A lightweight View component for simple, single-styled text.
 // Sharp path: one native CoreText raster per line (single textured quad).
@@ -42,11 +44,9 @@ typedef struct Label {
 
     // Highlight & cursor state
     Cursor *cursor;           // active mouse cursor style (I-beam when highlightable)
-    int32_t selectionStart;   // fixed selection anchor (-1 = none); ordered via getSelection
-    int32_t selectionEnd;     // active drag edge (-1 = none); getters/raster order the pair
+    TextSelect select;        // shared selection part (anchor/active edge + hover lifecycle)
     float highlightRadius;    // corner radius in points for selection rounded rect (default 3.0f)
     uint32_t highlightColor;  // packed 0xAARRGGBB selection background color (default 0x662563EB)
-    bool hovered;             // true if pointer is currently hovering within label bounds
 } Label;
 
 Label *Label_0(void);
@@ -90,6 +90,7 @@ void Label_setHovered(Label *label, bool hovered);
 int32_t Label_charIndexAt(const Label *label, float localX);
 void Label_handlePointer(Label *label, int kind, float localX, float localY, void *window);
 void Label_onPointer(Label *label, PointerEvent *ev, void *window);
+void Label_handleKey(Label *label, const UIKeyEvent *ev);
 
 // Symmetric Getters (Java-library standard)
 const char *Label_getText(const Label *label);

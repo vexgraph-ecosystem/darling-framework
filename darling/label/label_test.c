@@ -285,13 +285,15 @@ int main(void) {
         Label_getSelection(lbl, &s0, &s1);
         CHECK("Label deselects on outside click", s0 == -1 && s1 == -1);
 
-#if defined(__APPLE__)
+// Clipboard round-trip through the in-memory test seam — unit tests
+        // must never write the real NSPasteboard.
+        TextCore_setTestClipboard(true);
         TextCore_copyToClipboard("Darling Clipboard Test");
         char *pasted = TextCore_pasteFromClipboard();
-        CHECK("TextCore clipboard round-trip", pasted != nullptr && strcmp(pasted, "Darling Clipboard Test") == 0);
+        CHECK("TextCore test-clipboard round-trip", pasted != nullptr && strcmp(pasted, "Darling Clipboard Test") == 0);
         if (pasted)
             free(pasted);
-#endif
+        TextCore_setTestClipboard(false);
 
         Label_free(lbl);
     }

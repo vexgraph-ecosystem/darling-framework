@@ -53,4 +53,10 @@ bool TextCore_rasterStyled(const char *utf8, const char *family, float pxHeight,
 void TextCore_copyToClipboard(const char *utf8);
 char *TextCore_pasteFromClipboard(void);
 
+// Headless test seam: when enabled, copy/paste route through an in-memory
+// buffer instead of the OS board so unit tests never touch (or pollute) the
+// real NSPasteboard. Defaults to disabled; cold-test-only, never called from
+// tick/render paths.
+void TextCore_setTestClipboard(bool enable);
+
 #endif

@@ -35,6 +35,17 @@
 ;;DRAFT
 ;;INTENTION("Native CoreText line raster for sharp Label, active-mode backing")
 
+// Headless test seam (mirrors text/text_core_stub.c): when enabled,
+// copy/paste route through an in-memory buffer and never touch the board.
+static bool s_testClip = false;
+static char s_testClipBuf[8192];
+
+void TextCore_setTestClipboard(bool enable) {
+    s_testClip = enable;
+    if (s_testClipBuf[0] != '\0')
+        s_testClipBuf[0] = '\0';
+}
+
 float TextCore_backingScale(void) {
     CGFloat s = [[NSScreen mainScreen] backingScaleFactor];
     if (s > 0.0)
@@ -331,6 +342,11 @@ bool TextCore_rasterStyled(const char *utf8, const char *family, float pxHeight,
 void TextCore_copyToClipboard(const char *utf8) {
     if (!utf8)
         return;
+    if (s_testClip) {
+        s_testClipBuf[0] = '\0';
+        strncat(s_testClipBuf, utf8, sizeof(s_testClipBuf) - 1);
+        return;
+    }
     @autoreleasepool {
         NSPasteboard *pb = [NSPasteboard generalPasteboard];
         [pb clearContents];
@@ -342,6 +358,11 @@ void TextCore_copyToClipboard(const char *utf8) {
 }
 
 char *TextCore_pasteFromClipboard(void) {
+    if (s_testClip) {
+        if (s_testClipBuf[0] == '\0')
+            return nullptr;
+        return strdup(s_testClipBuf);
+    }
     @autoreleasepool {
         NSPasteboard *pb = [NSPasteboard generalPasteboard];
         NSString *str = [pb stringForType:NSPasteboardTypeString];

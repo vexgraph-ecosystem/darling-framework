@@ -5,6 +5,7 @@
 #include "oop/type.h"
 #include "text/text_core.h"
 #include "vulkan/texture/texture.h"
+#include "input/key.h"
 #include <math.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -47,11 +48,9 @@
  *   UnderlineStyle underline;// UNDERLINE_NONE, UNDERLINE_BASIC, etc.
  *   uint32_t underlineColor; // Packed 0xAARRGGBB (0 = inherit textColor)
  *   Cursor *cursor;          // Active mouse cursor style (I-beam when highlightable)
- *   int32_t selectionStart;  // Fixed selection anchor (-1 = none); ordered via getSelection
- *   int32_t selectionEnd;    // Active drag edge (-1 = none); getters/raster order the pair
+ *   TextSelect select;       // Shared selection part (anchor/active edge + hover lifecycle)
  *   float highlightRadius;   // Corner radius in points for selection rounded rect (default 3.0f)
  *   uint32_t highlightColor; // Packed 0xAARRGGBB selection background color (default 0x662563EB)
- *   bool hovered;            // True if pointer is currently hovering within label bounds
  *
  * FUNCTION REGISTRY:
  * ----------------------------------------------------------------------------
@@ -66,6 +65,7 @@
  *   - Label_charIndexAt(const label, localX)                           : Character offset from point
  *   - Label_handlePointer(label, kind, localX, localY, window)         : Pointer event dispatcher
  *   - Label_onPointer(label, ev, window)                               : PointerEvent wrapper
+ *   - Label_handleKey(label, ev)                                       : Key event (Cmd+C copy)
  *
  * Setters:
  *   - Label_setText(label, text)
@@ -163,6 +163,12 @@ int32_t Label_charIndexAt(const Label *label, float localX) {
         return 0;
     if (localX >= qw)
         return (int32_t) len;
+    // Hemisphere rule (uniform case): a pointer on the left half of a glyph
+    // (advance / 2, stable >= split) selects that glyph; the right half selects
+    // the next. For a uniform advance qw/len the boundary sits at the glyph
+    // midpoint, so roundf(ratio * len) is exactly the hemisphere mapping. A
+    // per-glyph Font-advance cache is deferred (;;DRAFT) — until then Label is
+    // uniform-hemisphere only.
     float ratio = localX / qw;
     int32_t idx = (int32_t) roundf(ratio * (float) len);
     if (idx < 0)
@@ -190,9 +196,11 @@ void Label_handlePointer(Label *label, int kind, float localX, float localY, voi
 
     bool inside = (localX >= 0.0f && localX <= w && localY >= 0.0f && localY <= h);
 
+    // Shared hover caret-cursor lifecycle (TextSelect part): ENTER/LEAVE/MOVE
+    // flip the hovered flag and drive I-beam / default cursor. Hovering never
+    // touches anchor/active and LEAVE never clears an in-progress selection.
     if (kind == PTR_LEAVE || (!inside && (kind == PTR_MOVE || kind == PTR_HOVER))) {
-        if ((*label).hovered) {
-            (*label).hovered = false;
+        if (TextSelect_setHovered(&(*label).select, false)) {
             if (window) {
                 Cursor *defCursor = Cursor_getPredefined(CURSOR_DEFAULT);
                 Cursor_apply(defCursor, window);
@@ -203,8 +211,7 @@ void Label_handlePointer(Label *label, int kind, float localX, float localY, voi
     }
 
     if (inside && (kind == PTR_ENTER || kind == PTR_MOVE || kind == PTR_HOVER)) {
-        if (!(*label).hovered) {
-            (*label).hovered = true;
+        if (TextSelect_setHovered(&(*label).select, true)) {
             if ((*label).highlightable && window)
                 Cursor_apply((*label).cursor, window);
             markDirty(label);
@@ -215,10 +222,10 @@ void Label_handlePointer(Label *label, int kind, float localX, float localY, voi
 
     if ((*label).highlightable) {
         if (kind == PTR_DOWN) {
+            // Outside-down clears any in-progress selection.
             if (!inside) {
-                if ((*label).selectionStart != -1 || (*label).selectionEnd != -1) {
-                    (*label).selectionStart = -1;
-                    (*label).selectionEnd = -1;
+                if (TextSelect_isActive(&(*label).select)) {
+                    TextSelect_cancel(&(*label).select);
                     markRasterDirty(label);
                     markDirty(label);
                 }
@@ -228,29 +235,17 @@ void Label_handlePointer(Label *label, int kind, float localX, float localY, voi
             // active edge, so dragging left (backward) then right past the anchor
             // selects exactly [anchor, active] — never a rolling union.
             int32_t idx = Label_charIndexAt(label, localX);
-            (*label).selectionStart = idx;
-            (*label).selectionEnd = idx;
+            TextSelect_begin(&(*label).select, idx);
             markRasterDirty(label);
             markDirty(label);
         } else if (kind == PTR_DRAG) {
-            if ((*label).selectionStart < 0)
-                return;
-            int32_t idx = Label_charIndexAt(label, localX);
-            (*label).selectionEnd = idx;
-            markRasterDirty(label);
-            markDirty(label);
+            if (TextSelect_drag(&(*label).select, Label_charIndexAt(label, localX))) {
+                markRasterDirty(label);
+                markDirty(label);
+            }
         } else if (kind == PTR_UP) {
-            if ((*label).selectionStart < 0)
-                return;
-            if ((*label).selectionStart > (*label).selectionEnd) {
-                int32_t tmp = (*label).selectionStart;
-                (*label).selectionStart = (*label).selectionEnd;
-                (*label).selectionEnd = tmp;
-            }
-            if ((*label).selectionStart == (*label).selectionEnd) {
-                (*label).selectionStart = -1;
-                (*label).selectionEnd = -1;
-            }
+            int32_t lo = -1, hi = -1;
+            TextSelect_end(&(*label).select, &lo, &hi);
             markRasterDirty(label);
             markDirty(label);
         }
@@ -264,6 +259,34 @@ void Label_onPointer(Label *label, PointerEvent *ev, void *window) {
     float x = PointerEvent_getX(ev);
     float y = PointerEvent_getY(ev);
     Label_handlePointer(label, kind, x, y, window);
+}
+
+// Key seam: Cmd/Ctrl+C copies the committed selection; V is a no-op on
+// read-only labels. Detection is by keyCode + modifier bits (cmd=8, ctrl=2
+// local bridge bits), never by the decoded character.
+void Label_handleKey(Label *label, const UIKeyEvent *ev) {
+    if (!label || !ev)
+        return;
+    if (!UIKeyEvent_isPressed(ev))
+        return;
+    if (UIKeyEvent_isRepeat(ev))
+        return;
+    uint32_t mods = UIKeyEvent_getMods(ev);
+    if ((mods & (8u | 2u)) == 0)
+        return;
+    if (!(*label).highlightable)
+        return;
+    int32_t code = UIKeyEvent_getKeyCode(ev);
+    if (code != KEY_C && code != KEY_V)
+        return;
+    if (code == KEY_C) {
+        char *sel = Label_getSelectedText(label);
+        if (sel) {
+            TextCore_copyToClipboard(sel);
+            Memory_free(sel);
+            UIKeyEvent_consume((UIKeyEvent*) ev);
+        }
+    }
 }
 
 static bool ensureRaster(Label *lbl) {
@@ -313,12 +336,12 @@ static bool ensureRaster(Label *lbl) {
     (*lbl).mnemonicChar = mChar;
     (*lbl).mnemonicIndex = mIndex;
 
-    int32_t selStart = (*lbl).highlightable ? (*lbl).selectionStart : -1;
-    int32_t selEnd = (*lbl).highlightable ? (*lbl).selectionEnd : -1;
-    if (selStart >= 0 && selEnd >= 0 && selStart > selEnd) {
-        int32_t tmp = selStart;
-        selStart = selEnd;
-        selEnd = tmp;
+    int32_t selStart = -1;
+    int32_t selEnd = -1;
+    int32_t selLo = -1, selHi = -1;
+    if ((*lbl).highlightable && TextSelect_getSpan(&(*lbl).select, &selLo, &selHi)) {
+        selStart = selLo;
+        selEnd = selHi;
     }
 
     TextStyleDescriptor style = {
@@ -545,11 +568,9 @@ Label *Label_0(void) {
     (*lbl).underline = UNDERLINE_NONE;
     (*lbl).underlineColor = 0;
     (*lbl).cursor = Cursor_getPredefined(CURSOR_DEFAULT);
-    (*lbl).selectionStart = -1;
-    (*lbl).selectionEnd = -1;
+    (*lbl).select = TextSelect_default();
     (*lbl).highlightRadius = 3.0f;
     (*lbl).highlightColor = 0x662563EBu;
-    (*lbl).hovered = false;
     {
         const char *defFamily = "Helvetica";
         size_t defLen = strlen(defFamily) + 1;
@@ -725,9 +746,7 @@ void Label_setHighlightable(Label *label, bool flag) {
         (*label).cursor = Cursor_getPredefined(CURSOR_IBEAM);
     } else {
         (*label).cursor = Cursor_getPredefined(CURSOR_DEFAULT);
-        (*label).selectionStart = -1;
-        (*label).selectionEnd = -1;
-        (*label).hovered = false;
+        TextSelect_reset(&(*label).select);
     }
     markRasterDirty(label);
     markDirty(label);
@@ -806,8 +825,12 @@ void Label_setCursor(Label *label, Cursor *cursor) {
 void Label_setSelection(Label *label, int32_t start, int32_t end) {
     if (!label)
         return;
-    (*label).selectionStart = start;
-    (*label).selectionEnd = end;
+    if (start < 0 || end < 0) {
+        TextSelect_reset(&(*label).select);
+    } else {
+        TextSelect_begin(&(*label).select, start);
+        TextSelect_drag(&(*label).select, end);
+    }
     markRasterDirty(label);
     markDirty(label);
 }
@@ -840,7 +863,7 @@ void Label_setHighlightColorRGBA(Label *label, uint8_t r, uint8_t g, uint8_t b, 
 void Label_setHovered(Label *label, bool hovered) {
     if (!label)
         return;
-    (*label).hovered = hovered;
+    TextSelect_setHovered(&(*label).select, hovered);
     markDirty(label);
 }
 
@@ -963,18 +986,9 @@ Cursor *Label_getCursor(const Label *label) {
 }
 
 void Label_getSelection(const Label *label, int32_t *outStart, int32_t *outEnd) {
-    if (!label) {
-        if (outStart) (*outStart) = -1;
-        if (outEnd) (*outEnd) = -1;
-        return;
-    }
-    int32_t s0 = (*label).selectionStart;
-    int32_t s1 = (*label).selectionEnd;
-    if (s0 >= 0 && s1 >= 0 && s0 > s1) {
-        int32_t tmp = s0;
-        s0 = s1;
-        s1 = tmp;
-    }
+    int32_t s0 = -1, s1 = -1;
+    if (label)
+        (void) TextSelect_getSpan(&(*label).select, &s0, &s1);
     if (outStart) (*outStart) = s0;
     if (outEnd) (*outEnd) = s1;
 }
@@ -996,21 +1010,15 @@ void Label_getHighlightColorRGBA(const Label *label, uint8_t *outR, uint8_t *out
 }
 
 bool Label_isHovered(const Label *label) {
-    return label ? (*label).hovered : false;
+    return label ? TextSelect_isHovered(&(*label).select) : false;
 }
 
 char *Label_getSelectedText(const Label *label) {
     if (!label || !(*label).text)
         return nullptr;
-    int32_t s0 = (*label).selectionStart;
-    int32_t s1 = (*label).selectionEnd;
-    if (s0 < 0 || s1 < 0)
+    int32_t s0 = -1, s1 = -1;
+    if (!TextSelect_getSpan(&(*label).select, &s0, &s1))
         return nullptr;
-    if (s0 > s1) {
-        int32_t tmp = s0;
-        s0 = s1;
-        s1 = tmp;
-    }
     int32_t len = (int32_t) strlen((*label).text);
     if (s0 < 0)
         s0 = 0;
@@ -1032,8 +1040,8 @@ void Label_setSelectedText(Label *label, const char *newText) {
         return;
     const char *orig = (*label).text ? (*label).text : "";
     int32_t origLen = (int32_t) strlen(orig);
-    int32_t s0 = (*label).selectionStart;
-    int32_t s1 = (*label).selectionEnd;
+    int32_t s0 = -1, s1 = -1;
+    (void) TextSelect_getSpan(&(*label).select, &s0, &s1);
     if (s0 < 0 || s1 < 0) {
         s0 = origLen;
         s1 = origLen;
@@ -1063,8 +1071,7 @@ void Label_setSelectedText(Label *label, const char *newText) {
 
     Label_setText(label, buf);
     Memory_free(buf);
-    (*label).selectionStart = -1;
-    (*label).selectionEnd = -1;
+    TextSelect_reset(&(*label).select);
     markRasterDirty(label);
     markDirty(label);
 }

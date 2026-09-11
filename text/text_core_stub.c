@@ -1,6 +1,7 @@
 #include "text/text_core.h"
 
 #include <stdlib.h>
+#include <string.h>
 
 #include "annotation/draft.h"
 #include "annotation/intention.h"
@@ -56,10 +57,31 @@ bool TextCore_rasterStyled(const char *utf8, const char *family, float pxHeight,
     return TextCore_rasterLine(utf8, family, pxHeight, argb, outRgba, outW, outH);
 }
 
+static bool s_testClip = false;
+static char s_testClipBuf[8192];
+
+void TextCore_setTestClipboard(bool enable) {
+    s_testClip = enable;
+    if (s_testClipBuf[0] != '\0')
+        s_testClipBuf[0] = '\0';
+}
+
 void TextCore_copyToClipboard(const char *utf8) {
+    if (s_testClip) {
+        if (!utf8)
+            return;
+        s_testClipBuf[0] = '\0';
+        strncat(s_testClipBuf, utf8, sizeof(s_testClipBuf) - 1);
+        return;
+    }
     (void) utf8;
 }
 
 char *TextCore_pasteFromClipboard(void) {
+    if (s_testClip) {
+        if (s_testClipBuf[0] == '\0')
+            return nullptr;
+        return strdup(s_testClipBuf);
+    }
     return nullptr;
 }
