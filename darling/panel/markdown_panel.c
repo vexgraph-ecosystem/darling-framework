@@ -3,6 +3,7 @@
 #include "darling/label/label.h"
 #include "darling/label/rich_label.h"
 #include "darling/panel/panel.h"
+#include "event/pointer.h"
 #include "annotation/overview.h"
 #include "nio/mem.h"
 #include "oop/type.h"
@@ -47,6 +48,10 @@
  *   struct MarkdownRowSlot *slots;     // Owned row records (see SLOT RECORD)
  *   size_t rowCount;                   // Active row record count
  *   size_t rowCapacity;                // Row record capacity
+ *   bool highlightable;                // Enables document drag selection (no caret)
+ *   int32_t selectionStart;            // Fixed selection anchor (doc-byte, -1 = none)
+ *   int32_t selectionEnd;              // Active drag edge (doc-byte, -1 = none)
+ *   uint32_t highlightColor;           // Packed 0xAARRGGBB selection fill (0x662563EB)
  *
  * SLOT RECORD (file-local, behaviorless; all behavior hangs off MarkdownPanel):
  * ----------------------------------------------------------------------------
@@ -54,7 +59,21 @@
  *     Panel *panel;                    // Row base (Label* or RichLabel* payload)
  *     RichText *model;                 // Owned RichText model, or nullptr for Labels
  *     uint8_t isRich;                  // 1 = RichLabel row, 0 = Label row
+ *     float height;                    // Final row height (stacking + hit-testing)
+ *     uint32_t cellStart;              // Row start offset in doc selection space
+ *     uint32_t textLen;                // Row text length (visible/model bytes)
  *   }
+ *
+ * SELECTION SIMPLIFICATION (Rule 33 managed exception, Tier 1 preserved):
+ *   Document selection aggregates each row's own text length into one
+ *   contiguous byte space (slot k starts at the sum of textLen of rows 0..k-1)
+ *   on the rendered text, NOT source-byte offsets. Both row types expose their
+ *   charIndexAt/setSelection in exactly this per-row space (Label visible
+ *   bytes, RichLabel model raw-string bytes), so down→charIndex, clamp across
+ *   rows, and mirror per-row sel become O(1) translations — no tag/marker
+ *   reverse-mapping, no allocation on the pointer path. getSelection returns
+ *   positions in this rendered-text space; a selection that spans rows simply
+ *   covers the whole text of the rows it lands on.
  *
  * FUNCTION REGISTRY:
  * ----------------------------------------------------------------------------
@@ -64,6 +83,7 @@
  *
  * Core Functions:
  *   - MarkdownPanel_free(s)
+ *   - MarkdownPanel_handlePointer(s, kind, localX, localY)  : document selection
  *
  * Setters:
  *   - MarkdownPanel_setText(s, text)
@@ -73,6 +93,10 @@
  *   - MarkdownPanel_setLocation(s, x, y)
  *   - MarkdownPanel_setSize(s, w, h)
  *   - MarkdownPanel_setBackgroundColor(s, color)
+ *   - MarkdownPanel_setHighlightable(s, flag)
+ *   - MarkdownPanel_setSelection(s, start, end)
+ *   - MarkdownPanel_setHighlightColor(s, color)
+ *   - MarkdownPanel_setHighlightColorRGBA(s, r, g, b, a)
  *
  * Getters:
  *   - MarkdownPanel_getText(s)
@@ -82,6 +106,10 @@
  *   - MarkdownPanel_getRowSpacing(s)
  *   - MarkdownPanel_getRowCount(s)
  *   - MarkdownPanel_getRow(s, index)
+ *   - MarkdownPanel_isHighlightable(s)
+ *   - MarkdownPanel_getSelection(s, outStart, outEnd)   : always ordered, null-safe
+ *   - MarkdownPanel_getHighlightColor(s)
+ *   - MarkdownPanel_getHighlightColorRGBA(s, outR, outG, outB, outA)
  * ============================================================================
  */
 
@@ -89,6 +117,9 @@ struct MarkdownRowSlot {
     Panel *panel;
     RichText *model;
     uint8_t isRich;
+    float height;
+    uint32_t cellStart;
+    uint32_t textLen;
 };
 
 #define MARKDOWN_BASE_SIZE 14.0f
@@ -133,6 +164,10 @@ MarkdownPanel *MarkdownPanel_0(void) {
     (*s).codeBackground = MARKDOWN_CODE_BACKGROUND;
     (*s).rows = box;
     (*s).rowSpacing = MARKDOWN_DEFAULT_SPACING;
+    (*s).highlightable = false;
+    (*s).selectionStart = -1;
+    (*s).selectionEnd = -1;
+    (*s).highlightColor = 0x662563EBu;
     ListContainer_setSpacing(box, MARKDOWN_DEFAULT_SPACING);
     (*s).slots = nullptr;
     (*s).rowCount = 0;
@@ -160,7 +195,9 @@ static void markDirty(MarkdownPanel *s) {
     Container_markDirty(c);
 }
 
-static bool pushSlot(MarkdownPanel *s, Panel *row, RichText *model, uint8_t isRich) {
+static bool pushSlot(MarkdownPanel *s, Panel *row, RichText *model, uint8_t isRich, float height, uint32_t cellStart, uint32_t textLen) {
+    if (!s || !row)
+        return false;
     if ((*s).rowCount >= (*s).rowCapacity) {
         size_t grown = (*s).rowCapacity == 0 ? 8 : (*s).rowCapacity * 2;
         struct MarkdownRowSlot *next = (struct MarkdownRowSlot*) Memory_realloc((*s).slots, grown * sizeof(struct MarkdownRowSlot));
@@ -174,6 +211,9 @@ static bool pushSlot(MarkdownPanel *s, Panel *row, RichText *model, uint8_t isRi
     slots[at].panel = row;
     slots[at].model = model;
     slots[at].isRich = isRich;
+    slots[at].height = height;
+    slots[at].cellStart = cellStart;
+    slots[at].textLen = textLen;
     (*s).rowCount = at + 1;
     return true;
 }
@@ -209,6 +249,151 @@ static void clearRows(MarkdownPanel *s) {
     (*s).slots = nullptr;
     (*s).rowCount = 0;
     (*s).rowCapacity = 0;
+}
+
+// Maps a point to a row's own text index (visible byte space for Label rows,
+// model raw-string bytes for RichLabel rows). Both spaces are what the row's
+// charIndexAt and setSelection already speak.
+static int32_t markdownRowIndexAt(MarkdownPanel *s, size_t rowIndex, float localX, float localY, float rowY) {
+    struct MarkdownRowSlot *slots = (*s).slots;
+    struct MarkdownRowSlot *slot = &slots[rowIndex];
+    if ((*slot).isRich) {
+        RichLabel *rl = (RichLabel*) (*slot).panel;
+        return RichLabel_charIndexAt(rl, localX, localY - rowY);
+    }
+    Label *lbl = (Label*) (*slot).panel;
+    return Label_charIndexAt(lbl, localX);
+}
+
+// Document selection index: rows aggregate their text lengths into a single
+// contiguous byte space (slot k starts at the sum of textLen of rows 0..k-1),
+// so a drag that spans rows is one monotonic index. Rows stack at y=0 with
+// height + rowSpacing, mirroring ListContainer's vertical layout.
+static int32_t markdownDocIndexAt(MarkdownPanel *s, float localX, float localY) {
+    if (!s)
+        return 0;
+    size_t n = (*s).rowCount;
+    if (n == 0)
+        return 0;
+    struct MarkdownRowSlot *slots = (*s).slots;
+    float accY = 0.0f;
+    float spacing = (*s).rowSpacing;
+    size_t ri = n - 1;
+    for (size_t i = 0; i < n; i++) {
+        float h = slots[i].height;
+        if (localY < accY + h) {
+            ri = i;
+            break;
+        }
+        accY += h + spacing;
+    }
+    struct MarkdownRowSlot *slot = &slots[ri];
+    int32_t idx = markdownRowIndexAt(s, ri, localX, localY, accY);
+    uint32_t cellStart = (*slot).cellStart;
+    uint32_t textLen = (*slot).textLen;
+    if (idx < 0)
+        idx = 0;
+    if ((uint32_t) idx > textLen)
+        idx = (int32_t) textLen;
+    return (int32_t)(cellStart + (uint32_t) idx);
+}
+
+// Clamps a normalized document range onto one row's own text and mirrors it
+// into the row's selection (with the panel's highlight color).
+static void applyRowSelection(MarkdownPanel *s, size_t rowIndex, int32_t lo, int32_t hi) {
+    struct MarkdownRowSlot *slots = (*s).slots;
+    struct MarkdownRowSlot *slot = &slots[rowIndex];
+    int32_t a = lo - (int32_t) (*slot).cellStart;
+    int32_t b = hi - (int32_t) (*slot).cellStart;
+    if (a < 0)
+        a = 0;
+    int32_t textLen = (int32_t) (*slot).textLen;
+    if (b > textLen)
+        b = textLen;
+    bool hit = a < b;
+    uint32_t color = (*s).highlightColor;
+    if ((*slot).isRich) {
+        RichLabel *rl = (RichLabel*) (*slot).panel;
+        RichLabel_setHighlightColor(rl, color);
+        if (hit)
+            RichLabel_setSelection(rl, a, b);
+        else
+            RichLabel_setSelection(rl, -1, -1);
+    } else {
+        Label *lbl = (Label*) (*slot).panel;
+        Label_setHighlightColor(lbl, color);
+        if (hit)
+            Label_setSelection(lbl, a, b);
+        else
+            Label_setSelection(lbl, -1, -1);
+    }
+}
+
+// Mirrors the panel selection onto every row after any anchor/active change.
+static void refreshRowSelection(MarkdownPanel *s) {
+    if (!s)
+        return;
+    int32_t lo = (*s).selectionStart;
+    int32_t hi = (*s).selectionEnd;
+    if (lo > hi) {
+        int32_t tmp = lo;
+        lo = hi;
+        hi = tmp;
+    }
+    if (lo < 0) {
+        lo = 0;
+        hi = 0;
+    }
+    size_t n = (*s).rowCount;
+    for (size_t i = 0; i < n; i++)
+        applyRowSelection(s, i, lo, hi);
+    markDirty(s);
+}
+
+void MarkdownPanel_handlePointer(MarkdownPanel *s, int32_t kind, float localX, float localY) {
+    if (!s)
+        return;
+    if ((*s).rowCount == 0)
+        return;
+    if (!(*s).highlightable)
+        return;
+    Panel *b = &(*s).base;
+    Container *c = &(*b).base;
+    float w = Container_getWidth(c);
+    float h = Container_getHeight(c);
+    bool inside = localX >= 0.0f && localY >= 0.0f && localX <= w && localY <= h;
+    if (kind == PTR_DOWN) {
+        if (inside) {
+            int32_t idx = markdownDocIndexAt(s, localX, localY);
+            (*s).selectionStart = idx;
+            (*s).selectionEnd = idx;
+        } else {
+            (*s).selectionStart = -1;
+            (*s).selectionEnd = -1;
+        }
+        refreshRowSelection(s);
+        return;
+    }
+    if (kind == PTR_DRAG) {
+        if ((*s).selectionStart < 0)
+            return;
+        if (inside)
+            (*s).selectionEnd = markdownDocIndexAt(s, localX, localY);
+        refreshRowSelection(s);
+        return;
+    }
+    if (kind == PTR_UP) {
+        if ((*s).selectionStart < 0)
+            return;
+        if (inside)
+            (*s).selectionEnd = markdownDocIndexAt(s, localX, localY);
+        if ((*s).selectionEnd == (*s).selectionStart) {
+            (*s).selectionStart = -1;
+            (*s).selectionEnd = -1;
+        }
+        refreshRowSelection(s);
+        return;
+    }
 }
 
 // Zero-alloc line classifier: index arithmetic over (line, len) only.
@@ -405,9 +590,9 @@ static float stackRow(MarkdownPanel *s, Panel *row, float cursor, float height) 
     return cursor + height + (*s).rowSpacing;
 }
 
-static void addLabelRow(MarkdownPanel *s, const char *line, size_t len, bool bullet, float size, uint32_t color, uint32_t bg, float *cursor) {
+static void addLabelRow(MarkdownPanel *s, const char *line, size_t len, bool bullet, float size, uint32_t color, uint32_t bg, float *cursor, size_t *cellBase) {
     ListContainer *box = (*s).rows;
-    if (!box || !cursor)
+    if (!box || !cursor || !cellBase)
         return;
     size_t extra = bullet ? 4 : 0;
     char *tmp = (char*) Memory_alloc(TYPE_ARRAY, len + extra + 1);
@@ -436,20 +621,22 @@ static void addLabelRow(MarkdownPanel *s, const char *line, size_t len, bool bul
         Label_setBackgroundColor(lbl, bg);
     Panel *row = &(*lbl).base;
     ListContainer_add(box, row);
-    if (!pushSlot(s, row, nullptr, 0)) {
+    float height = size * MARKDOWN_LINE_FACTOR;
+    if (!pushSlot(s, row, nullptr, 0, height, (uint32_t) (*cellBase), (uint32_t) at)) {
         size_t n = ListContainer_count(box);
         if (n > 0)
             ListContainer_remove(box, (int32_t)(n - 1));
         Label_free(lbl);
         return;
     }
-    (*cursor) = stackRow(s, row, (*cursor), size * MARKDOWN_LINE_FACTOR);
+    (*cellBase) += at;
+    (*cursor) = stackRow(s, row, (*cursor), height);
 }
 
-static void addRichRow(MarkdownPanel *s, const char *line, size_t len, bool bullet, float *cursor) {
+static void addRichRow(MarkdownPanel *s, const char *line, size_t len, bool bullet, float *cursor, size_t *cellBase) {
     ListContainer *box = (*s).rows;
     Font *font = (*s).font;
-    if (!box || !font || !cursor)
+    if (!box || !font || !cursor || !cellBase)
         return;
     size_t rawLen = len + (bullet ? 2 : 0);
     char *raw = (char*) Memory_alloc(TYPE_ARRAY, rawLen + 1);
@@ -486,6 +673,7 @@ static void addRichRow(MarkdownPanel *s, const char *line, size_t len, bool bull
     RichText_setStyle(rt, 2, font, MARKDOWN_BASE_SIZE, MARKDOWN_TEXT_COLOR, false, DECOR_LINE);
     RichText_setStyle(rt, 3, font, MARKDOWN_CODE_SIZE, MARKDOWN_TEXT_COLOR, false, DECOR_NONE);
     RichText_setString(rt, tagged);
+    size_t tagLen = tagged ? (uint32_t) strlen(tagged) : 0;
     Memory_free(tagged);
     RichText_layout(rt, 0.0f);
     RichLabel *rl = RichLabel_0();
@@ -496,7 +684,10 @@ static void addRichRow(MarkdownPanel *s, const char *line, size_t len, bool bull
     RichLabel_setTextModel(rl, rt);
     Panel *row = &(*rl).base;
     ListContainer_add(box, row);
-    if (!pushSlot(s, row, rt, 1)) {
+    float height = (*rt).layoutHeight;
+    if (height <= 0.0f)
+        height = MARKDOWN_BASE_SIZE * MARKDOWN_LINE_FACTOR;
+    if (!pushSlot(s, row, rt, 1, height, (uint32_t) (*cellBase), (uint32_t) tagLen)) {
         size_t n = ListContainer_count(box);
         if (n > 0)
             ListContainer_remove(box, (int32_t)(n - 1));
@@ -504,9 +695,7 @@ static void addRichRow(MarkdownPanel *s, const char *line, size_t len, bool bull
         Memory_free(rl);
         return;
     }
-    float height = (*rt).layoutHeight;
-    if (height <= 0.0f)
-        height = MARKDOWN_BASE_SIZE * MARKDOWN_LINE_FACTOR;
+    (*cellBase) += tagLen;
     (*cursor) = stackRow(s, row, (*cursor), height);
 }
 
@@ -526,6 +715,7 @@ static void rebuild(MarkdownPanel *s) {
         return;
     }
     float cursor = 0.0f;
+    size_t cellBase = 0;
     bool inFence = false;
     size_t start = 0;
     for (size_t i = 0; i <= total; i++) {
@@ -546,35 +736,35 @@ static void rebuild(MarkdownPanel *s) {
         if (kind == LINE_BLANK)
             continue;
         if (inFence) {
-            addLabelRow(s, line, len, false, MARKDOWN_CODE_SIZE, MARKDOWN_TEXT_COLOR, (*s).codeBackground, &cursor);
+            addLabelRow(s, line, len, false, MARKDOWN_CODE_SIZE, MARKDOWN_TEXT_COLOR, (*s).codeBackground, &cursor, &cellBase);
             continue;
         }
         const char *content = &line[contentStart];
         if (kind == LINE_HEADING) {
-            addLabelRow(s, content, contentLen, false, size, MARKDOWN_TEXT_COLOR, 0u, &cursor);
+            addLabelRow(s, content, contentLen, false, size, MARKDOWN_TEXT_COLOR, 0u, &cursor, &cellBase);
         } else if (kind == LINE_BULLET) {
             Font *font = (*s).font;
             if (font && hasInline(content, contentLen))
-                addRichRow(s, content, contentLen, true, &cursor);
+                addRichRow(s, content, contentLen, true, &cursor, &cellBase);
             else {
                 size_t stripped = contentLen + 1;
                 char *tmp = (char*) Memory_alloc(TYPE_ARRAY, stripped);
                 if (tmp) {
                     fillStripped(content, contentLen, tmp);
-                    addLabelRow(s, tmp, strlen(tmp), true, size, MARKDOWN_TEXT_COLOR, 0u, &cursor);
+                    addLabelRow(s, tmp, strlen(tmp), true, size, MARKDOWN_TEXT_COLOR, 0u, &cursor, &cellBase);
                     Memory_free(tmp);
                 }
             }
         } else {
             Font *font = (*s).font;
             if (font && hasInline(content, contentLen)) {
-                addRichRow(s, content, contentLen, false, &cursor);
+                addRichRow(s, content, contentLen, false, &cursor, &cellBase);
             } else {
                 size_t stripped = contentLen + 1;
                 char *tmp = (char*) Memory_alloc(TYPE_ARRAY, stripped);
                 if (tmp) {
                     fillStripped(content, contentLen, tmp);
-                    addLabelRow(s, tmp, strlen(tmp), false, size, MARKDOWN_TEXT_COLOR, 0u, &cursor);
+                    addLabelRow(s, tmp, strlen(tmp), false, size, MARKDOWN_TEXT_COLOR, 0u, &cursor, &cellBase);
                     Memory_free(tmp);
                 }
             }
@@ -671,6 +861,46 @@ void MarkdownPanel_setBackgroundColor(MarkdownPanel *s, uint32_t color) {
     Panel_setBackgroundColor(b, color);
 }
 
+void MarkdownPanel_setHighlightable(MarkdownPanel *s, bool flag) {
+    if (!s)
+        return;
+    (*s).highlightable = flag;
+    if (!flag) {
+        (*s).selectionStart = -1;
+        (*s).selectionEnd = -1;
+    }
+    struct MarkdownRowSlot *slots = (*s).slots;
+    size_t n = (*s).rowCount;
+    for (size_t i = 0; i < n; i++) {
+        struct MarkdownRowSlot *slot = &slots[i];
+        if ((*slot).isRich)
+            RichLabel_setHighlightable((RichLabel*) (*slot).panel, flag);
+        else
+            Label_setHighlightable((Label*) (*slot).panel, flag);
+    }
+    refreshRowSelection(s);
+}
+
+void MarkdownPanel_setSelection(MarkdownPanel *s, int32_t start, int32_t end) {
+    if (!s)
+        return;
+    (*s).selectionStart = start;
+    (*s).selectionEnd = end;
+    refreshRowSelection(s);
+}
+
+void MarkdownPanel_setHighlightColor(MarkdownPanel *s, uint32_t color) {
+    if (!s)
+        return;
+    (*s).highlightColor = color;
+    refreshRowSelection(s);
+}
+
+void MarkdownPanel_setHighlightColorRGBA(MarkdownPanel *s, uint8_t r, uint8_t g, uint8_t b, uint8_t a) {
+    uint32_t packed = ((uint32_t) a << 24) | ((uint32_t) r << 16) | ((uint32_t) g << 8) | (uint32_t) b;
+    MarkdownPanel_setHighlightColor(s, packed);
+}
+
 // GETTERS
 // ============================================================================
 
@@ -710,4 +940,45 @@ Panel *MarkdownPanel_getRow(const MarkdownPanel *s, size_t index) {
     struct MarkdownRowSlot *slots = (*s).slots;
     struct MarkdownRowSlot *slot = &slots[index];
     return (*slot).panel;
+}
+
+bool MarkdownPanel_isHighlightable(const MarkdownPanel *s) {
+    return s ? (*s).highlightable : false;
+}
+
+void MarkdownPanel_getSelection(const MarkdownPanel *s, int32_t *outStart, int32_t *outEnd) {
+    if (!s) {
+        if (outStart)
+            (*outStart) = -1;
+        if (outEnd)
+            (*outEnd) = -1;
+        return;
+    }
+    int32_t s0 = (*s).selectionStart;
+    int32_t s1 = (*s).selectionEnd;
+    if (s0 > s1) {
+        int32_t tmp = s0;
+        s0 = s1;
+        s1 = tmp;
+    }
+    if (outStart)
+        (*outStart) = s0;
+    if (outEnd)
+        (*outEnd) = s1;
+}
+
+uint32_t MarkdownPanel_getHighlightColor(const MarkdownPanel *s) {
+    return s ? (*s).highlightColor : 0u;
+}
+
+void MarkdownPanel_getHighlightColorRGBA(const MarkdownPanel *s, uint8_t *outR, uint8_t *outG, uint8_t *outB, uint8_t *outA) {
+    uint32_t c = s ? (*s).highlightColor : 0u;
+    if (outA)
+        (*outA) = (uint8_t) ((c >> 24) & 0xFF);
+    if (outR)
+        (*outR) = (uint8_t) ((c >> 16) & 0xFF);
+    if (outG)
+        (*outG) = (uint8_t) ((c >> 8) & 0xFF);
+    if (outB)
+        (*outB) = (uint8_t) (c & 0xFF);
 }

@@ -8,6 +8,7 @@
 #include "event/tree.h"
 #include "event/value.h"
 #include "darling/panel/panel.h"
+#include "darling/panel/markdown_panel.h"
 #include "c23/darling-type.h"
 #include "lang/vec4.h"
 #include "annotation/incomplete.h"
@@ -108,6 +109,7 @@ void Knob_handlePointer(Knob *self, int kind, float localX, float localY) __attr
 void ScrollBar_handlePointer(ScrollBar *self, int kind, float localX, float localY) __attribute__((weak));
 void Input_handlePointer(Input *self, int kind, float localX, float localY) __attribute__((weak));
 void Textarea_handlePointer(Textarea *self, int kind, float localX, float localY) __attribute__((weak));
+void MarkdownPanel_handlePointer(MarkdownPanel *self, int kind, float localX, float localY) __attribute__((weak));
 void Input_handleKey(Input *self, const UIKeyEvent *ev) __attribute__((weak));
 void Textarea_handleKey(Textarea *self, const UIKeyEvent *ev) __attribute__((weak));
 
@@ -140,13 +142,20 @@ static Panel *dispatchPick(Panel *node, float parentX, float parentY, float pare
     Vec4 rect;
     Container_resolve(&(*node).base, parentX, parentY, parentW, parentH, &rect);
     size_t n = Panel_childCount(node);
-    for (size_t k = n; k > 0; k--) {
-        Panel *kid = Panel_getChild(node, k - 1);
-        Vec4 kidRect;
-        Panel *hit = dispatchPick(kid, rect.x, rect.y, rect.z, rect.w, sx, sy, &kidRect);
-        if (hit) {
-            Vec4_copy(&kidRect, outRect);
-            return hit;
+    if (n > 0) {
+        uint64_t doc = dispatchClass(node);
+        for (size_t k = n; k > 0; k--) {
+            Panel *kid = Panel_getChild(node, k - 1);
+            Vec4 kidRect;
+            Panel *hit = dispatchPick(kid, rect.x, rect.y, rect.z, rect.w, sx, sy, &kidRect);
+            if (hit) {
+                if (doc == ID_MARKDOWN_PANEL) {
+                    Vec4_copy(&rect, outRect);
+                    return node;
+                }
+                Vec4_copy(&kidRect, outRect);
+                return hit;
+            }
         }
     }
     if (!Container_hitTest(&(*node).base, parentX, parentY, parentW, parentH, sx, sy))
@@ -211,6 +220,12 @@ static void dispatchPointerTo(Panel *target, int kind, float lx, float ly) {
         void (*fn)(Textarea *, int, float, float) = Textarea_handlePointer;
         if (fn)
             fn((Textarea*) target, kind, lx, ly);
+        return;
+    }
+    if (cls == ID_MARKDOWN_PANEL) {
+        void (*fn)(MarkdownPanel *, int, float, float) = MarkdownPanel_handlePointer;
+        if (fn)
+            fn((MarkdownPanel*) target, kind, lx, ly);
         return;
     }
 }

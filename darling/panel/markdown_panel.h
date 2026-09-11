@@ -35,6 +35,10 @@ typedef struct MarkdownPanel {
     struct MarkdownRowSlot *slots;
     size_t rowCount;
     size_t rowCapacity;
+    bool highlightable;
+    int32_t selectionStart;
+    int32_t selectionEnd;
+    uint32_t highlightColor;
 } MarkdownPanel;
 
 // Constructors:
@@ -54,6 +58,10 @@ void MarkdownPanel_setRowSpacing(MarkdownPanel *s, float spacing);
 void MarkdownPanel_setLocation(MarkdownPanel *s, float x, float y);
 void MarkdownPanel_setSize(MarkdownPanel *s, float w, float h);
 void MarkdownPanel_setBackgroundColor(MarkdownPanel *s, uint32_t color);
+void MarkdownPanel_setHighlightable(MarkdownPanel *s, bool flag);
+void MarkdownPanel_setSelection(MarkdownPanel *s, int32_t start, int32_t end);
+void MarkdownPanel_setHighlightColor(MarkdownPanel *s, uint32_t color);
+void MarkdownPanel_setHighlightColorRGBA(MarkdownPanel *s, uint8_t r, uint8_t g, uint8_t b, uint8_t a);
 
 // Symmetric Getters (Java-library standard)
 const char *MarkdownPanel_getText(const MarkdownPanel *s);
@@ -63,5 +71,14 @@ Panel *MarkdownPanel_getRows(const MarkdownPanel *s);
 float MarkdownPanel_getRowSpacing(const MarkdownPanel *s);
 size_t MarkdownPanel_getRowCount(const MarkdownPanel *s);
 Panel *MarkdownPanel_getRow(const MarkdownPanel *s, size_t index);
+bool MarkdownPanel_isHighlightable(const MarkdownPanel *s);
+void MarkdownPanel_getSelection(const MarkdownPanel *s, int32_t *outStart, int32_t *outEnd);
+uint32_t MarkdownPanel_getHighlightColor(const MarkdownPanel *s);
+void MarkdownPanel_getHighlightColorRGBA(const MarkdownPanel *s, uint8_t *outR, uint8_t *outG, uint8_t *outB, uint8_t *outA);
+
+// Pointer seam (driven by event/dispatch when the panel owns a document's
+// text rows): down anchors, drag moves the active edge, up normalizes or
+// collapses a plain click. Coordinates are local to the panel.
+void MarkdownPanel_handlePointer(MarkdownPanel *s, int32_t kind, float localX, float localY);
 
 #endif

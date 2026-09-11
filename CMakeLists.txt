@@ -207,6 +207,14 @@ if(NOT TARGET rich_label_test)
     target_link_libraries(rich_label_test PRIVATE darling)
 endif()
 
+# MarkdownPanel artifact: document selection over stacked rows + dispatch pointer seam.
+if(NOT TARGET markdown_panel_test)
+    add_executable(markdown_panel_test
+        darling/panel/markdown_panel_test.c
+    )
+    target_link_libraries(markdown_panel_test PRIVATE darling)
+endif()
+
 # Button artifact (click §1): headless click, hover, down/up bounds suite.
 if(NOT TARGET button_test)
     add_executable(button_test
