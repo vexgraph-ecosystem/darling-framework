@@ -69,6 +69,8 @@ typedef struct TextQuad {
     float bold;
     bool isColor; // color glyph (emoji): Vk_drawColorGlyph, not SDF
     TextDecoration decor;
+    int32_t charIndex; // source byte index of this glyph (-1 = decor quad)
+    float advance;     // pen advance in points; >0 only on glyph quads (selection mapping)
 } TextQuad;
 
 typedef struct RichText {

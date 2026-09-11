@@ -199,6 +199,14 @@ if(NOT TARGET label_test)
     target_link_libraries(label_test PRIVATE darling)
 endif()
 
+# RichLabel artifact: headless selection, synthetic-quad hit-test, and fixed-anchor drag suite.
+if(NOT TARGET rich_label_test)
+    add_executable(rich_label_test
+        darling/label/rich_label_test.c
+    )
+    target_link_libraries(rich_label_test PRIVATE darling)
+endif()
+
 # Button artifact (click §1): headless click, hover, down/up bounds suite.
 if(NOT TARGET button_test)
     add_executable(button_test

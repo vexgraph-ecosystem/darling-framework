@@ -360,6 +360,8 @@ void RichText_layout(RichText *rt, float maxWidth) {
                     (*sq).bold = -0.5f;
                     (*sq).isColor = false; // shadows render through the SDF path 
                     (*sq).decor = DECOR_NONE;
+                    (*sq).charIndex = -1;
+                    (*sq).advance = 0.0f;
                 }
                 
                 if (!ensureQuadsCapacity(rt)) break;
@@ -375,6 +377,8 @@ void RichText_layout(RichText *rt, float maxWidth) {
                 (*q).isColor = gm.color != 0;
                 (*q).bold = style.isBold ? 0.04f : 0.0f;
                 (*q).decor = DECOR_NONE;
+                (*q).charIndex = (*run).startChar + i;
+                (*q).advance = gm.advance + style.letterSpacing;
                 
                 cursorX += gm.advance + style.letterSpacing;
                 if (cursorX > globalMaxX) globalMaxX = cursorX;
@@ -395,6 +399,8 @@ void RichText_layout(RichText *rt, float maxWidth) {
             (*q).decor = style.decor;
             (*q).textureId = -1; // solid quad
             (*q).isColor = false;
+            (*q).charIndex = -1;
+            (*q).advance = 0.0f;
         }
     }
     
