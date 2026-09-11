@@ -101,9 +101,6 @@ int main(void) {
         CHECK("Label highlightable set", Label_isHighlightable(lbl) == true);
         CHECK("Label cursor adapted to I-beam", Label_getCursor(lbl) != NULL && Cursor_getType(Label_getCursor(lbl)) == CURSOR_IBEAM);
 
-        Label_setCaretPosition(lbl, 4);
-        CHECK("Label caret position", Label_getCaretPosition(lbl) == 4);
-
         Label_setSelection(lbl, 2, 7);
         int32_t sStart = -1, sEnd = -1;
         Label_getSelection(lbl, &sStart, &sEnd);
@@ -128,24 +125,44 @@ int main(void) {
         Label_handlePointer(lbl, PTR_MOVE, 200.0f, 10.0f, NULL);
         CHECK("Label unhovered outside", Label_isHovered(lbl) == false);
 
-        // 3. Pointer down -> start selection
+        // 3. Pointer down -> start selection (collapsed anchor)
         Label_handlePointer(lbl, PTR_DOWN, 30.0f, 10.0f, NULL);
         int32_t dStart = -1, dEnd = -1;
         Label_getSelection(lbl, &dStart, &dEnd);
         CHECK("Label pointer down selection initialized", dStart >= 0 && dStart == dEnd);
-        CHECK("Label caret follows pointer down", Label_getCaretPosition(lbl) == dStart);
 
         // 4. Pointer drag -> expand selection
         Label_handlePointer(lbl, PTR_DRAG, 120.0f, 10.0f, NULL);
         Label_getSelection(lbl, &dStart, &dEnd);
         CHECK("Label pointer drag selection expanded", dEnd > dStart);
-        CHECK("Label caret follows drag", Label_getCaretPosition(lbl) == dEnd);
 
         // 5. Pointer up -> selection preserved
         Label_handlePointer(lbl, PTR_UP, 120.0f, 10.0f, NULL);
         int32_t uStart = -1, uEnd = -1;
         Label_getSelection(lbl, &uStart, &uEnd);
         CHECK("Label pointer up preserves selection", uStart == dStart && uEnd == dEnd);
+
+        // 5b. New session: down then drag BACKWARD -> ordered pair mid-drag
+        Label_handlePointer(lbl, PTR_DOWN, 120.0f, 10.0f, NULL);    // anchor 12
+        Label_handlePointer(lbl, PTR_DRAG, 30.0f, 10.0f, NULL);     // active 3 (inverted)
+        Label_getSelection(lbl, &uStart, &uEnd);
+        CHECK("Label backward drag ordered mid-drag", uStart == 3 && uEnd == 12);
+
+        // 5c. Fixed anchor: drag right past the original anchor -> span [anchor, active]
+        Label_handlePointer(lbl, PTR_DRAG, 150.0f, 10.0f, NULL);    // active 15 > anchor 12
+        Label_getSelection(lbl, &uStart, &uEnd);
+        CHECK("Label fixed anchor survives backward pass", uStart == 12 && uEnd == 15);
+
+        // 5d. Release keeps the ordered selection
+        Label_handlePointer(lbl, PTR_UP, 150.0f, 10.0f, NULL);
+        Label_getSelection(lbl, &uStart, &uEnd);
+        CHECK("Label backward release keeps selection", uStart == 12 && uEnd == 15);
+
+        // 5e. Plain click (no drag) clears the selection
+        Label_handlePointer(lbl, PTR_DOWN, 60.0f, 10.0f, NULL);
+        Label_handlePointer(lbl, PTR_UP, 60.0f, 10.0f, NULL);
+        Label_getSelection(lbl, &uStart, &uEnd);
+        CHECK("Label plain click clears selection", uStart == -1 && uEnd == -1);
 
         // 6. Explicit PTR_LEAVE
         Label_handlePointer(lbl, PTR_HOVER, 50.0f, 10.0f, NULL);

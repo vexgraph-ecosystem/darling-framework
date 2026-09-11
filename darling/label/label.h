@@ -30,7 +30,7 @@ typedef struct Label {
     bool ownsFontFamily;      // true if fontFamily was copied and owned by label
 
     // Typography & text styling
-    bool highlightable;       // enables text selection & caret cursor
+    bool highlightable;       // enables text selection drag (no caret; labels aren't editable)
     bool mnemonic;            // parse '&' key accelerator prefix
     char mnemonicChar;        // parsed accelerator character ('\0' if none)
     int mnemonicIndex;        // index in display text (-1 if none)
@@ -42,9 +42,8 @@ typedef struct Label {
 
     // Highlight & cursor state
     Cursor *cursor;           // active mouse cursor style (I-beam when highlightable)
-    int32_t caretPosition;    // character index of caret cursor (-1 = hidden)
-    int32_t selectionStart;   // highlight selection start index (-1 = none)
-    int32_t selectionEnd;     // highlight selection end index (-1 = none)
+    int32_t selectionStart;   // fixed selection anchor (-1 = none); ordered via getSelection
+    int32_t selectionEnd;     // active drag edge (-1 = none); getters/raster order the pair
     float highlightRadius;    // corner radius in points for selection rounded rect (default 3.0f)
     uint32_t highlightColor;  // packed 0xAARRGGBB selection background color (default 0x662563EB)
     bool hovered;             // true if pointer is currently hovering within label bounds
@@ -81,7 +80,6 @@ void Label_setUnderline(Label *label, UnderlineStyle style);
 void Label_setUnderlineColor(Label *label, uint32_t color);
 void Label_setUnderlineColorRGBA(Label *label, uint8_t r, uint8_t g, uint8_t b, uint8_t a);
 void Label_setCursor(Label *label, Cursor *cursor);
-void Label_setCaretPosition(Label *label, int32_t pos);
 void Label_setSelection(Label *label, int32_t start, int32_t end);
 void Label_setHighlightRadius(Label *label, float radius);
 void Label_setHighlightColor(Label *label, uint32_t color);
@@ -117,7 +115,6 @@ UnderlineStyle Label_getUnderline(const Label *label);
 uint32_t Label_getUnderlineColor(const Label *label);
 void Label_getUnderlineColorRGBA(const Label *label, uint8_t *outR, uint8_t *outG, uint8_t *outB, uint8_t *outA);
 Cursor *Label_getCursor(const Label *label);
-int32_t Label_getCaretPosition(const Label *label);
 void Label_getSelection(const Label *label, int32_t *outStart, int32_t *outEnd);
 float Label_getHighlightRadius(const Label *label);
 uint32_t Label_getHighlightColor(const Label *label);

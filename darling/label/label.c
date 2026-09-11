@@ -37,7 +37,7 @@
  *   bool rasterDirty;        // True if string or font changed and needs re-raster
  *   bool ownsText;           // True if text was copied and owned by label
  *   bool ownsFontFamily;     // True if fontFamily was copied and owned by label
- *   bool highlightable;      // Enables text selection & caret cursor
+ *   bool highlightable;      // Enables text selection drag (no caret; labels aren't editable)
  *   bool mnemonic;           // Parse '&' key accelerator prefix
  *   char mnemonicChar;       // Parsed accelerator character ('\0' if none)
  *   int mnemonicIndex;       // Index in display text (-1 if none)
@@ -47,9 +47,8 @@
  *   UnderlineStyle underline;// UNDERLINE_NONE, UNDERLINE_BASIC, etc.
  *   uint32_t underlineColor; // Packed 0xAARRGGBB (0 = inherit textColor)
  *   Cursor *cursor;          // Active mouse cursor style (I-beam when highlightable)
- *   int32_t caretPosition;   // Character index of caret cursor (-1 = hidden)
- *   int32_t selectionStart;  // Highlight selection start index (-1 = none)
- *   int32_t selectionEnd;    // Highlight selection end index (-1 = none)
+ *   int32_t selectionStart;  // Fixed selection anchor (-1 = none); ordered via getSelection
+ *   int32_t selectionEnd;    // Active drag edge (-1 = none); getters/raster order the pair
  *   float highlightRadius;   // Corner radius in points for selection rounded rect (default 3.0f)
  *   uint32_t highlightColor; // Packed 0xAARRGGBB selection background color (default 0x662563EB)
  *   bool hovered;            // True if pointer is currently hovering within label bounds
@@ -90,7 +89,6 @@
  *   - Label_setUnderlineColor(label, color)
  *   - Label_setUnderlineColorRGBA(label, r, g, b, a)
  *   - Label_setCursor(label, cursor)
- *   - Label_setCaretPosition(label, pos)
  *   - Label_setSelection(label, start, end)
  *   - Label_setHighlightRadius(label, radius)
  *   - Label_setHighlightColor(label, color)
@@ -121,7 +119,6 @@
  *   - Label_getUnderlineColor(const label)
  *   - Label_getUnderlineColorRGBA(const label, outR, outG, outB, outA)
  *   - Label_getCursor(const label)
- *   - Label_getCaretPosition(const label)
  *   - Label_getSelection(const label, outStart, outEnd)
  *   - Label_getHighlightRadius(const label)
  *   - Label_getHighlightColor(const label)
@@ -219,31 +216,31 @@ void Label_handlePointer(Label *label, int kind, float localX, float localY, voi
     if ((*label).highlightable) {
         if (kind == PTR_DOWN) {
             if (!inside) {
-                if ((*label).selectionStart != -1 || (*label).selectionEnd != -1 || (*label).caretPosition != -1) {
+                if ((*label).selectionStart != -1 || (*label).selectionEnd != -1) {
                     (*label).selectionStart = -1;
                     (*label).selectionEnd = -1;
-                    (*label).caretPosition = -1;
                     markRasterDirty(label);
                     markDirty(label);
                 }
                 return;
             }
+            // Down = fixed anchor + collapsed selection. Drag then moves only the
+            // active edge, so dragging left (backward) then right past the anchor
+            // selects exactly [anchor, active] — never a rolling union.
             int32_t idx = Label_charIndexAt(label, localX);
-            (*label).caretPosition = idx;
             (*label).selectionStart = idx;
             (*label).selectionEnd = idx;
             markRasterDirty(label);
             markDirty(label);
         } else if (kind == PTR_DRAG) {
-            if ((*label).selectionStart < 0 && (*label).caretPosition < 0)
+            if ((*label).selectionStart < 0)
                 return;
             int32_t idx = Label_charIndexAt(label, localX);
             (*label).selectionEnd = idx;
-            (*label).caretPosition = idx;
             markRasterDirty(label);
             markDirty(label);
         } else if (kind == PTR_UP) {
-            if ((*label).selectionStart < 0 && (*label).caretPosition < 0)
+            if ((*label).selectionStart < 0)
                 return;
             if ((*label).selectionStart > (*label).selectionEnd) {
                 int32_t tmp = (*label).selectionStart;
@@ -316,6 +313,14 @@ static bool ensureRaster(Label *lbl) {
     (*lbl).mnemonicChar = mChar;
     (*lbl).mnemonicIndex = mIndex;
 
+    int32_t selStart = (*lbl).highlightable ? (*lbl).selectionStart : -1;
+    int32_t selEnd = (*lbl).highlightable ? (*lbl).selectionEnd : -1;
+    if (selStart >= 0 && selEnd >= 0 && selStart > selEnd) {
+        int32_t tmp = selStart;
+        selStart = selEnd;
+        selEnd = tmp;
+    }
+
     TextStyleDescriptor style = {
         .ligatures = (*lbl).ligatures,
         .spacingWidth = (*lbl).spacingWidth,
@@ -323,8 +328,8 @@ static bool ensureRaster(Label *lbl) {
         .underline = (*lbl).underline,
         .underlineColor = (*lbl).underlineColor,
         .mnemonicIndex = mIndex,
-        .selectionStart = (*lbl).highlightable ? (*lbl).selectionStart : -1,
-        .selectionEnd = (*lbl).highlightable ? (*lbl).selectionEnd : -1,
+        .selectionStart = selStart,
+        .selectionEnd = selEnd,
         .highlightRadius = (*lbl).highlightRadius,
         .highlightColor = (*lbl).highlightColor,
     };
@@ -497,16 +502,6 @@ static void Label_renderFn(Panel *panel, void *renderer, void *cmdBuffer, float 
 
         Vk_drawTexture(cmdBuffer, surfaceW, surfaceH, qx, qy, qw, qh, 1.0f, 1.0f, 1.0f, op,
             (*lbl).rasterTex, PICTURE_MODE_FIT, (float) (*lbl).rasterW, (float) (*lbl).rasterH);
-
-        // Caret cursor line in front of text (when highlightable)
-        if ((*lbl).highlightable && (*lbl).caretPosition >= 0 && (*lbl).text) {
-            size_t textLen = strlen((*lbl).text);
-            float charW = (textLen > 0) ? (qw / (float) textLen) : (*lbl).fontSize * 0.5f;
-            float caretX = qx + charW * (float) (*lbl).caretPosition;
-            if (caretX > qx + qw)
-                caretX = qx + qw;
-            Vk_fillRect(cmdBuffer, surfaceW, surfaceH, caretX, qy, 1.5f, qh, 1.0f, 1.0f, 1.0f, 0.9f * op);
-        }
         return;
     }
     drawSdfFallback(panel, cmdBuffer, surfaceW, surfaceH, x, y, w, h);
@@ -550,7 +545,6 @@ Label *Label_0(void) {
     (*lbl).underline = UNDERLINE_NONE;
     (*lbl).underlineColor = 0;
     (*lbl).cursor = Cursor_getPredefined(CURSOR_DEFAULT);
-    (*lbl).caretPosition = -1;
     (*lbl).selectionStart = -1;
     (*lbl).selectionEnd = -1;
     (*lbl).highlightRadius = 3.0f;
@@ -733,7 +727,6 @@ void Label_setHighlightable(Label *label, bool flag) {
         (*label).cursor = Cursor_getPredefined(CURSOR_DEFAULT);
         (*label).selectionStart = -1;
         (*label).selectionEnd = -1;
-        (*label).caretPosition = -1;
         (*label).hovered = false;
     }
     markRasterDirty(label);
@@ -808,13 +801,6 @@ void Label_setCursor(Label *label, Cursor *cursor) {
     if (!label)
         return;
     (*label).cursor = cursor;
-}
-
-void Label_setCaretPosition(Label *label, int32_t pos) {
-    if (!label)
-        return;
-    (*label).caretPosition = pos;
-    markDirty(label);
 }
 
 void Label_setSelection(Label *label, int32_t start, int32_t end) {
@@ -976,13 +962,21 @@ Cursor *Label_getCursor(const Label *label) {
     return label ? (*label).cursor : nullptr;
 }
 
-int32_t Label_getCaretPosition(const Label *label) {
-    return label ? (*label).caretPosition : -1;
-}
-
 void Label_getSelection(const Label *label, int32_t *outStart, int32_t *outEnd) {
-    if (outStart) (*outStart) = label ? (*label).selectionStart : -1;
-    if (outEnd) (*outEnd) = label ? (*label).selectionEnd : -1;
+    if (!label) {
+        (*outStart) = -1;
+        (*outEnd) = -1;
+        return;
+    }
+    int32_t s0 = (*label).selectionStart;
+    int32_t s1 = (*label).selectionEnd;
+    if (s0 >= 0 && s1 >= 0 && s0 > s1) {
+        int32_t tmp = s0;
+        s0 = s1;
+        s1 = tmp;
+    }
+    (*outStart) = s0;
+    (*outEnd) = s1;
 }
 
 float Label_getHighlightRadius(const Label *label) {
@@ -1041,10 +1035,6 @@ void Label_setSelectedText(Label *label, const char *newText) {
     int32_t s0 = (*label).selectionStart;
     int32_t s1 = (*label).selectionEnd;
     if (s0 < 0 || s1 < 0) {
-        s0 = (*label).caretPosition;
-        s1 = (*label).caretPosition;
-    }
-    if (s0 < 0) {
         s0 = origLen;
         s1 = origLen;
     }
@@ -1073,7 +1063,6 @@ void Label_setSelectedText(Label *label, const char *newText) {
 
     Label_setText(label, buf);
     Memory_free(buf);
-    (*label).caretPosition = s0 + insertLen;
     (*label).selectionStart = -1;
     (*label).selectionEnd = -1;
     markRasterDirty(label);
