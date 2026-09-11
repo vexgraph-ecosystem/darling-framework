@@ -186,11 +186,67 @@ int main(void) {
         RichLabel_getSelection(rl, &s0, &s1);
         CHECK("RichLabel outside click clears selection", s0 == -1 && s1 == -1);
 
+        // §Selection committed spans persist after pointer-up, and copy returns
+        // the tag-stripped plain bytes of the committed selection.
+        RichLabel_setSelection(rl, 2, 7);
+        RichLabel_handlePointer(rl, PTR_UP, 40.0f, 6.0f, NULL);
+        RichLabel_getSelection(rl, &s0, &s1);
+        CHECK("RichLabel committed span persists after UP", s0 == 2 && s1 == 7);
+
+        char *copied = RichLabel_getSelectedText(rl);
+        CHECK("RichLabel getSelectedText slice", copied != nullptr && strcmp(copied, "llo w") == 0);
+        if (copied) Memory_free(copied);
+
         RichLabel_free(rl);
         RichText_free(tm);
     }
 
-    // §5 Symmetric highlight-color setters, hover, null-safety
+    // §6 RichLabel_getSelectedText with style tags — tags must never leak.
+    {
+        RichText *tm = RichText_new();
+        CHECK("tagged RichText_new", tm != NULL);
+        if (tm) {
+            RichText_setString(tm, "A[b]c[d]e"); // tagged: A, [b], c, [d], e
+            CHECK("tagged rawString", (*tm).rawString != NULL);
+            if ((*tm).rawString) {
+                (*tm).quads = (TextQuad*) Memory_realloc((*tm).quads, 16 * sizeof(TextQuad));
+                if ((*tm).quads) {
+                    (*tm).quadCapacity = 16;
+                    (*tm).quadCount = 3; // glyphs A(0), c(4), e(8)
+                    size_t glyphAt[] = {0u, 4u, 8u};
+                    for (size_t i = 0; i < 3; i++) {
+                        TextQuad *q = &(*tm).quads[i];
+                        (*q).x = (float) (i * 8);
+                        (*q).y = 0.0f;
+                        (*q).w = 7.0f;
+                        (*q).h = 12.0f;
+                        (*q).u0 = 0.0f; (*q).v0 = 0.0f; (*q).u1 = 1.0f; (*q).v1 = 1.0f;
+                        (*q).color = 0xFFFFFFFF;
+                        (*q).textureId = -1;
+                        (*q).bold = 0.0f;
+                        (*q).isColor = false;
+                        (*q).decor = DECOR_NONE;
+                        (*q).charIndex = (int32_t) glyphAt[i];
+                        (*q).advance = 8.0f;
+                    }
+                    (*tm).layoutWidth = 24.0f;
+                    (*tm).layoutHeight = 12.0f;
+
+                    RichLabel *rl = RichLabel_0();
+                    RichLabel_setTextModel(rl, tm);
+                    RichLabel_setHighlightable(rl, true);
+                    RichLabel_setSelection(rl, 4, 9); // glyphs c + e
+                    char *copy = RichLabel_getSelectedText(rl);
+                    CHECK("RichLabel tag-stripped copy", copy != nullptr && strcmp(copy, "ce") == 0);
+                    if (copy) Memory_free(copy);
+                    RichLabel_free(rl);
+                }
+            }
+        }
+        RichText_free(tm);
+    }
+
+    // §7 Symmetric highlight-color setters, hover, null-safety
     {
         RichLabel *rl = RichLabel_0();
         RichLabel_setHighlightColor(rl, 0x88AABBCC);

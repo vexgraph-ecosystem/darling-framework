@@ -4,6 +4,9 @@
 #include "darling/panel/panel.h"
 #include "darling/cursor/cursor.h"
 #include "text/rich_text.h"
+#include "text/text_core.h"
+#include "text/text_select.h"
+#include "event/keyevent.h"
 #include "event/pointer.h"
 #include <stdint.h>
 
@@ -15,10 +18,8 @@ typedef struct RichLabel {
     // Highlight & cursor state
     Cursor *cursor;           // active mouse cursor style (I-beam when highlightable)
     bool highlightable;       // enables text selection drag (labels aren't editable)
-    int32_t selectionStart;   // fixed selection anchor (byte index, -1 = none); ordered via getSelection
-    int32_t selectionEnd;     // active drag edge (byte index, -1 = none); getters/raster order the pair
+    TextSelect select;        // shared fixed-anchor selection part (anchor/active edge + hover)
     uint32_t highlightColor;  // packed 0xAARRGGBB selection fill (default 0x662563EB)
-    bool hovered;             // true if pointer is currently hovering within label bounds
 } RichLabel;
 
 RichLabel *RichLabel_0(void);
@@ -46,5 +47,11 @@ Cursor *RichLabel_getCursor(const RichLabel *label);
 int32_t RichLabel_charIndexAt(const RichLabel *label, float localX, float localY);
 void RichLabel_handlePointer(RichLabel *label, int kind, float localX, float localY, void *window);
 void RichLabel_onPointer(RichLabel *label, PointerEvent *ev, void *window);
+
+// Key seam: Cmd/Ctrl+C copies the committed selection.
+void RichLabel_handleKey(RichLabel *label, const UIKeyEvent *ev);
+
+// Tag-stripped plain copy of the committed selection (arena-allocated).
+char *RichLabel_getSelectedText(const RichLabel *label);
 
 #endif // DARLING_RICH_LABEL_H

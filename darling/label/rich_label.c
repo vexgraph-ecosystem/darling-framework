@@ -3,6 +3,7 @@
 #include "nio/mem.h"
 #include "oop/type.h"
 #include "annotation/overview.h"
+#include "input/key.h"
 #include <string.h>
 
 ;;OVERVIEW
@@ -18,8 +19,11 @@
  * then right past the anchor selects exactly [anchor, active] — never a
  * rolling union. Selection maps pointer (localX, localY) to a source byte
  * index via each glyph quad's charIndex/advance; highlights are drawn as
- * flat per-line spans behind the glyph quads. RichLabel never shows a
- * caret — labels are non-editable surfaces (carets belong to Input).
+ * flat per-line spans behind the glyph quads. Selection state lives in the
+ * shared TextSelect part (COMMITS a nonzero range on UP; collapsed clicks
+ * clear), so the highlight and getSelectedText persist after pointer-up.
+ * RichLabel never shows a caret — labels are non-editable surfaces (carets
+ * belong to Input).
  *
  * STRUCT FIELDS (Mirroring darling/label/rich_label.h):
  * ----------------------------------------------------------------------------
@@ -28,10 +32,8 @@
  *   WrapMode wrapMode;       // Line-wrap policy inherited by the layout engine
  *   Cursor *cursor;          // Active mouse cursor style (I-beam when highlightable)
  *   bool highlightable;      // Enables text selection drag (no caret)
- *   int32_t selectionStart;  // Fixed selection anchor (byte index, -1 = none)
- *   int32_t selectionEnd;    // Active drag edge (byte index, -1 = none)
+ *   TextSelect select;       // Shared selection part (anchor/active edge + hover)
  *   uint32_t highlightColor; // Packed 0xAARRGGBB selection fill
- *   bool hovered;            // True if pointer is currently hovering within bounds
  *
  * PRIVATE HELPERS (kept file-local pure-data only):
  * ----------------------------------------------------------------------------
@@ -49,6 +51,8 @@
  *   - RichLabel_charIndexAt(label, localX, localY)                        : Byte index from point
  *   - RichLabel_handlePointer(label, kind, localX, localY, window)        : Pointer event dispatcher
  *   - RichLabel_onPointer(label, ev, window)                              : PointerEvent wrapper
+ *   - RichLabel_handleKey(label, ev)                                      : Key event (Cmd+C copy)
+ *   - RichLabel_getSelectedText(label)                                    : Tag-stripped plain copy
  *
  * Setters:
  *   - RichLabel_setTextModel(label, model)
@@ -147,8 +151,7 @@ void RichLabel_handlePointer(RichLabel *label, int kind, float localX, float loc
     bool inside = (localX >= 0.0f && localX <= w && localY >= 0.0f && localY <= h);
 
     if (kind == PTR_LEAVE || (!inside && (kind == PTR_MOVE || kind == PTR_HOVER))) {
-        if ((*label).hovered) {
-            (*label).hovered = false;
+        if (TextSelect_setHovered(&(*label).select, false)) {
             if (window) {
                 Cursor *defCursor = Cursor_getPredefined(CURSOR_DEFAULT);
                 Cursor_apply(defCursor, window);
@@ -159,8 +162,7 @@ void RichLabel_handlePointer(RichLabel *label, int kind, float localX, float loc
     }
 
     if (inside && (kind == PTR_ENTER || kind == PTR_MOVE || kind == PTR_HOVER)) {
-        if (!(*label).hovered) {
-            (*label).hovered = true;
+        if (TextSelect_setHovered(&(*label).select, true)) {
             if ((*label).highlightable && window)
                 Cursor_apply((*label).cursor, window);
             Container_markDirty(&(*label).base.base);
@@ -171,10 +173,10 @@ void RichLabel_handlePointer(RichLabel *label, int kind, float localX, float loc
 
     if ((*label).highlightable) {
         if (kind == PTR_DOWN) {
+            // Outside-down clears any in-progress selection.
             if (!inside) {
-                if ((*label).selectionStart != -1 || (*label).selectionEnd != -1) {
-                    (*label).selectionStart = -1;
-                    (*label).selectionEnd = -1;
+                if (TextSelect_isActive(&(*label).select)) {
+                    TextSelect_cancel(&(*label).select);
                     Container_markDirty(&(*label).base.base);
                 }
                 return;
@@ -183,27 +185,15 @@ void RichLabel_handlePointer(RichLabel *label, int kind, float localX, float loc
             // active edge, so dragging left (backward) then right past the anchor
             // selects exactly [anchor, active] — never a rolling union.
             int32_t idx = RichLabel_charIndexAt(label, localX, localY);
-            (*label).selectionStart = idx;
-            (*label).selectionEnd = idx;
+            TextSelect_begin(&(*label).select, idx);
             Container_markDirty(&(*label).base.base);
         } else if (kind == PTR_DRAG) {
-            if ((*label).selectionStart < 0)
-                return;
-            int32_t idx = RichLabel_charIndexAt(label, localX, localY);
-            (*label).selectionEnd = idx;
-            Container_markDirty(&(*label).base.base);
+            if (TextSelect_drag(&(*label).select, RichLabel_charIndexAt(label, localX, localY))) {
+                Container_markDirty(&(*label).base.base);
+            }
         } else if (kind == PTR_UP) {
-            if ((*label).selectionStart < 0)
-                return;
-            if ((*label).selectionStart > (*label).selectionEnd) {
-                int32_t tmp = (*label).selectionStart;
-                (*label).selectionStart = (*label).selectionEnd;
-                (*label).selectionEnd = tmp;
-            }
-            if ((*label).selectionStart == (*label).selectionEnd) {
-                (*label).selectionStart = -1;
-                (*label).selectionEnd = -1;
-            }
+            int32_t lo = -1, hi = -1;
+            TextSelect_end(&(*label).select, &lo, &hi);
             Container_markDirty(&(*label).base.base);
         }
     }
@@ -216,6 +206,34 @@ void RichLabel_onPointer(RichLabel *label, PointerEvent *ev, void *window) {
     float x = PointerEvent_getX(ev);
     float y = PointerEvent_getY(ev);
     RichLabel_handlePointer(label, kind, x, y, window);
+}
+
+// Key seam: Cmd/Ctrl+C copies the committed selection (tag-stripped); V is a
+// no-op on read-only labels. Detection by keyCode + modifier bits (cmd=8,
+// ctrl=2 local bridge bits), never by the decoded character.
+void RichLabel_handleKey(RichLabel *label, const UIKeyEvent *ev) {
+    if (!label || !ev)
+        return;
+    if (!UIKeyEvent_isPressed(ev))
+        return;
+    if (UIKeyEvent_isRepeat(ev))
+        return;
+    uint32_t mods = UIKeyEvent_getMods(ev);
+    if ((mods & (8u | 2u)) == 0)
+        return;
+    if (!(*label).highlightable)
+        return;
+    int32_t code = UIKeyEvent_getKeyCode(ev);
+    if (code != KEY_C && code != KEY_V)
+        return;
+    if (code == KEY_C) {
+        char *sel = RichLabel_getSelectedText(label);
+        if (sel) {
+            TextCore_copyToClipboard(sel);
+            Memory_free(sel);
+            UIKeyEvent_consume((UIKeyEvent*) ev);
+        }
+    }
 }
 
 // Draws per-line highlight spans behind the glyph quads whose charIndex falls
@@ -302,15 +320,8 @@ static void RichLabel_renderFn(Panel *panel, void *renderer, void *cmdBuffer, fl
         return;
 
     int32_t selStart = -1, selEnd = -1;
-    if ((*rl).highlightable) {
-        selStart = (*rl).selectionStart;
-        selEnd = (*rl).selectionEnd;
-        if (selStart >= 0 && selEnd >= 0 && selStart > selEnd) {
-            int32_t tmp = selStart;
-            selStart = selEnd;
-            selEnd = tmp;
-        }
-        if (selStart >= 0 && selEnd > selStart)
+    if ((*rl).highlightable && TextSelect_getSpan(&(*rl).select, &selStart, &selEnd)) {
+        if (selEnd > selStart)
             drawSelectionSpans(cmdBuffer, surfaceW, surfaceH, x, y, tm, selStart, selEnd,
                                (*rl).highlightColor, op);
     }
@@ -362,10 +373,8 @@ RichLabel *RichLabel_0(void) {
     (*rl).wrapMode = WRAP_WORD;
     (*rl).cursor = Cursor_getPredefined(CURSOR_DEFAULT);
     (*rl).highlightable = false;
-    (*rl).selectionStart = -1;
-    (*rl).selectionEnd = -1;
+    (*rl).select = TextSelect_default();
     (*rl).highlightColor = 0x662563EBu;
-    (*rl).hovered = false;
     Panel_setRenderHandler(&(*rl).base, RichLabel_renderFn);
 
     return rl;
@@ -413,17 +422,19 @@ void RichLabel_setHighlightable(RichLabel *label, bool flag) {
         (*label).cursor = Cursor_getPredefined(CURSOR_IBEAM);
     } else {
         (*label).cursor = Cursor_getPredefined(CURSOR_DEFAULT);
-        (*label).selectionStart = -1;
-        (*label).selectionEnd = -1;
-        (*label).hovered = false;
+        TextSelect_reset(&(*label).select);
     }
     Container_markDirty(&(*label).base.base);
 }
 
 void RichLabel_setSelection(RichLabel *label, int32_t start, int32_t end) {
     if (!label) return;
-    (*label).selectionStart = start;
-    (*label).selectionEnd = end;
+    if (start < 0 || end < 0) {
+        TextSelect_reset(&(*label).select);
+    } else {
+        TextSelect_begin(&(*label).select, start);
+        TextSelect_drag(&(*label).select, end);
+    }
     Container_markDirty(&(*label).base.base);
 }
 
@@ -441,7 +452,7 @@ void RichLabel_setHighlightColorRGBA(RichLabel *label, uint8_t r, uint8_t g, uin
 
 void RichLabel_setHovered(RichLabel *label, bool hovered) {
     if (!label) return;
-    (*label).hovered = hovered;
+    TextSelect_setHovered(&(*label).select, hovered);
     Container_markDirty(&(*label).base.base);
 }
 
@@ -459,18 +470,9 @@ bool RichLabel_isHighlightable(const RichLabel *label) {
 }
 
 void RichLabel_getSelection(const RichLabel *label, int32_t *outStart, int32_t *outEnd) {
-    if (!label) {
-        if (outStart) (*outStart) = -1;
-        if (outEnd) (*outEnd) = -1;
-        return;
-    }
-    int32_t s0 = (*label).selectionStart;
-    int32_t s1 = (*label).selectionEnd;
-    if (s0 >= 0 && s1 >= 0 && s0 > s1) {
-        int32_t tmp = s0;
-        s0 = s1;
-        s1 = tmp;
-    }
+    int32_t s0 = -1, s1 = -1;
+    if (label)
+        (void) TextSelect_getSpan(&(*label).select, &s0, &s1);
     if (outStart) (*outStart) = s0;
     if (outEnd) (*outEnd) = s1;
 }
@@ -488,9 +490,108 @@ void RichLabel_getHighlightColorRGBA(const RichLabel *label, uint8_t *outR, uint
 }
 
 bool RichLabel_isHovered(const RichLabel *label) {
-    return label ? (*label).hovered : false;
+    return label ? TextSelect_isHovered(&(*label).select) : false;
 }
 
 Cursor *RichLabel_getCursor(const RichLabel *label) {
     return label ? (*label).cursor : nullptr;
+}
+
+// Tag-stripped plain copy of the committed selection. Glyph quads are laid out
+// in string order and carry their starting byte offset into the TAGGED string;
+// for each selected quad we emit exactly its source bytes — the window up to
+// the next glyph — minus style tags, so neither tags nor decor quads (charIndex
+// -1) leak into the clipboard. Escaped \[ is emitted as a literal bracket.
+static int32_t glyphSpanEnd(const char *s, int32_t start, int32_t next) {
+    int32_t at = start;
+    while (at < next && s[at] != '\0') {
+        unsigned char b = (unsigned char) s[at];
+        if (b == '[')
+            return at;
+        if (b == '\\' && at + 1 < next && s[at + 1] == '[') {
+            at += 2;
+            continue;
+        }
+        int32_t need = 1;
+        if ((b & 0xE0) == 0xC0)
+            need = 2;
+        else if ((b & 0xF0) == 0xE0)
+            need = 3;
+        else if ((b & 0xF8) == 0xF0)
+            need = 4;
+        if (at + need > next)
+            return next;
+        at += need;
+    }
+    return at;
+}
+
+char *RichLabel_getSelectedText(const RichLabel *label) {
+    if (!label || !(*label).textModel)
+        return nullptr;
+    int32_t lo = -1, hi = -1;
+    if (!TextSelect_getSpan(&(*label).select, &lo, &hi))
+        return nullptr;
+    if (hi <= lo)
+        return nullptr;
+    const RichText *tm = (*label).textModel;
+    if (!(*tm).rawString || !(*tm).quads || (*tm).quadCount == 0)
+        return nullptr;
+    const char *s = (*tm).rawString;
+    int32_t rawLen = (int32_t) strlen(s);
+    if (lo < 0)
+        lo = 0;
+    if (hi > rawLen)
+        hi = rawLen;
+    if (hi <= lo)
+        return nullptr;
+
+    // Two passes over the selected glyph quads: count the stripped byte size,
+    // then emit. Both are cold-path (only on explicit Cmd+C), never on frames.
+    size_t cap = 0;
+    for (size_t i = 0; i < (*tm).quadCount; i++) {
+        const TextQuad *q = &(*tm).quads[i];
+        if ((*q).charIndex < 0 || (*q).advance <= 0)
+            continue;
+        int32_t c = (*q).charIndex;
+        if (c < lo || c >= hi)
+            continue;
+        int32_t nextStart = rawLen;
+        for (size_t j = i + 1; j < (*tm).quadCount; j++) {
+            const TextQuad *nq = &(*tm).quads[j];
+            if ((*nq).charIndex < 0 || (*nq).advance <= 0)
+                continue;
+            nextStart = (*nq).charIndex;
+            break;
+        }
+        cap += (size_t) (glyphSpanEnd(s, c, nextStart) - c);
+    }
+    if (cap == 0)
+        return nullptr;
+
+    char *out = (char*) Memory_alloc(TYPE_ARRAY, cap + 1);
+    if (!out)
+        return nullptr;
+    size_t at = 0;
+    for (size_t i = 0; i < (*tm).quadCount && at < cap; i++) {
+        const TextQuad *q = &(*tm).quads[i];
+        if ((*q).charIndex < 0 || (*q).advance <= 0)
+            continue;
+        int32_t c = (*q).charIndex;
+        if (c < lo || c >= hi)
+            continue;
+        int32_t nextStart = rawLen;
+        for (size_t j = i + 1; j < (*tm).quadCount; j++) {
+            const TextQuad *nq = &(*tm).quads[j];
+            if ((*nq).charIndex < 0 || (*nq).advance <= 0)
+                continue;
+            nextStart = (*nq).charIndex;
+            break;
+        }
+        int32_t end = glyphSpanEnd(s, c, nextStart);
+        for (int32_t k = c; k < end; k++)
+            out[at++] = s[k];
+    }
+    out[at] = '\0';
+    return out;
 }
