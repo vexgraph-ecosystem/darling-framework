@@ -647,6 +647,16 @@ void Darling_initCompositor(Window *window) {
             };
             if (AllocateCommandBuffers_fn) {
                 AllocateCommandBuffers_fn(dev, &cbai, &s_compositorCmdBuffer);
+                // Rule 39 seam naming: let a device-lost log name the re-record
+                // batch submit instead of the generic "vkQueueSubmit".
+                PFN_vkSetDebugUtilsObjectNameEXT setName_fn = (PFN_vkSetDebugUtilsObjectNameEXT)gdpa(dev, "vkSetDebugUtilsObjectNameEXT");
+                if (setName_fn && s_compositorCmdBuffer != VK_NULL_HANDLE) {
+                    VkDebugUtilsObjectNameInfoEXT info = { .sType = VK_STRUCTURE_TYPE_DEBUG_UTILS_OBJECT_NAME_INFO_EXT };
+                    info.objectType = VK_OBJECT_TYPE_COMMAND_BUFFER;
+                    info.objectHandle = (uint64_t)s_compositorCmdBuffer;
+                    info.pObjectName = "compositor batch";
+                    setName_fn(dev, &info);
+                }
             }
         }
     }
