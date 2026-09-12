@@ -28,7 +28,7 @@ TextSelect TextSelect_default(void);
 
 // Core Functions:
 //   TextSelect_begin(sel, idx)                : down — anchor + active collapse
-//   TextSelect_drag(sel, idx)                 : move the active edge only
+//   TextSelect_drag(sel, idx)                 : move the active edge only; true iff the edge moved
 //   TextSelect_end(sel, outLo, outHi)         : order + commit; outLo/outHi dest-last
 //   TextSelect_cancel(sel)                    : clear without committing
 //   TextSelect_getSpan(sel, outLo, outHi)     : ordered span while active

@@ -40,7 +40,7 @@
  *
  * Core Functions:
  *   - TextSelect_begin(sel, idx)               : down — anchor + active collapse
- *   - TextSelect_drag(sel, idx)                : move the active edge only
+ *   - TextSelect_drag(sel, idx)                : move the active edge only; true iff the edge moved
  *   - TextSelect_end(sel, outLo, outHi)        : order + commit, dest-last
  *   - TextSelect_cancel(sel)                   : clear without committing
  *   - TextSelect_getSpan(sel, outLo, outHi)    : ordered span while active
@@ -97,6 +97,8 @@ bool TextSelect_drag(TextSelect *sel, int32_t idx) {
         return false;
     if (idx < 0)
         idx = 0;
+    if ((*sel).active == idx)
+        return false;
     (*sel).active = idx;
     return true;
 }

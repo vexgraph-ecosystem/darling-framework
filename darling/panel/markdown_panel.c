@@ -314,7 +314,10 @@ static int32_t markdownDocIndexAt(MarkdownPanel *s, float localX, float localY) 
 }
 
 // Clamps a normalized document range onto one row's own text and mirrors it
-// into the row's selection (with the panel's highlight color).
+// into the row's selection (with the panel's highlight color). Rows whose
+// span AND color already match are skipped: a drag fires per pointer event,
+// and re-rasterizing every row per event (even untouched ones) collapses the
+// present rate over a long multi-row hold.
 static void applyRowSelection(MarkdownPanel *s, size_t rowIndex, int32_t lo, int32_t hi) {
     struct MarkdownRowSlot *slots = (*s).slots;
     struct MarkdownRowSlot *slot = &slots[rowIndex];
@@ -349,8 +352,14 @@ static void refreshRowSelection(MarkdownPanel *s) {
     if (!s)
         return;
     int32_t lo = -1, hi = -1;
+    int32_t wantA = hit ? a : -1;
+    int32_t wantB = hit ? b : -1;
     (void) TextSelect_getSpan(&(*s).select, &lo, &hi);
     if (lo < 0) {
+        int32_t curA = -1, curB = -1;
+        RichLabel_getSelection(rl, &curA, &curB);
+        if (RichLabel_getHighlightColor(rl) == color && curA == wantA && curB == wantB)
+            return;
         lo = 0;
         hi = 0;
     }
@@ -358,6 +367,10 @@ static void refreshRowSelection(MarkdownPanel *s) {
     for (size_t i = 0; i < n; i++)
         applyRowSelection(s, i, lo, hi);
     markDirty(s);
+        int32_t curA = -1, curB = -1;
+        Label_getSelection(lbl, &curA, &curB);
+        if (Label_getHighlightColor(lbl) == color && curA == wantA && curB == wantB)
+            return;
 }
 
 void MarkdownPanel_handlePointer(MarkdownPanel *s, int32_t kind, float localX, float localY, void *window) {
@@ -413,9 +426,8 @@ void MarkdownPanel_handlePointer(MarkdownPanel *s, int32_t kind, float localX, f
     if (kind == PTR_DRAG) {
         if (!TextSelect_isActive(&(*s).select))
             return;
-        if (inside)
-            TextSelect_drag(&(*s).select, markdownDocIndexAt(s, localX, localY));
-        refreshRowSelection(s);
+        if (TextSelect_drag(&(*s).select, markdownDocIndexAt(s, localX, localY)))
+            refreshRowSelection(s);
         return;
     }
     if (kind == PTR_UP) {
