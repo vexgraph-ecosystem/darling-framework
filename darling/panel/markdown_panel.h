@@ -8,8 +8,10 @@
 #include "c23/constructor.h"
 #include "darling/panel/list_container.h"
 #include "darling/panel/panel.h"
+#include "event/keyevent.h"
 #include "font/font.h"
 #include "oop/type.h"
+#include "text/text_select.h"
 
 // darling/panel/markdown_panel.h — markdown-fed document panel
 // (a Panel owning a row container rebuilt from a markdown source string).
@@ -36,8 +38,7 @@ typedef struct MarkdownPanel {
     size_t rowCount;
     size_t rowCapacity;
     bool highlightable;
-    int32_t selectionStart;
-    int32_t selectionEnd;
+    TextSelect select;      // shared fixed-anchor selection part (doc-byte space)
     uint32_t highlightColor;
 } MarkdownPanel;
 
@@ -77,8 +78,19 @@ uint32_t MarkdownPanel_getHighlightColor(const MarkdownPanel *s);
 void MarkdownPanel_getHighlightColorRGBA(const MarkdownPanel *s, uint8_t *outR, uint8_t *outG, uint8_t *outB, uint8_t *outA);
 
 // Pointer seam (driven by event/dispatch when the panel owns a document's
-// text rows): down anchors, drag moves the active edge, up normalizes or
-// collapses a plain click. Coordinates are local to the panel.
-void MarkdownPanel_handlePointer(MarkdownPanel *s, int32_t kind, float localX, float localY);
+// text rows): down anchors, drag moves the active edge, up orders and
+// COMMITS a nonzero range (or collapses a plain click). The extra window
+// argument carries the OS window for the hover I-beam caret-cursor
+// lifecycle (nullptr in headless tests). Coordinates are local to the panel.
+void MarkdownPanel_handlePointer(MarkdownPanel *s, int32_t kind, float localX, float localY, void *window);
+
+// Key seam: Cmd/Ctrl+C copies the committed selection; Cmd/Ctrl+V pastes the
+// clipboard into the document (whole-document text replacement, cold rebuild).
+void MarkdownPanel_handleKey(MarkdownPanel *s, const UIKeyEvent *ev);
+
+// Display-accurate plain copy of the committed selection (arena-allocated):
+// label rows slice their rendered string (bullets included when selected),
+// rich rows emit tag-stripped plain text.
+char *MarkdownPanel_getSelectedText(const MarkdownPanel *s);
 
 #endif

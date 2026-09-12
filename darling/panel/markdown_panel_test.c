@@ -1,11 +1,15 @@
 #include "annotation/overview.h"
 
 #include <stdio.h>
+#include <stdlib.h>
 #include <string.h>
 
 #include "darling/panel/markdown_panel.h"
 #include "darling/label/label.h"
+#include "event/keyevent.h"
+#include "input/key.h"
 #include "nio/mem.h"
+#include "text/text_core.h"
 
 ;;OVERVIEW
 /**
@@ -64,6 +68,7 @@ int main(void) {
     CHECK("not highlightable by default", !MarkdownPanel_isHighlightable(mp));
 
     int32_t s0 = 0, s1 = 0;
+    char *copy = nullptr;
     MarkdownPanel_getSelection(mp, &s0, &s1);
     CHECK("selection empty initially", s0 == -1 && s1 == -1);
 
@@ -74,24 +79,24 @@ int main(void) {
     int32_t sel0 = 0, sel1 = 0;
 
     // Forward drag across two rows: down mid-row0, active edge lands in row1.
-    MarkdownPanel_handlePointer(mp, PTR_DOWN, 100.0f, 20.0f);
-    MarkdownPanel_handlePointer(mp, PTR_DRAG, 200.0f, 50.0f);
+    MarkdownPanel_handlePointer(mp, PTR_DOWN, 100.0f, 20.0f, nullptr);
+    MarkdownPanel_handlePointer(mp, PTR_DRAG, 200.0f, 50.0f, nullptr);
     MarkdownPanel_getSelection(mp, &sel0, &sel1);
     CHECK("forward drag doc range", sel0 == 1 && sel1 == 12);
     rowSel(mp, 0, &r0, &r1);
     CHECK("forward drag row0 span", r0 == 1 && r1 == 5);
     rowSel(mp, 1, &r0, &r1);
     CHECK("forward drag row1 span", r0 == 0 && r1 == 7);
-    MarkdownPanel_handlePointer(mp, PTR_UP, 200.0f, 50.0f);
+    MarkdownPanel_handlePointer(mp, PTR_UP, 200.0f, 50.0f, nullptr);
     MarkdownPanel_getSelection(mp, &sel0, &sel1);
     CHECK("release keeps forward selection", sel0 == 1 && sel1 == 12);
 
     // Backward drag: anchor row3, active edge pulled back to row0.
-    MarkdownPanel_handlePointer(mp, PTR_DOWN, 300.0f, 100.0f);
+    MarkdownPanel_handlePointer(mp, PTR_DOWN, 300.0f, 100.0f, nullptr);
     rowSel(mp, 3, &r0, &r1);
     MarkdownPanel_getSelection(mp, &sel0, &sel1);
     CHECK("backward anchor mid-row3", sel0 == sel1 && sel0 == 44);
-    MarkdownPanel_handlePointer(mp, PTR_DRAG, 50.0f, 10.0f);
+    MarkdownPanel_handlePointer(mp, PTR_DRAG, 50.0f, 10.0f, nullptr);
     MarkdownPanel_getSelection(mp, &sel0, &sel1);
     CHECK("backward drag ordered doc range", sel0 == 1 && sel1 == 44);
     rowSel(mp, 0, &r0, &r1);
@@ -106,35 +111,35 @@ int main(void) {
     CHECK("backward drag row4 untouched", r0 == -1 && r1 == -1);
 
     // Fixed anchor survives a forward pass past it.
-    MarkdownPanel_handlePointer(mp, PTR_DRAG, 200.0f, 120.0f);
+    MarkdownPanel_handlePointer(mp, PTR_DRAG, 200.0f, 120.0f, nullptr);
     MarkdownPanel_getSelection(mp, &sel0, &sel1);
     CHECK("forward past anchor keeps anchor", sel0 == 44 && sel1 == 52);
     rowSel(mp, 4, &r0, &r1);
     CHECK("pulled row4 tail selected", r0 == 0 && r1 == 5);
-    MarkdownPanel_handlePointer(mp, PTR_UP, 200.0f, 120.0f);
+    MarkdownPanel_handlePointer(mp, PTR_UP, 200.0f, 120.0f, nullptr);
 
     // A plain click collapses to no selection.
-    MarkdownPanel_handlePointer(mp, PTR_DOWN, 200.0f, 200.0f);
-    MarkdownPanel_handlePointer(mp, PTR_UP, 200.0f, 200.0f);
+    MarkdownPanel_handlePointer(mp, PTR_DOWN, 200.0f, 200.0f, nullptr);
+    MarkdownPanel_handlePointer(mp, PTR_UP, 200.0f, 200.0f, nullptr);
     MarkdownPanel_getSelection(mp, &sel0, &sel1);
     CHECK("click clears selection", sel0 == -1 && sel1 == -1);
     rowSel(mp, 1, &r0, &r1);
     CHECK("click clears rows", r0 == -1 && r1 == -1);
 
     // Outside click (left of panel) clears.
-    MarkdownPanel_handlePointer(mp, PTR_DOWN, -20.0f, 40.0f);
-    MarkdownPanel_handlePointer(mp, PTR_UP, -20.0f, 40.0f);
-    MarkdownPanel_handlePointer(mp, PTR_DOWN, 100.0f, 20.0f);
+    MarkdownPanel_handlePointer(mp, PTR_DOWN, -20.0f, 40.0f, nullptr);
+    MarkdownPanel_handlePointer(mp, PTR_UP, -20.0f, 40.0f, nullptr);
+    MarkdownPanel_handlePointer(mp, PTR_DOWN, 100.0f, 20.0f, nullptr);
     MarkdownPanel_getSelection(mp, &sel0, &sel1);
     CHECK("down anchors after outside reset", sel0 == sel1 && sel0 == 1);
-    MarkdownPanel_handlePointer(mp, PTR_UP, 100.0f, 20.0f);
+    MarkdownPanel_handlePointer(mp, PTR_UP, 100.0f, 20.0f, nullptr);
     MarkdownPanel_getSelection(mp, &sel0, &sel1);
     CHECK("outside click cleared last session", sel0 == -1 && sel1 == -1);
 
     // Hard lock: unhighlightable ignores pointer events.
     MarkdownPanel_setHighlightable(mp, false);
-    MarkdownPanel_handlePointer(mp, PTR_DOWN, 100.0f, 20.0f);
-    MarkdownPanel_handlePointer(mp, PTR_DRAG, 200.0f, 50.0f);
+    MarkdownPanel_handlePointer(mp, PTR_DOWN, 100.0f, 20.0f, nullptr);
+    MarkdownPanel_handlePointer(mp, PTR_DRAG, 200.0f, 50.0f, nullptr);
     MarkdownPanel_getSelection(mp, &sel0, &sel1);
     CHECK("unhighlightable swallows pointer", sel0 == -1 && sel1 == -1);
     MarkdownPanel_setHighlightable(mp, true);
@@ -161,6 +166,78 @@ int main(void) {
     MarkdownPanel_getHighlightColorRGBA(mp, &r, &g, &b, &a);
     CHECK("color channel rd", r == 255 && g == 0 && b == 0 && a == 255);
 
+    // Display-accurate copy: every row here is a Label (no Font headless), so
+    // getSelectedText slices the stored visible strings — the "• " bullet
+    // literal participates only when the selection touches it.
+    MarkdownPanel_setSelection(mp, 6, 11);
+    copy = MarkdownPanel_getSelectedText(mp);
+    CHECK("mid-row copy", copy && strcmp(copy, "ome p") == 0);
+    if (copy)
+        Memory_free(copy);
+
+    // [18,24): row1's last byte 'h' plus row2's first 5 bytes "• b".
+    MarkdownPanel_setSelection(mp, 18, 24);
+    copy = MarkdownPanel_getSelectedText(mp);
+    CHECK("bullet-touch copy", copy && strcmp(copy, "h\xE2\x80\xA2 b") == 0);
+    if (copy)
+        Memory_free(copy);
+
+    // Whole document [0,56): rows concatenate with no inter-row separators
+    // (visible strings already include bullets).
+    MarkdownPanel_setSelection(mp, 0, 56);
+    copy = MarkdownPanel_getSelectedText(mp);
+    CHECK("whole-doc copy", copy && strcmp(copy, "Titlesome paragraph\xE2\x80\xA2 bullet one\xE2\x80\xA2 bullet twocode line") == 0);
+    if (copy)
+        Memory_free(copy);
+
+    // A committed selection's copy re-reads the span: clear via click → null.
+    MarkdownPanel_handlePointer(mp, PTR_DOWN, 100.0f, 20.0f, nullptr);
+    MarkdownPanel_handlePointer(mp, PTR_UP, 100.0f, 20.0f, nullptr);
+    CHECK("collapsed click nulls copy", MarkdownPanel_getSelectedText(mp) == nullptr);
+
+    // Key seam: Cmd+C copies the committed span through the in-memory board.
+    TextCore_setTestClipboard(true);
+    MarkdownPanel_setSelection(mp, 6, 18);
+    UIKeyEvent *kev = UIKeyEvent_3(KEY_C, true, false);
+    UIKeyEvent_setMods(kev, 8u);
+    MarkdownPanel_handleKey(mp, kev);
+    CHECK("copy consumed", UIKeyEvent_isConsumed(kev));
+    char *pasted = TextCore_pasteFromClipboard();
+    CHECK("copy lands on board", pasted && strcmp(pasted, "ome paragrap") == 0);
+    if (pasted)
+        free(pasted);
+
+    // Cmd+V replaces the document text with the board (cold rebuild).
+    kev = UIKeyEvent_3(KEY_V, true, false);
+    UIKeyEvent_setMods(kev, 8u);
+    MarkdownPanel_handleKey(mp, kev);
+    CHECK("paste consumed", UIKeyEvent_isConsumed(kev));
+    CHECK("paste replaces text", MarkdownPanel_getRowCount(mp) == 1);
+
+    // Restore the original document + selection so the null-safety block below
+    // still acts on the pristine 5-row fixture (row1 holds [5,14)).
+    MarkdownPanel_setText(mp, "# Title\nsome paragraph\n- bullet one\n- **bullet two**\n```\ncode line\n```");
+    MarkdownPanel_setSelection(mp, 30, 10);
+
+
+    // Repeat and plain presses never copy; no mods → not consumed.
+    kev = UIKeyEvent_3(KEY_C, true, true);
+    UIKeyEvent_setMods(kev, 8u);
+    MarkdownPanel_handleKey(mp, kev);
+    CHECK("repeat ignored", !UIKeyEvent_isConsumed(kev));
+
+    kev = UIKeyEvent_3(KEY_C, false, false);
+    UIKeyEvent_setMods(kev, 8u);
+    MarkdownPanel_handleKey(mp, kev);
+    CHECK("release ignored", !UIKeyEvent_isConsumed(kev));
+
+    kev = UIKeyEvent_3(KEY_C, true, false);
+    UIKeyEvent_setMods(kev, 0u);
+    MarkdownPanel_handleKey(mp, kev);
+    CHECK("no-mods ignored", !UIKeyEvent_isConsumed(kev));
+
+    TextCore_setTestClipboard(false);
+
     // Null-safety (Rule 35).
     MarkdownPanel_getSelection(NULL, &s0, &s1);
     CHECK("null getSelection safe", s0 == -1 && s1 == -1);
@@ -168,7 +245,7 @@ int main(void) {
     CHECK("null getHighlightColor", MarkdownPanel_getHighlightColor(NULL) == 0u);
     rowSel(mp, 1, &r0, &r1);
     CHECK("row1 span before null call", r0 == 5 && r1 == 14);
-    MarkdownPanel_handlePointer(NULL, PTR_DOWN, 100.0f, 20.0f);
+    MarkdownPanel_handlePointer(NULL, PTR_DOWN, 100.0f, 20.0f, nullptr);
     rowSel(mp, 1, &r0, &r1);
     CHECK("null handlePointer leaves selection", r0 == 5 && r1 == 14);
 

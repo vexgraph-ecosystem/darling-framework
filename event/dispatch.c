@@ -109,7 +109,7 @@ void Knob_handlePointer(Knob *self, int kind, float localX, float localY) __attr
 void ScrollBar_handlePointer(ScrollBar *self, int kind, float localX, float localY) __attribute__((weak));
 void Input_handlePointer(Input *self, int kind, float localX, float localY) __attribute__((weak));
 void Textarea_handlePointer(Textarea *self, int kind, float localX, float localY) __attribute__((weak));
-void MarkdownPanel_handlePointer(MarkdownPanel *self, int kind, float localX, float localY) __attribute__((weak));
+void MarkdownPanel_handlePointer(MarkdownPanel *self, int kind, float localX, float localY, void *window) __attribute__((weak));
 void Input_handleKey(Input *self, const UIKeyEvent *ev) __attribute__((weak));
 void Textarea_handleKey(Textarea *self, const UIKeyEvent *ev) __attribute__((weak));
 
@@ -223,9 +223,9 @@ static void dispatchPointerTo(Panel *target, int kind, float lx, float ly) {
         return;
     }
     if (cls == ID_MARKDOWN_PANEL) {
-        void (*fn)(MarkdownPanel *, int, float, float) = MarkdownPanel_handlePointer;
+        void (*fn)(MarkdownPanel *, int, float, float, void *) = MarkdownPanel_handlePointer;
         if (fn)
-            fn((MarkdownPanel*) target, kind, lx, ly);
+            fn((MarkdownPanel*) target, kind, lx, ly, nullptr);
         return;
     }
 }

@@ -1,18 +1,22 @@
 #include "darling/panel/markdown_panel.h"
 
+#include "darling/cursor/cursor.h"
 #include "darling/label/label.h"
 #include "darling/label/rich_label.h"
 #include "darling/panel/panel.h"
 #include "event/pointer.h"
 #include "annotation/overview.h"
+#include "input/key.h"
 #include "nio/mem.h"
 #include "oop/type.h"
 #include "primitive/string.h"
 #include "text/rich_text.h"
+#include "text/text_core.h"
 
 #include <stdbool.h>
 #include <stddef.h>
 #include <stdint.h>
+#include <stdlib.h>
 #include <string.h>
 
 ;;OVERVIEW
@@ -49,8 +53,7 @@
  *   size_t rowCount;                   // Active row record count
  *   size_t rowCapacity;                // Row record capacity
  *   bool highlightable;                // Enables document drag selection (no caret)
- *   int32_t selectionStart;            // Fixed selection anchor (doc-byte, -1 = none)
- *   int32_t selectionEnd;              // Active drag edge (doc-byte, -1 = none)
+ *   TextSelect select;                 // Shared selection part (doc-byte space + hover)
  *   uint32_t highlightColor;           // Packed 0xAARRGGBB selection fill (0x662563EB)
  *
  * SLOT RECORD (file-local, behaviorless; all behavior hangs off MarkdownPanel):
@@ -75,6 +78,17 @@
  *   positions in this rendered-text space; a selection that spans rows simply
  *   covers the whole text of the rows it lands on.
  *
+ * SELECTION COPY (display-accurate, cold path):
+ *   getSelectedText walks the committed span one row at a time and emits the
+ *   rendered bytes the user sees: Label rows slice their stored display string
+ *   (markers already stripped at row build; the "• " bullet literal lives at
+ *   [0,4) of the row string and is included when the selection touches it),
+ *   RichLabel rows strip [nn]/style tags and unescape \[ back to '[' from the
+ *   tagged model string. This matches the SELECTION SIMPLIFICATION space 1:1,
+ *   so the copy never re-runs markdown parsing; source-offset slot fields
+ *   (srcStart/srcSkip/srcLen) were considered and rejected — they would be
+ *   dead structure since the stored row strings are already display strings.
+ *
  * FUNCTION REGISTRY:
  * ----------------------------------------------------------------------------
  * Constructors:
@@ -83,7 +97,9 @@
  *
  * Core Functions:
  *   - MarkdownPanel_free(s)
- *   - MarkdownPanel_handlePointer(s, kind, localX, localY)  : document selection
+ *   - MarkdownPanel_handlePointer(s, kind, localX, localY, window) : document selection
+ *   - MarkdownPanel_handleKey(s, ev)                               : key event (Cmd+C copy / Cmd+V paste)
+ *   - MarkdownPanel_getSelectedText(s)                             : display-accurate copy
  *
  * Setters:
  *   - MarkdownPanel_setText(s, text)
@@ -165,8 +181,7 @@ MarkdownPanel *MarkdownPanel_0(void) {
     (*s).rows = box;
     (*s).rowSpacing = MARKDOWN_DEFAULT_SPACING;
     (*s).highlightable = false;
-    (*s).selectionStart = -1;
-    (*s).selectionEnd = -1;
+    (*s).select = TextSelect_default();
     (*s).highlightColor = 0x662563EBu;
     ListContainer_setSpacing(box, MARKDOWN_DEFAULT_SPACING);
     (*s).slots = nullptr;
@@ -333,13 +348,8 @@ static void applyRowSelection(MarkdownPanel *s, size_t rowIndex, int32_t lo, int
 static void refreshRowSelection(MarkdownPanel *s) {
     if (!s)
         return;
-    int32_t lo = (*s).selectionStart;
-    int32_t hi = (*s).selectionEnd;
-    if (lo > hi) {
-        int32_t tmp = lo;
-        lo = hi;
-        hi = tmp;
-    }
+    int32_t lo = -1, hi = -1;
+    (void) TextSelect_getSpan(&(*s).select, &lo, &hi);
     if (lo < 0) {
         lo = 0;
         hi = 0;
@@ -350,46 +360,70 @@ static void refreshRowSelection(MarkdownPanel *s) {
     markDirty(s);
 }
 
-void MarkdownPanel_handlePointer(MarkdownPanel *s, int32_t kind, float localX, float localY) {
+void MarkdownPanel_handlePointer(MarkdownPanel *s, int32_t kind, float localX, float localY, void *window) {
     if (!s)
         return;
     if ((*s).rowCount == 0)
-        return;
-    if (!(*s).highlightable)
         return;
     Panel *b = &(*s).base;
     Container *c = &(*b).base;
     float w = Container_getWidth(c);
     float h = Container_getHeight(c);
     bool inside = localX >= 0.0f && localY >= 0.0f && localX <= w && localY <= h;
+
+    // Shared hover caret-cursor lifecycle (TextSelect part): flip the hovered
+    // flag and drive I-beam / default cursor. Hovering never touches
+    // anchor/active and LEAVE never clears an in-progress selection.
+    if (kind == PTR_LEAVE || (!inside && (kind == PTR_MOVE || kind == PTR_HOVER))) {
+        if (TextSelect_setHovered(&(*s).select, false)) {
+            if (window) {
+                Cursor *defCursor = Cursor_getPredefined(CURSOR_DEFAULT);
+                Cursor_apply(defCursor, window);
+            }
+            markDirty(s);
+        }
+        return;
+    }
+
+    if (inside && (kind == PTR_ENTER || kind == PTR_MOVE || kind == PTR_HOVER)) {
+        if (TextSelect_setHovered(&(*s).select, true)) {
+            if ((*s).highlightable && window) {
+                Cursor *ibeam = Cursor_getPredefined(CURSOR_IBEAM);
+                Cursor_apply(ibeam, window);
+            }
+            markDirty(s);
+        } else if ((*s).highlightable && window) {
+            Cursor *ibeam = Cursor_getPredefined(CURSOR_IBEAM);
+            Cursor_apply(ibeam, window);
+        }
+    }
+
+    if (!(*s).highlightable)
+        return;
     if (kind == PTR_DOWN) {
         if (inside) {
             int32_t idx = markdownDocIndexAt(s, localX, localY);
-            (*s).selectionStart = idx;
-            (*s).selectionEnd = idx;
+            TextSelect_begin(&(*s).select, idx);
         } else {
-            (*s).selectionStart = -1;
-            (*s).selectionEnd = -1;
+            TextSelect_cancel(&(*s).select);
         }
         refreshRowSelection(s);
         return;
     }
     if (kind == PTR_DRAG) {
-        if ((*s).selectionStart < 0)
+        if (!TextSelect_isActive(&(*s).select))
             return;
         if (inside)
-            (*s).selectionEnd = markdownDocIndexAt(s, localX, localY);
+            TextSelect_drag(&(*s).select, markdownDocIndexAt(s, localX, localY));
         refreshRowSelection(s);
         return;
     }
     if (kind == PTR_UP) {
-        if ((*s).selectionStart < 0)
-            return;
-        if (inside)
-            (*s).selectionEnd = markdownDocIndexAt(s, localX, localY);
-        if ((*s).selectionEnd == (*s).selectionStart) {
-            (*s).selectionStart = -1;
-            (*s).selectionEnd = -1;
+        int32_t lo = -1, hi = -1;
+        if (TextSelect_isActive(&(*s).select)) {
+            if (inside)
+                TextSelect_drag(&(*s).select, markdownDocIndexAt(s, localX, localY));
+            TextSelect_end(&(*s).select, &lo, &hi);
         }
         refreshRowSelection(s);
         return;
@@ -865,10 +899,8 @@ void MarkdownPanel_setHighlightable(MarkdownPanel *s, bool flag) {
     if (!s)
         return;
     (*s).highlightable = flag;
-    if (!flag) {
-        (*s).selectionStart = -1;
-        (*s).selectionEnd = -1;
-    }
+    if (!flag)
+        TextSelect_reset(&(*s).select);
     struct MarkdownRowSlot *slots = (*s).slots;
     size_t n = (*s).rowCount;
     for (size_t i = 0; i < n; i++) {
@@ -884,8 +916,12 @@ void MarkdownPanel_setHighlightable(MarkdownPanel *s, bool flag) {
 void MarkdownPanel_setSelection(MarkdownPanel *s, int32_t start, int32_t end) {
     if (!s)
         return;
-    (*s).selectionStart = start;
-    (*s).selectionEnd = end;
+    if (start < 0 || end < 0) {
+        TextSelect_reset(&(*s).select);
+    } else {
+        TextSelect_begin(&(*s).select, start);
+        TextSelect_drag(&(*s).select, end);
+    }
     refreshRowSelection(s);
 }
 
@@ -947,24 +983,11 @@ bool MarkdownPanel_isHighlightable(const MarkdownPanel *s) {
 }
 
 void MarkdownPanel_getSelection(const MarkdownPanel *s, int32_t *outStart, int32_t *outEnd) {
-    if (!s) {
-        if (outStart)
-            (*outStart) = -1;
-        if (outEnd)
-            (*outEnd) = -1;
-        return;
-    }
-    int32_t s0 = (*s).selectionStart;
-    int32_t s1 = (*s).selectionEnd;
-    if (s0 > s1) {
-        int32_t tmp = s0;
-        s0 = s1;
-        s1 = tmp;
-    }
-    if (outStart)
-        (*outStart) = s0;
-    if (outEnd)
-        (*outEnd) = s1;
+    int32_t s0 = -1, s1 = -1;
+    if (s)
+        (void) TextSelect_getSpan(&(*s).select, &s0, &s1);
+    if (outStart) (*outStart) = s0;
+    if (outEnd) (*outEnd) = s1;
 }
 
 uint32_t MarkdownPanel_getHighlightColor(const MarkdownPanel *s) {
@@ -981,4 +1004,212 @@ void MarkdownPanel_getHighlightColorRGBA(const MarkdownPanel *s, uint8_t *outR, 
         (*outG) = (uint8_t) ((c >> 8) & 0xFF);
     if (outB)
         (*outB) = (uint8_t) (c & 0xFF);
+}
+
+// ----------------------------------------------------------------------------
+// CORE FUNCTIONS (selection copy + key seam)
+// ----------------------------------------------------------------------------
+
+// End of a glyph's display bytes inside the tagged string: the window up to
+// the next glyph whose source bytes are NOT a style tag. Tags start with '[';
+// an escaped \[ emits a literal bracket. Mirrors rich_label's span walk.
+static int32_t glyphSpanEnd(const char *s, int32_t start, int32_t next) {
+    int32_t at = start;
+    while (at < next && s[at] != '\0') {
+        unsigned char b = (unsigned char) s[at];
+        if (b == '[')
+            return at;
+        if (b == '\\' && at + 1 < next && s[at + 1] == '[') {
+            at += 2;
+            continue;
+        }
+        int32_t need = 1;
+        if ((b & 0xE0) == 0xC0)
+            need = 2;
+        else if ((b & 0xF0) == 0xE0)
+            need = 3;
+        else if ((b & 0xF8) == 0xF0)
+            need = 4;
+        if (at + need > next)
+            return next;
+        at += need;
+    }
+    return at;
+}
+
+// Stripped plain byte count of the tagged range [a, b) over a RichText model.
+static size_t countRichRange(const RichText *tm, int32_t a, int32_t b) {
+    if (!tm || !(*tm).rawString || !(*tm).quads || (*tm).quadCount == 0)
+        return 0;
+    const char *s = (*tm).rawString;
+    int32_t rawLen = (int32_t) strlen(s);
+    size_t cap = 0;
+    for (size_t i = 0; i < (*tm).quadCount; i++) {
+        const TextQuad *q = &(*tm).quads[i];
+        if ((*q).charIndex < 0 || (*q).advance <= 0)
+            continue;
+        int32_t c = (*q).charIndex;
+        if (c < a || c >= b)
+            continue;
+        int32_t nextStart = rawLen;
+        for (size_t j = i + 1; j < (*tm).quadCount; j++) {
+            const TextQuad *nq = &(*tm).quads[j];
+            if ((*nq).charIndex < 0 || (*nq).advance <= 0)
+                continue;
+            nextStart = (*nq).charIndex;
+            break;
+        }
+        cap += (size_t) (glyphSpanEnd(s, c, nextStart) - c);
+    }
+    return cap;
+}
+
+// Fills out with the stripped plain bytes of [a, b); returns bytes written.
+static size_t fillRichRange(const RichText *tm, int32_t a, int32_t b, char *out) {
+    size_t at = 0;
+    if (!tm || !(*tm).rawString || !(*tm).quads || (*tm).quadCount == 0)
+        return 0;
+    const char *s = (*tm).rawString;
+    int32_t rawLen = (int32_t) strlen(s);
+    for (size_t i = 0; i < (*tm).quadCount; i++) {
+        const TextQuad *q = &(*tm).quads[i];
+        if ((*q).charIndex < 0 || (*q).advance <= 0)
+            continue;
+        int32_t c = (*q).charIndex;
+        if (c < a || c >= b)
+            continue;
+        int32_t nextStart = rawLen;
+        for (size_t j = i + 1; j < (*tm).quadCount; j++) {
+            const TextQuad *nq = &(*tm).quads[j];
+            if ((*nq).charIndex < 0 || (*nq).advance <= 0)
+                continue;
+            nextStart = (*nq).charIndex;
+            break;
+        }
+        int32_t end = glyphSpanEnd(s, c, nextStart);
+        for (int32_t k = c; k < end; k++)
+            out[at++] = s[k];
+    }
+    return at;
+}
+
+// Clamps a doc-space [lo, hi) onto one row and returns the row-local byte
+// range via outA/outB; returns the byte count (0 when the row is untouched).
+static int32_t clampRowRange(const MarkdownPanel *s, size_t rowIndex, int32_t lo, int32_t hi, int32_t *outA, int32_t *outB) {
+    struct MarkdownRowSlot *slots = (*s).slots;
+    struct MarkdownRowSlot *slot = &slots[rowIndex];
+    int32_t cs = (int32_t) (*slot).cellStart;
+    int32_t tl = (int32_t) (*slot).textLen;
+    int32_t a = lo < cs ? 0 : lo - cs;
+    int32_t b = hi - cs;
+    if (b > tl)
+        b = tl;
+    if (a < 0)
+        a = 0;
+    if (a >= b)
+        return 0;
+    (*outA) = a;
+    (*outB) = b;
+    return b - a;
+}
+
+// Display-accurate plain copy of the committed selection (arena-allocated,
+// caller Memory_free). Label rows slice their stored display string — markers
+// were already stripped at row build and the "• " bullet literal lives at
+// [0,4), so it is included exactly when the selection touches it. Rich rows
+// strip [nn] style tags (and unescape \[) from the tagged model string.
+char *MarkdownPanel_getSelectedText(const MarkdownPanel *s) {
+    if (!s)
+        return nullptr;
+    int32_t lo = -1, hi = -1;
+    if (!TextSelect_getSpan(&(*s).select, &lo, &hi))
+        return nullptr;
+    if (hi <= lo)
+        return nullptr;
+    size_t n = (*s).rowCount;
+    if (n == 0)
+        return nullptr;
+
+    size_t cap = 0;
+    for (size_t i = 0; i < n; i++) {
+        int32_t a = 0, b = 0;
+        int32_t len = clampRowRange(s, i, lo, hi, &a, &b);
+        if (len <= 0)
+            continue;
+        struct MarkdownRowSlot *slots = (*s).slots;
+        struct MarkdownRowSlot *slot = &slots[i];
+        if ((*slot).isRich)
+            cap += countRichRange((*slot).model, a, b);
+        else {
+            const char *txt = Label_getText((const Label*) (*slot).panel);
+            cap += txt ? (size_t) len : 0;
+        }
+    }
+    if (cap == 0)
+        return nullptr;
+
+    char *out = (char*) Memory_alloc(TYPE_ARRAY, cap + 1);
+    if (!out)
+        return nullptr;
+    size_t at = 0;
+    for (size_t i = 0; i < n; i++) {
+        int32_t a = 0, b = 0;
+        int32_t len = clampRowRange(s, i, lo, hi, &a, &b);
+        if (len <= 0)
+            continue;
+        struct MarkdownRowSlot *slots = (*s).slots;
+        struct MarkdownRowSlot *slot = &slots[i];
+        if ((*slot).isRich) {
+            at += fillRichRange((*slot).model, a, b, out + at);
+        } else {
+            const char *txt = Label_getText((const Label*) (*slot).panel);
+            if (!txt)
+                continue;
+            int32_t txtLen = (int32_t) strlen(txt);
+            int32_t copyFrom = a < txtLen ? a : txtLen;
+            int32_t copyTo = b < txtLen ? b : txtLen;
+            if (copyFrom < copyTo) {
+                memcpy(out + at, txt + copyFrom, (size_t)(copyTo - copyFrom));
+                at += (size_t)(copyTo - copyFrom);
+            }
+        }
+    }
+    out[at] = '\0';
+    return out;
+}
+
+// Key seam: Cmd/Ctrl+C copies the committed selection; Cmd/Ctrl+V replaces the
+// whole document text with the clipboard (cold rebuild). Press-only, repeats
+// ignored; detection by keyCode + modifier bits (cmd=8, ctrl=2), never by the
+// decoded character.
+void MarkdownPanel_handleKey(MarkdownPanel *s, const UIKeyEvent *ev) {
+    if (!s || !ev)
+        return;
+    if (!UIKeyEvent_isPressed(ev))
+        return;
+    if (UIKeyEvent_isRepeat(ev))
+        return;
+    uint32_t mods = UIKeyEvent_getMods(ev);
+    if ((mods & (8u | 2u)) == 0)
+        return;
+    if (!(*s).highlightable)
+        return;
+    int32_t code = UIKeyEvent_getKeyCode(ev);
+    if (code == KEY_C) {
+        char *sel = MarkdownPanel_getSelectedText(s);
+        if (sel) {
+            TextCore_copyToClipboard(sel);
+            Memory_free(sel);
+            UIKeyEvent_consume((UIKeyEvent*) ev);
+        }
+        return;
+    }
+    if (code == KEY_V) {
+        char *clip = TextCore_pasteFromClipboard();
+        if (clip) {
+            MarkdownPanel_setText(s, clip);
+            free(clip);
+            UIKeyEvent_consume((UIKeyEvent*) ev);
+        }
+    }
 }
