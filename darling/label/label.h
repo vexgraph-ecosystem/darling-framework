@@ -28,6 +28,8 @@ typedef struct Label {
     int rasterH;
     float rasterBacking;
     bool rasterDirty;
+    float *glyphX;          // Per-byte CoreText pen offsets in points (strlen+1), NULL = uniform fallback
+    int32_t glyphN;         // Entry count of glyphX (0 when absent)
     bool ownsText;            // true if text was copied and owned by label
     bool ownsFontFamily;      // true if fontFamily was copied and owned by label
 
@@ -103,6 +105,8 @@ int32_t Label_getRasterTexture(const Label *label);
 void Label_getRasterSize(const Label *label, int *outW, int *outH);
 float Label_getRasterBacking(const Label *label);
 bool Label_isRasterDirty(const Label *label);
+const float *Label_getGlyphOffsets(const Label *label);
+int32_t Label_getGlyphOffsetCount(const Label *label);
 
 bool Label_isHighlightable(const Label *label);
 bool Label_isMnemonic(const Label *label);

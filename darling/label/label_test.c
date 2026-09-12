@@ -298,6 +298,58 @@ int main(void) {
         Label_free(lbl);
     }
 
+    // §7 Stated per-glyph positions: the hit-test shares the table with the
+    // highlight. Synthetic tables (same pattern as rich_label_test's synthetic
+    // quads — the shaper only runs on Apple raster); Label_free owns them.
+    {
+        Label *lbl = Label_1("Ga");
+        CHECK("glyph table absent by default", Label_getGlyphOffsets(lbl) == nullptr);
+        CHECK("glyph count absent by default", Label_getGlyphOffsetCount(lbl) == 0);
+        float *gx = (float*) Memory_alloc(TYPE_ARRAY, 3 * sizeof(float));
+        gx[0] = 0.0f;
+        gx[1] = 30.0f;
+        gx[2] = 38.0f;
+        (*lbl).glyphX = gx;
+        (*lbl).glyphN = 3;
+        CHECK("glyph offsets getter", Label_getGlyphOffsets(lbl) == gx);
+        CHECK("glyph count getter", Label_getGlyphOffsetCount(lbl) == 3);
+        // Boundaries at 16 / 35 (midpoints + 1pt raster pad): a pointer over
+        // the true wide G maps to 0, over the narrow a maps to 1. Uniform
+        // math (qw = 2*6 = 12) would map x=20 to 2 — the reported bug.
+        CHECK("proportional hit G", Label_charIndexAt(lbl, 5.0f) == 0);
+        CHECK("proportional hit a", Label_charIndexAt(lbl, 20.0f) == 1);
+        CHECK("proportional hit a right half", Label_charIndexAt(lbl, 34.0f) == 1);
+        CHECK("proportional hit end", Label_charIndexAt(lbl, 35.0f) == 2);
+        CHECK("proportional hit clamp right", Label_charIndexAt(lbl, 100.0f) == 2);
+        CHECK("proportional hit clamp left", Label_charIndexAt(lbl, -5.0f) == 0);
+        // Stale-length table is ignored (uniform fallback, no crash).
+        (*lbl).glyphN = 99;
+        int32_t fb = Label_charIndexAt(lbl, 20.0f);
+        CHECK("mismatched table falls back", fb >= 0 && fb <= 2);
+        (*lbl).glyphN = 3;
+        Label_free(lbl);
+    }
+    {
+        // Multibyte rewind: continuation bytes share their codepoint's offset
+        // and must resolve to the codepoint start, never mid-codepoint.
+        Label *lbl = Label_1("éx");
+        float *gx = (float*) Memory_alloc(TYPE_ARRAY, 4 * sizeof(float));
+        gx[0] = 0.0f;
+        gx[1] = 0.0f;
+        gx[2] = 14.0f;
+        gx[3] = 22.0f;
+        (*lbl).glyphX = gx;
+        (*lbl).glyphN = 4;
+        CHECK("multibyte hit first", Label_charIndexAt(lbl, 5.0f) == 0);
+        CHECK("multibyte hit second", Label_charIndexAt(lbl, 10.0f) == 2);
+        CHECK("multibyte hit end", Label_charIndexAt(lbl, 21.0f) == 3);
+        Label_free(lbl);
+    }
+    {
+        CHECK("null glyph offsets", Label_getGlyphOffsets(nullptr) == nullptr);
+        CHECK("null glyph count", Label_getGlyphOffsetCount(nullptr) == 0);
+    }
+
     printf("\n=== Label & Cursor Test Summary: %d failures ===\n", g_failures);
     return g_failures > 0 ? 1 : 0;
 }

@@ -28,6 +28,7 @@
  *   - TextCore_backingScale(void)
  *   - TextCore_rasterLine(utf8, family, pxHeight, argb, outRgba, outW, outH)
  *   - TextCore_rasterStyled(utf8, family, pxHeight, argb, style, outRgba, outW, outH)
+ *   - TextCore_lineOffsets(utf8, family, pxHeight, ligatures, kernPts, outPts, cap)
  * ============================================================================
  */
 
@@ -55,6 +56,99 @@ float TextCore_backingScale(void) {
 
 bool TextCore_rasterLine(const char *utf8, const char *family, float pxHeight, uint32_t argb, uint8_t **outRgba, int *outW, int *outH) {
     return TextCore_rasterStyled(utf8, family, pxHeight, argb, nullptr, outRgba, outW, outH);
+}
+
+// Per-glyph pen offsets from the same shaper that paints: same font fallback
+// chain, ligature flag, and tracking as TextCore_rasterStyled, so the table
+// matches the baked highlight exactly. Single-line only; anything else fails
+// closed and the caller keeps its uniform fallback.
+int32_t TextCore_lineOffsets(const char *utf8, const char *family, float pxHeight,
+                             bool ligatures, float kernPts,
+                             float *outPts, int32_t cap) {
+    if (!utf8 || !outPts)
+        return -1;
+    if (pxHeight <= 0.0f || cap <= 0)
+        return -1;
+    size_t byteLen = strlen(utf8);
+    if (byteLen == 0)
+        return -1;
+    if (memchr(utf8, '\n', byteLen) != NULL)
+        return -1;
+    if (byteLen + 1 > (size_t) cap)
+        return -1;
+
+    @autoreleasepool {
+        NSString *str = [NSString stringWithUTF8String:utf8];
+        if (!str)
+            return -1;
+        NSString *fam = family ? [NSString stringWithUTF8String:family] : @"Helvetica";
+        CTFontRef font = CTFontCreateWithName((__bridge CFStringRef) fam, pxHeight, NULL);
+        if (!font) {
+            font = CTFontCreateWithName(CFSTR("Helvetica"), pxHeight, NULL);
+            if (!font)
+                return -1;
+        }
+        CGGlyph testG[2] = {0};
+        UniChar testC[2] = {'a', 'e'};
+        if (CTFontGetGlyphsForCharacters(font, testC, testG, 2) && testG[0] == testG[1]) {
+            CFRelease(font);
+            font = CTFontCreateWithName(CFSTR("Menlo"), pxHeight, NULL);
+            if (!font)
+                font = CTFontCreateWithName(CFSTR("Helvetica"), pxHeight, NULL);
+            if (!font)
+                return -1;
+        }
+
+        float backing = TextCore_backingScale();
+        if (backing <= 0.0f)
+            backing = 1.0f;
+        CGFloat kern = (kernPts != 0.0f) ? (kernPts * backing) : 0.0f;
+
+        NSMutableDictionary *attrs = [NSMutableDictionary dictionaryWithCapacity:4];
+        [attrs setObject:(__bridge id) font forKey:(id)kCTFontAttributeName];
+        [attrs setObject:@(ligatures ? 1 : 0) forKey:(id)kCTLigatureAttributeName];
+        if (kern != 0.0f) {
+            [attrs setObject:@(kern) forKey:(id)kCTKernAttributeName];
+        }
+        NSAttributedString *rattr = [[NSAttributedString alloc] initWithString:str attributes:attrs];
+        CTLineRef line = CTLineCreateWithAttributedString((__bridge CFAttributedStringRef) rattr);
+        if (!line) {
+            CFRelease(font);
+            return -1;
+        }
+        // Byte index -> UTF-16 index map (NSString space). Continuation bytes
+        // share their codepoint's entry; astral codepoints span two units.
+        CFIndex u16 = 0;
+        size_t i = 0;
+        while (i < byteLen) {
+            unsigned char c0 = (unsigned char) utf8[i];
+            size_t charLen = 1;
+            int u16Len = 1;
+            if (c0 < 0x80) {
+                charLen = 1;
+            } else if ((c0 & 0xE0) == 0xC0) {
+                charLen = 2;
+            } else if ((c0 & 0xF0) == 0xE0) {
+                charLen = 3;
+            } else if ((c0 & 0xF8) == 0xF0) {
+                charLen = 4;
+                u16Len = 2;
+            }
+            if (i + charLen > byteLen)
+                charLen = 1;
+            CGFloat px = CTLineGetOffsetForStringIndex(line, u16, NULL);
+            float pts = (float) (px / (double) backing);
+            for (size_t k = 0; k < charLen && i + k < byteLen; k++)
+                outPts[i + k] = pts;
+            i += charLen;
+            u16 += u16Len;
+        }
+        double adv = CTLineGetTypographicBounds(line, NULL, NULL, NULL);
+        outPts[byteLen] = (float) (adv / (double) backing);
+        CFRelease(line);
+        CFRelease(font);
+        return (int32_t) (byteLen + 1);
+    }
 }
 
 bool TextCore_rasterStyled(const char *utf8, const char *family, float pxHeight, uint32_t argb,

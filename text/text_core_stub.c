@@ -23,6 +23,7 @@
  *   - TextCore_backingScale(void)
  *   - TextCore_rasterLine(utf8, family, pxHeight, argb, outRgba, outW, outH)
  *   - TextCore_rasterStyled(utf8, family, pxHeight, argb, style, outRgba, outW, outH)
+ *   - TextCore_lineOffsets(utf8, family, pxHeight, ligatures, kernPts, outPts, cap)
  * ============================================================================
  */
 
@@ -55,6 +56,21 @@ bool TextCore_rasterStyled(const char *utf8, const char *family, float pxHeight,
                            const TextStyleDescriptor *style, uint8_t **outRgba, int *outW, int *outH) {
     (void) style;
     return TextCore_rasterLine(utf8, family, pxHeight, argb, outRgba, outW, outH);
+}
+
+// No native shaper off Apple: per-glyph offsets are unavailable, so the
+// caller keeps its uniform fallback. Fail closed, never partial.
+int32_t TextCore_lineOffsets(const char *utf8, const char *family, float pxHeight,
+                             bool ligatures, float kernPts,
+                             float *outPts, int32_t cap) {
+    (void) utf8;
+    (void) family;
+    (void) pxHeight;
+    (void) ligatures;
+    (void) kernPts;
+    (void) outPts;
+    (void) cap;
+    return -1;
 }
 
 static bool s_testClip = false;

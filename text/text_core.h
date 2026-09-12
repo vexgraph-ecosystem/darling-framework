@@ -49,6 +49,18 @@ bool TextCore_rasterLine(const char *utf8, const char *family, float pxHeight, u
 bool TextCore_rasterStyled(const char *utf8, const char *family, float pxHeight, uint32_t argb,
                            const TextStyleDescriptor *style, uint8_t **outRgba, int *outW, int *outH);
 
+// Per-glyph pen offsets for single-line text, in points: one entry per UTF-8
+// byte plus a trailing total advance (strlen(utf8)+1 entries). Entry i is the
+// CoreText pen x of the glyph covering byte i (continuation bytes share their
+// codepoint's offset). Same font/ligature/tracking inputs as the raster, so
+// offsets match paint exactly; the label hit-test shares this table with the
+// highlight it paints. Cold path only (label raster rebuild). Multiline,
+// empty, bad params, or cap < strlen+1 fail closed with -1 (never partial).
+// The stub always returns -1 and the caller keeps its uniform fallback.
+int32_t TextCore_lineOffsets(const char *utf8, const char *family, float pxHeight,
+                             bool ligatures, float kernPts,
+                             float *outPts, int32_t cap);
+
 // Native clipboard integration
 void TextCore_copyToClipboard(const char *utf8);
 char *TextCore_pasteFromClipboard(void);

@@ -22,6 +22,14 @@
  *   1. Sharp Path : Native CoreText line rasterization into a textured quad.
  *   2. SDF Path   : Multi-pass signed distance field fallback rendering.
  *
+ * Selection coordinates are stated per glyph, not estimated: ensureRaster
+ * asks the same CoreText shaper that paints for one pen offset per UTF-8
+ * byte (glyphX, label space) and the pointer hit-test shares that table
+ * with the baked highlight, so proportional type maps 1:1. Absent table
+ * (multiline, stub platform, raster failure) falls back to uniform.
+ * Mnemonic `&` stripping is index-mapped both ways: the raster paints in
+ * clean coordinates while TextSelect stays in label coordinates.
+ *
  * STRUCT FIELDS (Mirroring darling/label/label.h):
  * ----------------------------------------------------------------------------
  *   Panel base;              // Inherited layout, bounds, and hierarchy state
@@ -36,6 +44,8 @@
  *   int rasterH;             // Pixel height of CoreText raster
  *   float rasterBacking;     // Retina scale factor at rasterization time
  *   bool rasterDirty;        // True if string or font changed and needs re-raster
+ *   float *glyphX;           // Per-byte CoreText pen offsets in points (strlen+1), NULL = uniform fallback
+ *   int32_t glyphN;          // Entry count of glyphX (0 when absent)
  *   bool ownsText;           // True if text was copied and owned by label
  *   bool ownsFontFamily;     // True if fontFamily was copied and owned by label
  *   bool highlightable;      // Enables text selection drag (no caret; labels aren't editable)
@@ -62,7 +72,7 @@
  *
  * Core Functions:
  *   - Label_renderFn(panel, rend, cmd, surfaceW, surfaceH, x, y, w, h) : Draw handler
- *   - Label_charIndexAt(const label, localX)                           : Character offset from point
+ *   - Label_charIndexAt(const label, localX)                           : Byte offset from point (per-glyph table, uniform fallback)
  *   - Label_handlePointer(label, kind, localX, localY, window)         : Pointer event dispatcher
  *   - Label_onPointer(label, ev, window)                               : PointerEvent wrapper
  *   - Label_handleKey(label, ev)                                       : Key event (Cmd+C copy)
@@ -107,6 +117,8 @@
  *   - Label_getRasterSize(const label, outW, outH)
  *   - Label_getRasterBacking(const label)
  *   - Label_isRasterDirty(const label)
+ *   - Label_getGlyphOffsets(const label)
+ *   - Label_getGlyphOffsetCount(const label)
  *   - Label_isHighlightable(const label)
  *   - Label_isMnemonic(const label)
  *   - Label_getMnemonicChar(const label)
@@ -137,6 +149,18 @@ static void markRasterDirty(Label *lbl) {
     (*lbl).rasterDirty = true;
 }
 
+// Drops the stated per-glyph positions. Called on every raster rebuild entry
+// (before repopulating) and on free, so a failed rebuild never leaves a
+// stale table from a previous text behind.
+static void clearGlyphTable(Label *lbl) {
+    if (!lbl)
+        return;
+    if ((*lbl).glyphX)
+        Memory_free((*lbl).glyphX);
+    (*lbl).glyphX = nullptr;
+    (*lbl).glyphN = 0;
+}
+
 static void markDirty(Label *lbl) {
     if (!lbl)
         return;
@@ -150,6 +174,33 @@ int32_t Label_charIndexAt(const Label *label, float localX) {
     size_t len = strlen((*label).text);
     if (len == 0)
         return 0;
+    // Stated positions (per-glyph table): the hit-test shares the exact
+    // CoreText pen offsets the raster paints, so proportional type maps 1:1.
+    // The boundary between glyph i and i+1 sits at their midpoint
+    // (hemisphere); equal neighbors (continuation bytes, stripped markers)
+    // rewind to the codepoint start so a span never opens mid-codepoint.
+    // The raster carries a 1px left pad, folded in here in points.
+    const float *gx = (*label).glyphX;
+    if (gx && (*label).glyphN == (int32_t) len + 1) {
+        float backing = (*label).rasterBacking > 0.0f ? (*label).rasterBacking : 1.0f;
+        float pad = 1.0f / backing;
+        if (localX <= gx[0] + pad)
+            return 0;
+        if (localX >= gx[len] + pad)
+            return (int32_t) len;
+        int32_t lo = 0, hi = (int32_t) len;
+        while (lo < hi) {
+            int32_t m = lo + (hi - lo) / 2;
+            float b = (gx[m] + gx[m + 1]) * 0.5f + pad;
+            if (b <= localX)
+                lo = m + 1;
+            else
+                hi = m;
+        }
+        while (lo > 0 && gx[lo] == gx[lo - 1])
+            lo--;
+        return lo;
+    }
     const Panel *p = &(*label).base;
     const Container *c = &(*p).base;
     float qw = (*c).w;
@@ -163,12 +214,12 @@ int32_t Label_charIndexAt(const Label *label, float localX) {
         return 0;
     if (localX >= qw)
         return (int32_t) len;
-    // Hemisphere rule (uniform case): a pointer on the left half of a glyph
-    // (advance / 2, stable >= split) selects that glyph; the right half selects
-    // the next. For a uniform advance qw/len the boundary sits at the glyph
-    // midpoint, so roundf(ratio * len) is exactly the hemisphere mapping. A
-    // per-glyph Font-advance cache is deferred (;;DRAFT) — until then Label is
-    // uniform-hemisphere only.
+    // Hemisphere rule (uniform fallback only: no stated table because the
+    // text is multiline, the platform stub has no shaper, or the raster
+    // failed). A pointer on the left half of a glyph (advance / 2, stable >=
+    // split) selects that glyph; the right half selects the next. For a
+    // uniform advance qw/len the boundary sits at the glyph midpoint, so
+    // roundf(ratio * len) is exactly the hemisphere mapping.
     float ratio = localX / qw;
     int32_t idx = (int32_t) roundf(ratio * (float) len);
     if (idx < 0)
@@ -295,6 +346,7 @@ static bool ensureRaster(Label *lbl) {
     if (!(*lbl).rasterDirty)
         return (*lbl).rasterTex >= 0;
     (*lbl).rasterDirty = false;
+    clearGlyphTable(lbl);
     if (!(*lbl).text || (*lbl).text[0] == '\0' || (*lbl).fontSize <= 0.0f) {
         (*lbl).rasterTex = -1;
         return false;
@@ -312,17 +364,45 @@ static bool ensureRaster(Label *lbl) {
     int mIndex = -1;
     char mChar = '\0';
 
+    // Label-to-clean index map (mnemonic `&` stripping shifts everything
+    // after the marker). toClean[i] is the clean coordinate of original byte
+    // i; skipMark[i] flags the consumed marker byte itself, which hit-testing
+    // folds onto the previous glyph (zero-width phantom, never addressable).
+    size_t srcLen = strlen((*lbl).text);
+    int32_t *toClean = nullptr;
+    uint8_t *skipMark = nullptr;
     if ((*lbl).mnemonic && (*lbl).text) {
-        size_t srcLen = strlen((*lbl).text);
+        toClean = (int32_t*) Memory_alloc(TYPE_ARRAY, (srcLen + 1) * sizeof(int32_t));
+        skipMark = (uint8_t*) Memory_alloc(TYPE_ARRAY, srcLen + 1);
+        if (!toClean || !skipMark) {
+            if (toClean)
+                Memory_free(toClean);
+            if (skipMark)
+                Memory_free(skipMark);
+            toClean = nullptr;
+            skipMark = nullptr;
+        } else {
+            for (size_t z = 0; z <= srcLen; z++)
+                skipMark[z] = 0;
+        }
+    }
+
+    if ((*lbl).mnemonic && (*lbl).text) {
         size_t dst = 0;
         for (size_t i = 0; i < srcLen && dst + 1 < sizeof(cleanText); i++) {
+            if (toClean)
+                toClean[i] = (int32_t) dst;
             if ((*lbl).text[i] == '&') {
                 if (i + 1 < srcLen && (*lbl).text[i + 1] == '&') {
                     cleanText[dst++] = '&';
+                    if (toClean)
+                        toClean[i + 1] = (int32_t) dst - 1;
                     i++;
                 } else if (i + 1 < srcLen && mIndex < 0) {
                     mChar = (*lbl).text[i + 1];
                     mIndex = (int) dst;
+                    if (skipMark)
+                        skipMark[i] = 1;
                 } else {
                     cleanText[dst++] = (*lbl).text[i];
                 }
@@ -330,6 +410,8 @@ static bool ensureRaster(Label *lbl) {
                 cleanText[dst++] = (*lbl).text[i];
             }
         }
+        if (toClean)
+            toClean[srcLen] = (int32_t) dst;
         cleanText[dst] = '\0';
         srcText = cleanText;
     }
@@ -343,6 +425,34 @@ static bool ensureRaster(Label *lbl) {
         selStart = selLo;
         selEnd = selHi;
     }
+    // The raster paints stripped text: map the label-space span into clean
+    // coordinates (identity when no mnemonic is parsed).
+    int32_t cleanLen = (int32_t) strlen(srcText);
+    int32_t selStartClean = selStart;
+    int32_t selEndClean = selEnd;
+    if (toClean && selStart >= 0) {
+        int32_t a = selStart;
+        int32_t b = selEnd;
+        if (a < 0)
+            a = 0;
+        if (b < 0)
+            b = 0;
+        if (a > (int32_t) srcLen)
+            a = (int32_t) srcLen;
+        if (b > (int32_t) srcLen)
+            b = (int32_t) srcLen;
+        selStartClean = toClean[a];
+        selEndClean = toClean[b];
+    }
+
+    // Stated positions from the same shaper that paints (single line only,
+    // bounded by the strip buffer). Installed below iff the raster succeeds,
+    // so the table can never disagree with the pixels on screen.
+    float cleanOff[512];
+    int32_t offCount = -1;
+    if (cleanLen + 1 <= 512)
+        offCount = TextCore_lineOffsets(srcText, family, pxH, (*lbl).ligatures,
+                                        (*lbl).spacingWidth, cleanOff, 512);
 
     TextStyleDescriptor style = {
         .ligatures = (*lbl).ligatures,
@@ -351,8 +461,8 @@ static bool ensureRaster(Label *lbl) {
         .underline = (*lbl).underline,
         .underlineColor = (*lbl).underlineColor,
         .mnemonicIndex = mIndex,
-        .selectionStart = selStart,
-        .selectionEnd = selEnd,
+        .selectionStart = selStartClean,
+        .selectionEnd = selEndClean,
         .highlightRadius = (*lbl).highlightRadius,
         .highlightColor = (*lbl).highlightColor,
     };
@@ -360,10 +470,21 @@ static bool ensureRaster(Label *lbl) {
     uint8_t *rgba = nullptr;
     int w = 0;
     int h = 0;
-    if (!TextCore_rasterStyled(srcText, family, pxH, (*lbl).textColor, &style, &rgba, &w, &h))
+    bool painted = TextCore_rasterStyled(srcText, family, pxH, (*lbl).textColor, &style, &rgba, &w, &h);
+    if (!painted) {
+        if (toClean)
+            Memory_free(toClean);
+        if (skipMark)
+            Memory_free(skipMark);
         return false;
-    if (!rgba || w <= 0 || h <= 0)
+    }
+    if (!rgba || w <= 0 || h <= 0) {
+        if (toClean)
+            Memory_free(toClean);
+        if (skipMark)
+            Memory_free(skipMark);
         return false;
+    }
     int32_t tex = -1;
     if ((*lbl).rasterTex >= 0) {
         tex = Texture_replaceRaw((*lbl).rasterTex, rgba, (uint32_t) w, (uint32_t) h);
@@ -371,12 +492,46 @@ static bool ensureRaster(Label *lbl) {
         tex = Texture_loadRaw(rgba, (uint32_t) w, (uint32_t) h);
     }
     free(rgba);
-    if (tex < 0)
+    if (tex < 0) {
+        if (toClean)
+            Memory_free(toClean);
+        if (skipMark)
+            Memory_free(skipMark);
         return false;
+    }
     (*lbl).rasterTex = tex;
     (*lbl).rasterW = w;
     (*lbl).rasterH = h;
     (*lbl).rasterBacking = backing;
+    // Install the stated positions (label space): clean offsets mapped back
+    // through the strip map; consumed markers fold onto the previous glyph.
+    // Installed only here — beside the pixels they describe — so the table
+    // can never disagree with what is on screen.
+    if (offCount == cleanLen + 1) {
+        float *gx = (float*) Memory_alloc(TYPE_ARRAY, (srcLen + 1) * sizeof(float));
+        if (gx) {
+            for (size_t i = 0; i <= srcLen; i++) {
+                int32_t c = toClean ? toClean[i] : (int32_t) i;
+                if (c < 0)
+                    c = 0;
+                if (c > cleanLen)
+                    c = cleanLen;
+                gx[i] = cleanOff[c];
+            }
+            if (skipMark) {
+                for (size_t i = 0; i <= srcLen; i++) {
+                    if (skipMark[i] && i > 0)
+                        gx[i] = gx[i - 1];
+                }
+            }
+            (*lbl).glyphX = gx;
+            (*lbl).glyphN = (int32_t)(srcLen + 1);
+        }
+    }
+    if (toClean)
+        Memory_free(toClean);
+    if (skipMark)
+        Memory_free(skipMark);
     return true;
 }
 
@@ -558,6 +713,8 @@ Label *Label_0(void) {
     (*lbl).rasterH = 0;
     (*lbl).rasterBacking = 1.0f;
     (*lbl).rasterDirty = true;
+    (*lbl).glyphX = nullptr;
+    (*lbl).glyphN = 0;
     (*lbl).highlightable = false;
     (*lbl).mnemonic = false;
     (*lbl).mnemonicChar = '\0';
@@ -884,6 +1041,7 @@ void Label_free(Label *label) {
         Texture_free((*label).rasterTex);
         (*label).rasterTex = -1;
     }
+    clearGlyphTable(label);
     Memory_free(label);
 }
 
@@ -930,6 +1088,14 @@ float Label_getRasterBacking(const Label *label) {
 
 bool Label_isRasterDirty(const Label *label) {
     return label ? (*label).rasterDirty : false;
+}
+
+const float *Label_getGlyphOffsets(const Label *label) {
+    return label ? (*label).glyphX : nullptr;
+}
+
+int32_t Label_getGlyphOffsetCount(const Label *label) {
+    return label ? (*label).glyphN : 0;
 }
 
 bool Label_isHighlightable(const Label *label) {
