@@ -27,6 +27,11 @@ void Darling_shutdownCompositor(void);
 // Pre-frame callback invoked before swapchain acquisition (runs offscreen IOSurface passes).
 void Darling_preFrame(Window *window, int drawW, int drawH, void *userdata);
 
+// Batch-drain query: true when the IOSurface re-record batch has no flight
+// pending. Present-on-demand loops gate their tree-dirty clear on this so a
+// timed-out batch's unexported work is retried next tick, never dropped.
+bool Darling_compositorSettled(void);
+
 // Frame rendering callback invoked by Vk_clearPresent inside active swapchain pass.
 void Darling_renderFrame(void *cmdBuffer, int drawW, int drawH, void *userdata);
 

@@ -43,6 +43,7 @@
  * Core Functions:
  *   - Darling_initCompositor(window)
  *   - Darling_renderFrame(cmdBuffer, drawW, drawH, userdata)
+ *   - Darling_compositorSettled(void)          : true when the re-record batch is drained
  * ============================================================================
  */
 
@@ -90,6 +91,16 @@ static int s_iosurfaceChildCount = 0;
 static VkCommandPool s_compositorCmdPool = VK_NULL_HANDLE;
 static VkCommandBuffer s_compositorCmdBuffer = VK_NULL_HANDLE;
 static VkFence s_batchFence = VK_NULL_HANDLE;
+
+// Batch-flight guard: the re-record command buffer must never be reset or
+// resubmitted while a previous batch submit is still pending (reset-while-
+// pending and double-pending submits are illegal and can kill the device).
+// A timed-out batch stays pending; the next tick polls (non-blocking) and
+// skips re-recording until the flight drains, then records fresh. Dirty
+// flags stay set throughout, so deferred work is retried, never dropped.
+static bool s_batchPending = false;
+
+static void refenceBatchSignaled(VkDevice dev);
 
 static IOSurfaceChild *recordChildToIOSurface(VkCommandBuffer cb, Panel *child, void *surface, int w, int h) {
     if (!child || !surface || w <= 0 || h <= 0) return nullptr;
@@ -233,6 +244,17 @@ static void renderNativeContent(Window *window, Panel *contentPanel, int winW, i
     VkCommandBuffer cb = s_compositorCmdBuffer;
     if (cb == VK_NULL_HANDLE) return;
 
+    // Flight guard: never reset the batch command buffer while the previous
+    // submit is still pending. Poll non-blocking (Rule 27: no unbounded
+    // wait); a still-flying batch skips this tick and retries next — the
+    // dirty flags stay set, so no work is lost, only deferred.
+    if (s_batchPending) {
+        COMPOSITOR_LOAD_DEVICE(GetFenceStatus)
+        if (!GetFenceStatus_fn || GetFenceStatus_fn(dev, s_batchFence) != VK_SUCCESS)
+            return;
+        s_batchPending = false;
+    }
+
     COMPOSITOR_LOAD_DEVICE(ResetCommandBuffer);
     COMPOSITOR_LOAD_DEVICE(BeginCommandBuffer);
     COMPOSITOR_LOAD_DEVICE(EndCommandBuffer);
@@ -317,12 +339,33 @@ static void renderNativeContent(Window *window, Panel *contentPanel, int winW, i
         };
 
         ResetFences_fn(dev, 1, &s_batchFence);
-        QueueSubmit_fn(queue, 1, &si, s_batchFence);
+        VkResult sr = QueueSubmit_fn(queue, 1, &si, s_batchFence);
+        if (sr != VK_SUCCESS) {
+            // Failed submits queue nothing: the just-reset fence would never
+            // signal again, wedging every future batch wait. Recreate it
+            // signaled and retry next tick (dirty flags stay set). Throttled:
+            // one line per 2s, not one per tick.
+            static uint64_t batchErrNs = 0;
+            uint64_t errNow = NanoTime_now();
+            if (batchErrNs == 0 || errNow - batchErrNs >= 2000000000ULL) {
+                batchErrNs = errNow;
+                fprintf(stderr, "[compositor] batch submit failed (%d)\n", (int) sr);
+                fflush(stderr);
+            }
+            refenceBatchSignaled(dev);
+            s_batchPending = false;
+            return;
+        }
+        s_batchPending = true;
         // Bounded wait: a dead drawable (fullscreen close) may never signal.
         // Hanging here parks the worker and freezes teardown with a ghost
-        // window — drop the batch and keep old content instead.
+        // window — drop the batch and keep old content instead. The batch
+        // stays pending: the next tick polls and retries (never resets a
+        // flying command buffer), so the timeout defers work instead of
+        // dropping it.
         if (WaitForFences_fn(dev, 1, &s_batchFence, VK_TRUE, 100000000ULL) != VK_SUCCESS)
             return;
+        s_batchPending = false;
 
         for (int i = 0; i < recordedCount; i++) {
             VkIOSurface_export((*recorded[i]).surf);
@@ -330,6 +373,33 @@ static void renderNativeContent(Window *window, Panel *contentPanel, int winW, i
             Panel_clearTreeDirty((*recorded[i]).panel);
         }
     }
+}
+
+// Rebuild the batch fence in the SIGNALED state after a failed submit left
+// it reset with no pending work (an unsignaled fence with nothing queued
+// never signals again). Create-first: on creation failure the old fence is
+// kept (wedged, but no new crash).
+static void refenceBatchSignaled(VkDevice dev) {
+    COMPOSITOR_LOAD_DEVICE(DestroyFence)
+    COMPOSITOR_LOAD_DEVICE(CreateFence)
+    if (!DestroyFence_fn || !CreateFence_fn)
+        return;
+    VkFenceCreateInfo fci = { .sType = VK_STRUCTURE_TYPE_FENCE_CREATE_INFO };
+    fci.flags = VK_FENCE_CREATE_SIGNALED_BIT;
+    VkFence fresh = VK_NULL_HANDLE;
+    if (CreateFence_fn(dev, &fci, nullptr, &fresh) != VK_SUCCESS)
+        return;
+    VkFence old = s_batchFence;
+    s_batchFence = fresh;
+    if (old != VK_NULL_HANDLE)
+        DestroyFence_fn(dev, old, nullptr);
+}
+
+// Drain query for present-on-demand loops: true when the re-record batch has
+// no flight pending. Loops gate their tree-dirty clear on this so a timed-out
+// batch's unexported work is retried next tick, never dropped by a clear.
+bool Darling_compositorSettled(void) {
+    return !s_batchPending;
 }
 
 // // CORE FUNCTIONS
