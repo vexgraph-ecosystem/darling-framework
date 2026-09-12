@@ -10,6 +10,7 @@
 #include "vulkan/vk.h"
 #include "vulkan/vk_iosurface.h"
 #include "vulkan/vk_pane.h"
+#include "vulkan/vk_guard.h"
 #include "vulkan/vk_scene.h"
 #include "vulkan/vk_view.h"
 #include "window/window.h"
@@ -44,6 +45,7 @@
  *   - Darling_initCompositor(window)
  *   - Darling_renderFrame(cmdBuffer, drawW, drawH, userdata)
  *   - Darling_compositorSettled(void)          : true when the re-record batch is drained
+ *     (Rule 39: batch submit carries the VkGuard_check seam guard)
  * ============================================================================
  */
 
@@ -327,6 +329,10 @@ static void renderNativeContent(Window *window, Panel *contentPanel, int winW, i
     EndCommandBuffer_fn(cb);
 
     if (recordedCount > 0) {
+        // Rule 39 seam guard: the batch submits to the shared queue; a dead
+        // or nulled device must never receive it. Debug net (NDEBUG-stripped).
+        if (!VkGuard_check("compositor batch", Vk_getDevice(), Vk_getQueue(), Vk_isDeviceLost()))
+            return;
         if (s_batchFence == VK_NULL_HANDLE) {
             VkFenceCreateInfo fi = { .sType = VK_STRUCTURE_TYPE_FENCE_CREATE_INFO };
             CreateFence_fn(dev, &fi, nullptr, &s_batchFence);
