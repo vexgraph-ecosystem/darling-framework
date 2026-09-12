@@ -32,6 +32,17 @@ void Darling_preFrame(Window *window, int drawW, int drawH, void *userdata);
 // timed-out batch's unexported work is retried next tick, never dropped.
 bool Darling_compositorSettled(void);
 
+// Resize gate: true when the batch ring is idle. Resize-class work (a
+// Texture_replaceRaw that changes dimensions, an IOSurface rewrap) runs
+// only when idle; otherwise the caller defers to a same-size update or
+// skips the tick. Headless-safe: true with no flight.
+bool Darling_compositorIdleForResize(void);
+
+// Batch-ring introspection (Rule 24): live in-flight slot count and the
+// fixed COMPOSITOR_BATCH_SLOTS capacity (3). Headless-safe: 0 and 3.
+int32_t Darling_compositorBatchDepth(void);
+int32_t Darling_compositorBatchCapacity(void);
+
 // Frame rendering callback invoked by Vk_clearPresent inside active swapchain pass.
 void Darling_renderFrame(void *cmdBuffer, int drawW, int drawH, void *userdata);
 

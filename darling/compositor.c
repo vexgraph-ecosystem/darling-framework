@@ -39,12 +39,27 @@
  *     bool valid;          // True once the entry holds a current render
  *   }
  *
+ * SLOT RECORD (batch flight row — behaviorless, owned by the batch ring):
+ * ----------------------------------------------------------------------------
+ *   VkCommandBuffer s_batchCb[i];    // ring-owned re-record buffer
+ *   VkFence s_batchFence[i];         // per-slot submit fence (null = unarmed)
+ *   bool s_batchSlotBusy[i];         // true between submit and drain
+ * Ring: COMPOSITOR_BATCH_SLOTS 3; s_batchCursor rotates claims. A claim
+ * polls its fence non-blocking; no free slot => skip-and-retry next tick
+ * (dirty flags stay set, work is deferred never dropped). Shutdown drains
+ * each live fence with a bounded 100ms wait (Rule 27) before destroy.
+ *
  * FUNCTION REGISTRY:
  * ----------------------------------------------------------------------------
  * Core Functions:
  *   - Darling_initCompositor(window)
  *   - Darling_renderFrame(cmdBuffer, drawW, drawH, userdata)
- *   - Darling_compositorSettled(void)          : true when the re-record batch is drained
+ *   - Darling_compositorSettled(void)          : true when no batch slot is flying
+ *   - Darling_compositorIdleForResize(void)    : settled alias for pane/
+ *     texture resize callers — resize-class work (replaceRaw-resize) runs
+ *     only when idle, else defers to a same-size update or skips the tick
+ *   - Darling_compositorBatchDepth(void)       : live in-flight slot count
+ *   - Darling_compositorBatchCapacity(void)    : COMPOSITOR_BATCH_SLOTS (3)
  *     (Rule 39: batch submit carries the VkGuard_check seam guard)
  * ============================================================================
  */
@@ -88,21 +103,66 @@ typedef struct IOSurfaceChild {
 } IOSurfaceChild;
 
 #define IOSURFACE_CHILD_MAX 256
+#define COMPOSITOR_BATCH_SLOTS 3
+#define COMPOSITOR_FENCE_WAIT_NS 100000000ULL
 static IOSurfaceChild s_iosurfaceChildren[IOSURFACE_CHILD_MAX] = {0};
 static int s_iosurfaceChildCount = 0;
 static VkCommandPool s_compositorCmdPool = VK_NULL_HANDLE;
-static VkCommandBuffer s_compositorCmdBuffer = VK_NULL_HANDLE;
-static VkFence s_batchFence = VK_NULL_HANDLE;
+static VkCommandBuffer s_batchCb[COMPOSITOR_BATCH_SLOTS] = {VK_NULL_HANDLE, VK_NULL_HANDLE, VK_NULL_HANDLE};
+static VkFence s_batchFence[COMPOSITOR_BATCH_SLOTS] = {VK_NULL_HANDLE, VK_NULL_HANDLE, VK_NULL_HANDLE};
+static bool s_batchSlotBusy[COMPOSITOR_BATCH_SLOTS] = {false, false, false};
+static int s_batchCursor = 0;
 
-// Batch-flight guard: the re-record command buffer must never be reset or
-// resubmitted while a previous batch submit is still pending (reset-while-
-// pending and double-pending submits are illegal and can kill the device).
-// A timed-out batch stays pending; the next tick polls (non-blocking) and
-// skips re-recording until the flight drains, then records fresh. Dirty
-// flags stay set throughout, so deferred work is retried, never dropped.
+// Batch-flight guard: a re-record command buffer must never be reset or
+// resubmitted while its own submit is still pending (reset-while-pending
+// and double-pending submits are illegal and can kill the device). The ring
+// claims the next non-flying slot via non-blocking poll; when every slot
+// flies the tick skips re-recording and retries next — dirty flags stay set
+// throughout, so deferred work is retried, never dropped. s_batchPending
+// mirrors "any slot busy" for the settled query below.
 static bool s_batchPending = false;
 
-static void refenceBatchSignaled(VkDevice dev);
+static void refenceSlotSignaled(VkDevice dev, int slot);
+static int claimBatchSlot(VkDevice dev);
+static void refreshBatchPending(void);
+
+// Mirror "any slot busy" into s_batchPending for the settled query.
+static void refreshBatchPending(void) {
+    bool any = false;
+    for (int i = 0; i < COMPOSITOR_BATCH_SLOTS; i++) {
+        if (s_batchSlotBusy[i]) {
+            any = true;
+            break;
+        }
+    }
+    s_batchPending = any;
+}
+
+// Claim the next non-flying batch slot (non-blocking poll, Rule 27).
+// Returns the slot index, or -1 when every slot still flies — the tick
+// skips re-recording and retries next (dirty stays set, never dropped).
+static int claimBatchSlot(VkDevice dev) {
+    COMPOSITOR_LOAD_DEVICE(GetFenceStatus)
+    for (int n = 0; n < COMPOSITOR_BATCH_SLOTS; n++) {
+        int slot = (s_batchCursor + n) % COMPOSITOR_BATCH_SLOTS;
+        if (s_batchCb[slot] == VK_NULL_HANDLE)
+            continue;
+        if (s_batchSlotBusy[slot]) {
+            if (s_batchFence[slot] == VK_NULL_HANDLE) {
+                s_batchSlotBusy[slot] = false;
+            } else {
+                if (!GetFenceStatus_fn)
+                    continue;
+                if (GetFenceStatus_fn(dev, s_batchFence[slot]) != VK_SUCCESS)
+                    continue;
+                s_batchSlotBusy[slot] = false;
+            }
+        }
+        s_batchCursor = (slot + 1) % COMPOSITOR_BATCH_SLOTS;
+        return slot;
+    }
+    return -1;
+}
 
 static IOSurfaceChild *recordChildToIOSurface(VkCommandBuffer cb, Panel *child, void *surface, int w, int h) {
     if (!child || !surface || w <= 0 || h <= 0) return nullptr;
@@ -147,11 +207,19 @@ static IOSurfaceChild *recordChildToIOSurface(VkCommandBuffer cb, Panel *child, 
 
     if ((*ioChild).surf && (VkIOSurface_width((*ioChild).surf) != (uint32_t)canvasW ||
                             VkIOSurface_height((*ioChild).surf) != (uint32_t)canvasH)) {
-        if ((*ioChild).fb) DestroyFramebuffer_fn(dev, (*ioChild).fb, nullptr);
-        VkIOSurface_free((*ioChild).surf);
-        (*ioChild).surf = nullptr;
-        (*ioChild).fb = VK_NULL_HANDLE;
-        (*ioChild).valid = false;
+        // Resize-class rewrap: a flying batch slot may still reference this
+        // fb. When the ring is unsettled the rewrap DEFERS — record at the
+        // old size this tick and retry next (dirty stays set, never dropped).
+        if (s_batchPending) {
+            canvasW = (int) VkIOSurface_width((*ioChild).surf);
+            canvasH = (int) VkIOSurface_height((*ioChild).surf);
+        } else {
+            if ((*ioChild).fb) DestroyFramebuffer_fn(dev, (*ioChild).fb, nullptr);
+            VkIOSurface_free((*ioChild).surf);
+            (*ioChild).surf = nullptr;
+            (*ioChild).fb = VK_NULL_HANDLE;
+            (*ioChild).valid = false;
+        }
     }
 
     if (!(*ioChild).surf) {
@@ -243,19 +311,16 @@ static void renderNativeContent(Window *window, Panel *contentPanel, int winW, i
 
     VkDevice dev = Vk_getDevice();
     VkQueue queue = Vk_getQueue();
-    VkCommandBuffer cb = s_compositorCmdBuffer;
-    if (cb == VK_NULL_HANDLE) return;
 
-    // Flight guard: never reset the batch command buffer while the previous
-    // submit is still pending. Poll non-blocking (Rule 27: no unbounded
-    // wait); a still-flying batch skips this tick and retries next — the
-    // dirty flags stay set, so no work is lost, only deferred.
-    if (s_batchPending) {
-        COMPOSITOR_LOAD_DEVICE(GetFenceStatus)
-        if (!GetFenceStatus_fn || GetFenceStatus_fn(dev, s_batchFence) != VK_SUCCESS)
-            return;
-        s_batchPending = false;
+    // Ring claim: the next non-flying slot, or -1 when every slot flies —
+    // skip-and-retry next tick (dirty stays set). Never reset a flying CB.
+    int slot = claimBatchSlot(dev);
+    if (slot < 0) {
+        refreshBatchPending();
+        return;
     }
+    refreshBatchPending();
+    VkCommandBuffer cb = s_batchCb[slot];
 
     COMPOSITOR_LOAD_DEVICE(ResetCommandBuffer);
     COMPOSITOR_LOAD_DEVICE(BeginCommandBuffer);
@@ -272,7 +337,20 @@ static void renderNativeContent(Window *window, Panel *contentPanel, int winW, i
     IOSurfaceChild *recorded[IOSURFACE_CHILD_MAX];
     int recordedCount = 0;
 
+    // TEMP DIAGNOSIS: VEX_EMPTY_BATCH=1 / VEX_HALF_BATCH=1 slice the recorded
+    // children to bisect the faulting draw content (to be removed).
+    static int s_emptyBatch = -1;
+    static int s_halfBatch = -1;
+    if (s_emptyBatch < 0)
+        s_emptyBatch = getenv("VEX_EMPTY_BATCH") != nullptr;
+    if (s_halfBatch < 0)
+        s_halfBatch = getenv("VEX_HALF_BATCH") != nullptr;
+
     for (size_t i = 0; i < childCount; i++) {
+        if (s_emptyBatch)
+            break;
+        if (s_halfBatch && i >= childCount / 2)
+            break;
         Panel *child = Panel_getChild(contentPanel, i);
         if (!child || child == scenePanel) continue;
 
@@ -328,14 +406,25 @@ static void renderNativeContent(Window *window, Panel *contentPanel, int winW, i
 
     EndCommandBuffer_fn(cb);
 
+    // TEMP DIAGNOSIS: VEX_NO_BATCH=1 skips the batch submit (env knob for
+    // bisecting the page-fault submit; to be removed).
+    {
+        static int s_noBatch = -1;
+        if (s_noBatch < 0)
+            s_noBatch = getenv("VEX_NO_BATCH") != nullptr;
+        if (s_noBatch)
+            return;
+    }
+
     if (recordedCount > 0) {
         // Rule 39 seam guard: the batch submits to the shared queue; a dead
         // or nulled device must never receive it. Debug net (NDEBUG-stripped).
         if (!VkGuard_check("compositor batch", Vk_getDevice(), Vk_getQueue(), Vk_isDeviceLost()))
             return;
-        if (s_batchFence == VK_NULL_HANDLE) {
+        if (s_batchFence[slot] == VK_NULL_HANDLE) {
             VkFenceCreateInfo fi = { .sType = VK_STRUCTURE_TYPE_FENCE_CREATE_INFO };
-            CreateFence_fn(dev, &fi, nullptr, &s_batchFence);
+            if (CreateFence_fn(dev, &fi, nullptr, &s_batchFence[slot]) != VK_SUCCESS)
+                return;
         }
 
         VkSubmitInfo si = {
@@ -344,8 +433,8 @@ static void renderNativeContent(Window *window, Panel *contentPanel, int winW, i
             .pCommandBuffers = &cb,
         };
 
-        ResetFences_fn(dev, 1, &s_batchFence);
-        VkResult sr = QueueSubmit_fn(queue, 1, &si, s_batchFence);
+        ResetFences_fn(dev, 1, &s_batchFence[slot]);
+        VkResult sr = QueueSubmit_fn(queue, 1, &si, s_batchFence[slot]);
         if (sr != VK_SUCCESS) {
             // Failed submits queue nothing: the just-reset fence would never
             // signal again, wedging every future batch wait. Recreate it
@@ -358,20 +447,26 @@ static void renderNativeContent(Window *window, Panel *contentPanel, int winW, i
                 fprintf(stderr, "[compositor] batch submit failed (%d)\n", (int) sr);
                 fflush(stderr);
             }
-            refenceBatchSignaled(dev);
-            s_batchPending = false;
+            refenceSlotSignaled(dev, slot);
+            s_batchSlotBusy[slot] = false;
+            refreshBatchPending();
             return;
         }
-        s_batchPending = true;
+        s_batchSlotBusy[slot] = true;
+        refreshBatchPending();
         // Bounded wait: a dead drawable (fullscreen close) may never signal.
         // Hanging here parks the worker and freezes teardown with a ghost
-        // window — drop the batch and keep old content instead. The batch
-        // stays pending: the next tick polls and retries (never resets a
+        // window — drop the batch and keep old content instead. The slot
+        // stays busy: the next tick polls and retries (never resets a
         // flying command buffer), so the timeout defers work instead of
         // dropping it.
-        if (WaitForFences_fn(dev, 1, &s_batchFence, VK_TRUE, 100000000ULL) != VK_SUCCESS)
+        if (WaitForFences_fn(dev, 1, &s_batchFence[slot], VK_TRUE, COMPOSITOR_FENCE_WAIT_NS) != VK_SUCCESS) {
+            fprintf(stderr, "[compositor] batch fence wait TIMEOUT at %llu ms\n",
+                    (unsigned long long) (NanoTime_now() / 1000000ULL));
             return;
-        s_batchPending = false;
+        }
+        s_batchSlotBusy[slot] = false;
+        refreshBatchPending();
 
         for (int i = 0; i < recordedCount; i++) {
             VkIOSurface_export((*recorded[i]).surf);
@@ -381,31 +476,56 @@ static void renderNativeContent(Window *window, Panel *contentPanel, int winW, i
     }
 }
 
-// Rebuild the batch fence in the SIGNALED state after a failed submit left
+// Rebuild one slot's fence in the SIGNALED state after a failed submit left
 // it reset with no pending work (an unsignaled fence with nothing queued
 // never signals again). Create-first: on creation failure the old fence is
 // kept (wedged, but no new crash).
-static void refenceBatchSignaled(VkDevice dev) {
+static void refenceSlotSignaled(VkDevice dev, int slot) {
     COMPOSITOR_LOAD_DEVICE(DestroyFence)
     COMPOSITOR_LOAD_DEVICE(CreateFence)
     if (!DestroyFence_fn || !CreateFence_fn)
+        return;
+    if (slot < 0 || slot >= COMPOSITOR_BATCH_SLOTS)
         return;
     VkFenceCreateInfo fci = { .sType = VK_STRUCTURE_TYPE_FENCE_CREATE_INFO };
     fci.flags = VK_FENCE_CREATE_SIGNALED_BIT;
     VkFence fresh = VK_NULL_HANDLE;
     if (CreateFence_fn(dev, &fci, nullptr, &fresh) != VK_SUCCESS)
         return;
-    VkFence old = s_batchFence;
-    s_batchFence = fresh;
+    VkFence old = s_batchFence[slot];
+    s_batchFence[slot] = fresh;
     if (old != VK_NULL_HANDLE)
         DestroyFence_fn(dev, old, nullptr);
 }
 
-// Drain query for present-on-demand loops: true when the re-record batch has
-// no flight pending. Loops gate their tree-dirty clear on this so a timed-out
-// batch's unexported work is retried next tick, never dropped by a clear.
+// Drain query for present-on-demand loops: true when no batch slot flies.
+// Loops gate their tree-dirty clear on this so a timed-out batch's
+// unexported work is retried next tick, never dropped by a clear.
 bool Darling_compositorSettled(void) {
     return !s_batchPending;
+}
+
+// Resize gate for pane/texture callers: resize-class work (a
+// Texture_replaceRaw that changes dimensions, an IOSurface rewrap) runs
+// only when the batch ring is idle; otherwise the caller defers to a
+// same-size update or skips the tick. Headless-safe: true with no flight.
+bool Darling_compositorIdleForResize(void) {
+    return !s_batchPending;
+}
+
+// GETTERS (Rule 24: symmetric, null-safe counters over the batch ring)
+
+int32_t Darling_compositorBatchDepth(void) {
+    int32_t depth = 0;
+    for (int i = 0; i < COMPOSITOR_BATCH_SLOTS; i++) {
+        if (s_batchSlotBusy[i])
+            depth++;
+    }
+    return depth;
+}
+
+int32_t Darling_compositorBatchCapacity(void) {
+    return COMPOSITOR_BATCH_SLOTS;
 }
 
 // // CORE FUNCTIONS
@@ -419,6 +539,13 @@ static void Darling_layerRender(void *cmdBuffer, int w, int h, void *owner) {
     Panel *child = (Panel*) owner;
     if (!child || !cmdBuffer || w <= 0 || h <= 0)
         return;
+
+    // Resize contract (Rule 39): this pane paints into its OWN chain — never
+    // the shared batch CB — so steady rendering proceeds regardless of batch
+    // flight. Resize-class work the handler triggers (a Texture_replaceRaw
+    // that changes dimensions) must consult Darling_compositorIdleForResize
+    // first: when the ring flies it defers to a same-size update or skips
+    // the tick, exactly like the IOSurface drift-defer above.
 
     Panel_RenderFn handler = Panel_getRenderHandler(child);
     if (handler) {
@@ -628,10 +755,12 @@ void Darling_initCompositor(Window *window) {
     uint32_t qf = Vk_getQueueFamily();
     PFN_vkGetDeviceProcAddr gdpa = Vk_getGdpa();
 
-    // Create dedicated command pool and command buffer for offscreen IOSurface rendering
+    // Create dedicated command pool and batch ring (one re-record buffer +
+    // fence per slot) for offscreen IOSurface rendering
     if (s_compositorCmdPool == VK_NULL_HANDLE && dev != VK_NULL_HANDLE && gdpa) {
         PFN_vkCreateCommandPool CreateCommandPool_fn = (PFN_vkCreateCommandPool)gdpa(dev, "vkCreateCommandPool");
         PFN_vkAllocateCommandBuffers AllocateCommandBuffers_fn = (PFN_vkAllocateCommandBuffers)gdpa(dev, "vkAllocateCommandBuffers");
+        PFN_vkCreateFence CreateFence_fn = (PFN_vkCreateFence) gdpa(dev, "vkCreateFence");
 
         VkCommandPoolCreateInfo cpci = {
             .sType = VK_STRUCTURE_TYPE_COMMAND_POOL_CREATE_INFO,
@@ -643,19 +772,35 @@ void Darling_initCompositor(Window *window) {
                 .sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_ALLOCATE_INFO,
                 .commandPool = s_compositorCmdPool,
                 .level = VK_COMMAND_BUFFER_LEVEL_PRIMARY,
-                .commandBufferCount = 1,
+                .commandBufferCount = COMPOSITOR_BATCH_SLOTS,
             };
             if (AllocateCommandBuffers_fn) {
-                AllocateCommandBuffers_fn(dev, &cbai, &s_compositorCmdBuffer);
+                AllocateCommandBuffers_fn(dev, &cbai, s_batchCb);
                 // Rule 39 seam naming: let a device-lost log name the re-record
-                // batch submit instead of the generic "vkQueueSubmit".
+                // batch submit instead of the generic "vkQueueSubmit". Gated on
+                // the extension actually being live (loader resolves the symbol
+                // even on unsupported builds; calling it there segfaults).
                 PFN_vkSetDebugUtilsObjectNameEXT setName_fn = (PFN_vkSetDebugUtilsObjectNameEXT)gdpa(dev, "vkSetDebugUtilsObjectNameEXT");
-                if (setName_fn && s_compositorCmdBuffer != VK_NULL_HANDLE) {
-                    VkDebugUtilsObjectNameInfoEXT info = { .sType = VK_STRUCTURE_TYPE_DEBUG_UTILS_OBJECT_NAME_INFO_EXT };
-                    info.objectType = VK_OBJECT_TYPE_COMMAND_BUFFER;
-                    info.objectHandle = (uint64_t)s_compositorCmdBuffer;
-                    info.pObjectName = "compositor batch";
-                    setName_fn(dev, &info);
+                if (setName_fn && Vk_isDebugUtilsEnabled()) {
+                    char batchName[COMPOSITOR_BATCH_SLOTS][24];
+                    for (int i = 0; i < COMPOSITOR_BATCH_SLOTS; i++) {
+                        if (s_batchCb[i] == VK_NULL_HANDLE)
+                            continue;
+                        snprintf(batchName[i], sizeof(batchName[i]), "compositor batch %d", i);
+                        VkDebugUtilsObjectNameInfoEXT info = { .sType = VK_STRUCTURE_TYPE_DEBUG_UTILS_OBJECT_NAME_INFO_EXT };
+                        info.objectType = VK_OBJECT_TYPE_COMMAND_BUFFER;
+                        info.objectHandle = (uint64_t) s_batchCb[i];
+                        info.pObjectName = batchName[i];
+                        setName_fn(dev, &info);
+                    }
+                }
+            }
+            if (CreateFence_fn) {
+                for (int i = 0; i < COMPOSITOR_BATCH_SLOTS; i++) {
+                    if (s_batchFence[i] != VK_NULL_HANDLE)
+                        continue;
+                    VkFenceCreateInfo fi = { .sType = VK_STRUCTURE_TYPE_FENCE_CREATE_INFO };
+                    CreateFence_fn(dev, &fi, nullptr, &s_batchFence[i]);
                 }
             }
         }
@@ -697,19 +842,31 @@ void Darling_shutdownCompositor(void) {
         }
         s_iosurfaceChildCount = 0;
 
-        if (s_batchFence != VK_NULL_HANDLE) {
-            PFN_vkDestroyFence DestroyFence_fn = (PFN_vkDestroyFence)gdpa(dev, "vkDestroyFence");
-            if (DestroyFence_fn) DestroyFence_fn(dev, s_batchFence, nullptr);
-            s_batchFence = VK_NULL_HANDLE;
+        // Rule 26/27 teardown: drain each live batch fence with a bounded
+        // 100ms wait (a dead drawable never signals — drop, don't hang),
+        // then destroy fences + pool. No UINT64_MAX anywhere on this path.
+        PFN_vkWaitForFences WaitForFences_fn = (PFN_vkWaitForFences) gdpa(dev, "vkWaitForFences");
+        PFN_vkDestroyFence DestroyFence_fn = (PFN_vkDestroyFence)gdpa(dev, "vkDestroyFence");
+        for (int i = 0; i < COMPOSITOR_BATCH_SLOTS; i++) {
+            if (s_batchFence[i] != VK_NULL_HANDLE) {
+                if (WaitForFences_fn)
+                    WaitForFences_fn(dev, 1, &s_batchFence[i], VK_TRUE, COMPOSITOR_FENCE_WAIT_NS);
+                if (DestroyFence_fn) DestroyFence_fn(dev, s_batchFence[i], nullptr);
+                s_batchFence[i] = VK_NULL_HANDLE;
+            }
+            s_batchCb[i] = VK_NULL_HANDLE;
+            s_batchSlotBusy[i] = false;
         }
+        s_batchCursor = 0;
 
         if (s_compositorCmdPool != VK_NULL_HANDLE) {
             PFN_vkDestroyCommandPool DestroyCommandPool_fn = (PFN_vkDestroyCommandPool)gdpa(dev, "vkDestroyCommandPool");
             if (DestroyCommandPool_fn) DestroyCommandPool_fn(dev, s_compositorCmdPool, nullptr);
             s_compositorCmdPool = VK_NULL_HANDLE;
-            s_compositorCmdBuffer = VK_NULL_HANDLE;
         }
     }
+
+    s_batchPending = false;
 
     Texture_shutdown();
     SdfGpu_shutdown();

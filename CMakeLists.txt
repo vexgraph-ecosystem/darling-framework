@@ -81,6 +81,8 @@ add_library(darling STATIC
     darling/field/input.c
     darling/field/textarea.c
     darling/field/inputotp.c
+    darling/field/searchfield.c
+    darling/field/codefield.c
     darling/field/select.c
     darling/field/datepicker.c
     darling/field/colorpicker.c
@@ -176,148 +178,178 @@ endif()
 # Widget gallery + test suite: umbrella probe — target lives in
 # vexgraph/CMakeLists.txt (main/darling_gallery.c).
 
+set(DARLING_TEST_DIR "${CMAKE_CURRENT_SOURCE_DIR}/../../_tests/darling")
+if(NOT EXISTS "${DARLING_TEST_DIR}")
+    set(DARLING_TEST_DIR "${CMAKE_CURRENT_SOURCE_DIR}/tests")
+endif()
+
 # Phase 1 substrate artifact (layout-panels §8): headless rounded-rect diff.
-if(NOT TARGET corner_test)
+if(NOT TARGET corner_test AND EXISTS "${DARLING_TEST_DIR}/corner_test.c")
     add_executable(corner_test
-        render/corner_test.c
+        ${DARLING_TEST_DIR}/corner_test.c
     )
     target_link_libraries(corner_test PRIVATE darling)
 endif()
 
 # Anim artifact (anim §1): headless easing + keyframe player suite.
-if(NOT TARGET anim_test)
+if(NOT TARGET anim_test AND EXISTS "${DARLING_TEST_DIR}/anim_test.c")
     add_executable(anim_test
-        darling/anim/anim_test.c
+        ${DARLING_TEST_DIR}/anim_test.c
     )
     target_link_libraries(anim_test PRIVATE darling)
 endif()
 
 # Label & Cursor artifact: headless typography, styling, mnemonic, and cursor suite.
-if(NOT TARGET label_test)
+if(NOT TARGET label_test AND EXISTS "${DARLING_TEST_DIR}/label_test.c")
     add_executable(label_test
-        darling/label/label_test.c
+        ${DARLING_TEST_DIR}/label_test.c
     )
     target_link_libraries(label_test PRIVATE darling)
 endif()
 
 # RichLabel artifact: headless selection, synthetic-quad hit-test, and fixed-anchor drag suite.
-if(NOT TARGET rich_label_test)
+if(NOT TARGET rich_label_test AND EXISTS "${DARLING_TEST_DIR}/rich_label_test.c")
     add_executable(rich_label_test
-        darling/label/rich_label_test.c
+        ${DARLING_TEST_DIR}/rich_label_test.c
     )
     target_link_libraries(rich_label_test PRIVATE darling)
 endif()
 
 # MarkdownPanel artifact: document selection over stacked rows + dispatch pointer seam.
-if(NOT TARGET markdown_panel_test)
+if(NOT TARGET markdown_panel_test AND EXISTS "${DARLING_TEST_DIR}/markdown_panel_test.c")
     add_executable(markdown_panel_test
-        darling/panel/markdown_panel_test.c
+        ${DARLING_TEST_DIR}/markdown_panel_test.c
     )
     target_link_libraries(markdown_panel_test PRIVATE darling)
 endif()
 
 # TextSelect artifact: shared fixed-anchor selection part state machine suite.
-if(NOT TARGET text_select_test)
+if(NOT TARGET text_select_test AND EXISTS "${DARLING_TEST_DIR}/text_select_test.c")
     add_executable(text_select_test
-        text/text_select_test.c
+        ${DARLING_TEST_DIR}/text_select_test.c
     )
     target_link_libraries(text_select_test PRIVATE darling)
 endif()
 
 # Dispatcher artifact: darling event dispatch routing, focus gate, bridge seam.
-if(NOT TARGET dispatcher_test)
+if(NOT TARGET dispatcher_test AND EXISTS "${DARLING_TEST_DIR}/dispatcher_test.c")
     add_executable(dispatcher_test
-        event/dispatcher_test.c
+        ${DARLING_TEST_DIR}/dispatcher_test.c
     )
     target_link_libraries(dispatcher_test PRIVATE darling)
 endif()
 
 # Button artifact (click §1): headless click, hover, down/up bounds suite.
-if(NOT TARGET button_test)
+if(NOT TARGET button_test AND EXISTS "${DARLING_TEST_DIR}/button_test.c")
     add_executable(button_test
-        darling/button/button_test.c
+        ${DARLING_TEST_DIR}/button_test.c
     )
     target_link_libraries(button_test PRIVATE darling)
 endif()
 
 # Checkbox artifact (click §2): headless toggle, indeterminate, inside/outside bounds suite.
-if(NOT TARGET checkbox_test)
+if(NOT TARGET checkbox_test AND EXISTS "${DARLING_TEST_DIR}/checkbox_test.c")
     add_executable(checkbox_test
-        darling/field/checkbox_test.c
+        ${DARLING_TEST_DIR}/checkbox_test.c
     )
     target_link_libraries(checkbox_test PRIVATE darling)
 endif()
 
 # Switch artifact (click §3): headless toggle, state flip, inside/outside bounds suite.
-if(NOT TARGET switch_test)
+if(NOT TARGET switch_test AND EXISTS "${DARLING_TEST_DIR}/switch_test.c")
     add_executable(switch_test
-        darling/button/switch_test.c
+        ${DARLING_TEST_DIR}/switch_test.c
     )
     target_link_libraries(switch_test PRIVATE darling)
 endif()
 
 # Slider artifact (drag §1): headless drag, step snap, range clamping suite.
-if(NOT TARGET slider_test)
+if(NOT TARGET slider_test AND EXISTS "${DARLING_TEST_DIR}/slider_test.c")
     add_executable(slider_test
-        darling/field/slider_test.c
+        ${DARLING_TEST_DIR}/slider_test.c
     )
     target_link_libraries(slider_test PRIVATE darling)
 endif()
 
 # Knob artifact (drag §2): headless rotary scrub, normalized mapping, callback suite.
-if(NOT TARGET knob_test)
+if(NOT TARGET knob_test AND EXISTS "${DARLING_TEST_DIR}/knob_test.c")
     add_executable(knob_test
-        darling/field/knob_test.c
+        ${DARLING_TEST_DIR}/knob_test.c
     )
     target_link_libraries(knob_test PRIVATE darling)
 endif()
 
 # ScrollBar artifact (drag §3): headless drag, clickAt fraction mapping suite.
-if(NOT TARGET scrollbar_test)
+if(NOT TARGET scrollbar_test AND EXISTS "${DARLING_TEST_DIR}/scrollbar_test.c")
     add_executable(scrollbar_test
-        darling/field/scrollbar_test.c
+        ${DARLING_TEST_DIR}/scrollbar_test.c
     )
     target_link_libraries(scrollbar_test PRIVATE darling)
 endif()
 
 # ExpandableListContainer artifact (tree/hierarchy §1): headless add, expand/collapse, depth, checklist, remove suite.
-if(NOT TARGET expandable_list_container_test)
+if(NOT TARGET expandable_list_container_test AND EXISTS "${DARLING_TEST_DIR}/expandable_list_container_test.c")
     add_executable(expandable_list_container_test
-        darling/panel/expandable_list_container_test.c
+        ${DARLING_TEST_DIR}/expandable_list_container_test.c
     )
     target_link_libraries(expandable_list_container_test PRIVATE darling)
 endif()
 
 # RadioGroup artifact (click §4): headless options, mutual exclusion, pointer click suite.
-if(NOT TARGET radiogroup_test)
+if(NOT TARGET radiogroup_test AND EXISTS "${DARLING_TEST_DIR}/radiogroup_test.c")
     add_executable(radiogroup_test
-        darling/field/radiogroup_test.c
+        ${DARLING_TEST_DIR}/radiogroup_test.c
     )
     target_link_libraries(radiogroup_test PRIVATE darling)
 endif()
 
 # Input artifact (text §1): headless text insertion, deletion, caret motion, key event suite.
-if(NOT TARGET darling_input_test)
+if(NOT TARGET darling_input_test AND EXISTS "${DARLING_TEST_DIR}/input_test.c")
     add_executable(darling_input_test
-        darling/field/input_test.c
+        ${DARLING_TEST_DIR}/input_test.c
     )
     target_link_libraries(darling_input_test PRIVATE darling)
 endif()
 
 # Textarea artifact (text §2): headless multiline buffer, caret, pointer, key event suite.
-if(NOT TARGET textarea_test)
+if(NOT TARGET textarea_test AND EXISTS "${DARLING_TEST_DIR}/textarea_test.c")
     add_executable(textarea_test
-        darling/field/textarea_test.c
+        ${DARLING_TEST_DIR}/textarea_test.c
     )
     target_link_libraries(textarea_test PRIVATE darling)
 endif()
 
+# InputOTP artifact: headless passcode digit entry, auto-advance, and completion suite.
+if(NOT TARGET inputotp_test AND EXISTS "${DARLING_TEST_DIR}/inputotp_test.c")
+    add_executable(inputotp_test
+        ${DARLING_TEST_DIR}/inputotp_test.c
+    )
+    target_link_libraries(inputotp_test PRIVATE darling)
+endif()
+
+# SearchField & CodeField artifact: headless search and code editor suites.
+if(NOT TARGET search_code_test AND EXISTS "${DARLING_TEST_DIR}/search_code_test.c")
+    add_executable(search_code_test
+        ${DARLING_TEST_DIR}/search_code_test.c
+    )
+    target_link_libraries(search_code_test PRIVATE darling)
+endif()
+
 # Panel dirty artifact: headless recursive tree dirtiness and clearing suite.
-if(NOT TARGET panel_dirty_test)
+if(NOT TARGET panel_dirty_test AND EXISTS "${DARLING_TEST_DIR}/panel_dirty_test.c")
     add_executable(panel_dirty_test
-        darling/panel/panel_dirty_test.c
+        ${DARLING_TEST_DIR}/panel_dirty_test.c
     )
     target_link_libraries(panel_dirty_test PRIVATE darling)
+endif()
+
+# Compositor batch-ring contract test: headless settled/idle/depth/capacity
+# defaults + shutdown-with-no-flight. Links darling; needs no GPU.
+if(NOT TARGET compositor_batch_test AND EXISTS "${DARLING_TEST_DIR}/compositor_batch_test.c")
+    add_executable(compositor_batch_test
+        ${DARLING_TEST_DIR}/compositor_batch_test.c
+    )
+    target_link_libraries(compositor_batch_test PRIVATE darling)
 endif()
 
 # Manifest emitter artifact: build-time tool printing the module manifest
