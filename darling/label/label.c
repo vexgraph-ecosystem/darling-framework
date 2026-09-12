@@ -535,7 +535,7 @@ static void Label_renderFn(Panel *panel, void *renderer, void *cmdBuffer, float 
 // ============================================================================
 
 Label *Label_0(void) {
-    Label *lbl = (Label*) Memory_alloc(TYPE_PANEL_SINGLETON, sizeof(Label));
+    Label *lbl = (Label*) Memory_alloc(TYPE_LABEL_SINGLETON, sizeof(Label));
     if (!lbl)
         return NULL;
     Panel *p = Panel_0();

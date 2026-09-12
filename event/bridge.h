@@ -33,5 +33,10 @@ void   Darling_bridgeSetFocused(Panel *p);
 Panel *Darling_bridgeGetFocused(void);
 // Tree root used for pointer delivery (nullptr when detached).
 Panel *Darling_bridgeGetRoot(void);
+// OS window registered for cursor/pointer seams (I-beam caret, etc.); the
+// text handlePointer handlers read it via Darling_bridgeGetWindow. The app
+// registers its native window once at startup.
+void   Darling_bridgeSetWindow(void *window);
+void  *Darling_bridgeGetWindow(void);
 
 #endif

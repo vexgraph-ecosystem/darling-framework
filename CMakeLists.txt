@@ -224,6 +224,14 @@ if(NOT TARGET text_select_test)
     target_link_libraries(text_select_test PRIVATE darling)
 endif()
 
+# Dispatcher artifact: darling event dispatch routing, focus gate, bridge seam.
+if(NOT TARGET dispatcher_test)
+    add_executable(dispatcher_test
+        event/dispatcher_test.c
+    )
+    target_link_libraries(dispatcher_test PRIVATE darling)
+endif()
+
 # Button artifact (click §1): headless click, hover, down/up bounds suite.
 if(NOT TARGET button_test)
     add_executable(button_test

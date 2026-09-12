@@ -55,12 +55,14 @@
  * Setters:
  *   - Darling_bridgeSetFocusedWindow(windowId, p)
  *   - Darling_bridgeSetFocused(p)
+ *   - Darling_bridgeSetWindow(window)   // OS window for cursor seams
  *
  * Getters:
  *   - Darling_bridgeGetFocusedWindow(windowId)
  *   - Darling_bridgeGetRootWindow(windowId)
  *   - Darling_bridgeGetFocused()
  *   - Darling_bridgeGetRoot()
+ *   - Darling_bridgeGetWindow()
  * ============================================================================
  */
 
@@ -81,6 +83,7 @@ static BridgeSlot s_slots[DARLING_MAX_WINDOW_BRIDGES];
 static Panel *s_root = nullptr;
 static Panel *s_focused = nullptr;
 static bool s_attached = false;
+static void *s_window = nullptr;
 static KeyHandler s_keyListener;
 static MouseHandler s_mouseListener;
 
@@ -163,9 +166,19 @@ static void bridgeKeyRepeat(void *self, int keyEvent, uint64_t exactNanos) {
     UIKeyEvent *ev = UIKeyEvent_0();
     if (!ev)
         return;
+    uint32_t mods = 0u;
+    if (keyEvent & KEY_MOD_SHIFT)
+        mods |= 1u;
+    if (keyEvent & KEY_MOD_CONTROL)
+        mods |= 2u;
+    if (keyEvent & KEY_MOD_OPTION)
+        mods |= 4u;
+    if (keyEvent & KEY_MOD_COMMAND)
+        mods |= 8u;
     UIKeyEvent_setTarget(ev, f);
     UIKeyEvent_setKeyCode(ev, keyEvent & KEY_MASK_CODE);
     UIKeyEvent_setCh(ev, -1);
+    UIKeyEvent_setMods(ev, mods);
     UIKeyEvent_setPressed(ev, true);
     UIKeyEvent_setRepeat(ev, true);
     UIKeyEvent_setNanos(ev, exactNanos);
@@ -327,6 +340,13 @@ void Darling_bridgeSetFocused(Panel *p) {
     s_focused = p;
 }
 
+// OS window registered for cursor/pointer work (I-beam caret, etc.). Every
+// handlePointer seam reads it via Darling_bridgeGetWindow for its cursor
+// lifecycle; the gallery registers its native window once at startup.
+void Darling_bridgeSetWindow(void *window) {
+    s_window = window;
+}
+
 // GETTERS
 // ============================================================================
 
@@ -346,6 +366,10 @@ Panel *Darling_bridgeGetRootWindow(uint32_t windowId) {
 
 Panel *Darling_bridgeGetFocused(void) {
     return s_focused;
+}
+
+void *Darling_bridgeGetWindow(void) {
+    return s_window;
 }
 
 Panel *Darling_bridgeGetRoot(void) {

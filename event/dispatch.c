@@ -1,6 +1,7 @@
 #include "event/dispatch.h"
 
 #include "event/action.h"
+#include "event/bridge.h"
 #include "event/focus.h"
 #include "event/gesture.h"
 #include "event/keyevent.h"
@@ -49,8 +50,10 @@
  *      scrubbing survives leaving the bounds.
  *   5. Hover: s_hoveredPanel tracking on MOVE/HOVER/DOWN; a change fires a
  *      PTR_LEAVE to the old panel plus a PTR_ENTER to the new one.
- *   6. Focus: PTR_DOWN on a focusable kind (Input, Textarea) sets
- *      s_focusedPanel; Darling_fireKey forwards to the focused panel only.
+ *   6. Focus: PTR_DOWN on a focusable kind sets s_focusedPanel; a kind is
+ *      focusable when it is Input/Textarea, or a highlightable
+ *      Label/RichLabel/MarkdownPanel (weak isHighlightable getter, absent =
+ *      not focusable). Darling_fireKey forwards to the focused panel only.
  *   7. Consumed short-circuits: an already-consumed event is dropped on
  *      entry, and no further delivery step runs once consumed is set.
  *
@@ -79,7 +82,7 @@
  *
  * Static Helpers:
  *   - dispatchClass(p)                      // Memory_type masked to class
- *   - dispatchIsFocusable(p)                // true for Input/Textarea kinds
+ *   - dispatchIsFocusable(p)                // Input/Textarea or highlightable text kind
  *   - dispatchPick(node, ...)               // reverse-child-order hit-test walk
  *   - dispatchPointerTo(target, kind, lx, ly) // weak handlePointer type dispatch
  *   - dispatchKeyTo(target, ev)             // weak handleKey type dispatch
@@ -99,6 +102,8 @@ typedef struct Knob Knob;
 typedef struct ScrollBar ScrollBar;
 typedef struct Input Input;
 typedef struct Textarea Textarea;
+typedef struct Label Label;
+typedef struct RichLabel RichLabel;
 
 void Button_handlePointer(Button *self, int kind, float localX, float localY) __attribute__((weak));
 void Switch_handlePointer(Switch *self, int kind, float localX, float localY) __attribute__((weak));
@@ -110,8 +115,16 @@ void ScrollBar_handlePointer(ScrollBar *self, int kind, float localX, float loca
 void Input_handlePointer(Input *self, int kind, float localX, float localY) __attribute__((weak));
 void Textarea_handlePointer(Textarea *self, int kind, float localX, float localY) __attribute__((weak));
 void MarkdownPanel_handlePointer(MarkdownPanel *self, int kind, float localX, float localY, void *window) __attribute__((weak));
+void Label_handlePointer(Label *self, int kind, float localX, float localY, void *window) __attribute__((weak));
+void RichLabel_handlePointer(RichLabel *self, int kind, float localX, float localY, void *window) __attribute__((weak));
 void Input_handleKey(Input *self, const UIKeyEvent *ev) __attribute__((weak));
 void Textarea_handleKey(Textarea *self, const UIKeyEvent *ev) __attribute__((weak));
+void MarkdownPanel_handleKey(MarkdownPanel *self, const UIKeyEvent *ev) __attribute__((weak));
+void Label_handleKey(Label *self, const UIKeyEvent *ev) __attribute__((weak));
+void RichLabel_handleKey(RichLabel *self, const UIKeyEvent *ev) __attribute__((weak));
+bool Label_isHighlightable(const Label *self) __attribute__((weak));
+bool RichLabel_isHighlightable(const RichLabel *self) __attribute__((weak));
+bool MarkdownPanel_isHighlightable(const MarkdownPanel *self) __attribute__((weak));
 
 static Panel *s_activePanel = nullptr;
 static float s_activeOX = 0.0f;
@@ -127,11 +140,32 @@ static uint64_t dispatchClass(Panel *p) {
     return Memory_type(p) & MASK_CLASS;
 }
 
+// The bridge caches the current OS window (Darling_bridgeSetWindow) so every
+// text handler receives the same native window for its cursor lifecycle even
+// without the app forwarding it per-event.
 static bool dispatchIsFocusable(Panel *p) {
     uint64_t cls = dispatchClass(p);
     if (cls == ID_INPUT)
         return true;
-    return cls == ID_TEXTAREA;
+    if (cls == ID_TEXTAREA)
+        return true;
+    if (cls == ID_LABEL) {
+        bool (*fn)(const Label *) = Label_isHighlightable;
+        return fn && fn((const Label*) p);
+    }
+    if (cls == ID_RICH_LABEL) {
+        bool (*fn)(const RichLabel *) = RichLabel_isHighlightable;
+        return fn && fn((const RichLabel*) p);
+    }
+    if (cls == ID_MARKDOWN_PANEL) {
+        bool (*fn)(const MarkdownPanel *) = MarkdownPanel_isHighlightable;
+        return fn && fn((const MarkdownPanel*) p);
+    }
+    return false;
+}
+
+static void *dispatchWindow(void) {
+    return Darling_bridgeGetWindow();
 }
 
 static Panel *dispatchPick(Panel *node, float parentX, float parentY, float parentW, float parentH, float sx, float sy, Vec4 *outRect) {
@@ -225,7 +259,19 @@ static void dispatchPointerTo(Panel *target, int kind, float lx, float ly) {
     if (cls == ID_MARKDOWN_PANEL) {
         void (*fn)(MarkdownPanel *, int, float, float, void *) = MarkdownPanel_handlePointer;
         if (fn)
-            fn((MarkdownPanel*) target, kind, lx, ly, nullptr);
+            fn((MarkdownPanel*) target, kind, lx, ly, dispatchWindow());
+        return;
+    }
+    if (cls == ID_LABEL) {
+        void (*fn)(Label *, int, float, float, void *) = Label_handlePointer;
+        if (fn)
+            fn((Label*) target, kind, lx, ly, dispatchWindow());
+        return;
+    }
+    if (cls == ID_RICH_LABEL) {
+        void (*fn)(RichLabel *, int, float, float, void *) = RichLabel_handlePointer;
+        if (fn)
+            fn((RichLabel*) target, kind, lx, ly, dispatchWindow());
         return;
     }
 }
@@ -244,6 +290,24 @@ static void dispatchKeyTo(Panel *target, const UIKeyEvent *ev) {
         void (*fn)(Textarea *, const UIKeyEvent *) = Textarea_handleKey;
         if (fn)
             fn((Textarea*) target, ev);
+        return;
+    }
+    if (cls == ID_MARKDOWN_PANEL) {
+        void (*fn)(MarkdownPanel *, const UIKeyEvent *) = MarkdownPanel_handleKey;
+        if (fn)
+            fn((MarkdownPanel*) target, ev);
+        return;
+    }
+    if (cls == ID_LABEL) {
+        void (*fn)(Label *, const UIKeyEvent *) = Label_handleKey;
+        if (fn)
+            fn((Label*) target, ev);
+        return;
+    }
+    if (cls == ID_RICH_LABEL) {
+        void (*fn)(RichLabel *, const UIKeyEvent *) = RichLabel_handleKey;
+        if (fn)
+            fn((RichLabel*) target, ev);
         return;
     }
 }

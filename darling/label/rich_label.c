@@ -357,7 +357,7 @@ static void RichLabel_renderFn(Panel *panel, void *renderer, void *cmdBuffer, fl
 // ============================================================================
 
 RichLabel *RichLabel_0(void) {
-    RichLabel *rl = (RichLabel*) Memory_alloc(TYPE_PANEL_SINGLETON, sizeof(RichLabel));
+    RichLabel *rl = (RichLabel*) Memory_alloc(TYPE_RICH_LABEL_SINGLETON, sizeof(RichLabel));
     if (!rl) return NULL;
 
     Panel *p = Panel_0();
