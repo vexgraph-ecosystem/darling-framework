@@ -43,6 +43,7 @@ typedef struct Label {
     float spacingHeight;      // line leading delta in points (default 0.0)
     UnderlineStyle underline; // UNDERLINE_NONE, UNDERLINE_BASIC, etc.
     uint32_t underlineColor;  // packed 0xAARRGGBB (0 = inherit textColor)
+    TextAlign textAlign;      // text alignment (TEXT_ALIGN_LEFT, TEXT_ALIGN_CENTER, etc.)
 
     // Highlight & cursor state
     Cursor *cursor;           // active mouse cursor style (I-beam when highlightable)
@@ -86,6 +87,7 @@ void Label_setSelection(Label *label, int32_t start, int32_t end);
 void Label_setHighlightRadius(Label *label, float radius);
 void Label_setHighlightColor(Label *label, uint32_t color);
 void Label_setHighlightColorRGBA(Label *label, uint8_t r, uint8_t g, uint8_t b, uint8_t a);
+void Label_setTextAlign(Label *label, TextAlign align);
 void Label_setHovered(Label *label, bool hovered);
 
 // Interactive pointer & hit-test functions
@@ -125,6 +127,7 @@ float Label_getHighlightRadius(const Label *label);
 uint32_t Label_getHighlightColor(const Label *label);
 void Label_getHighlightColorRGBA(const Label *label, uint8_t *outR, uint8_t *outG, uint8_t *outB, uint8_t *outA);
 bool Label_isHovered(const Label *label);
+TextAlign Label_getTextAlign(const Label *label);
 
 // Selection and clipboard helpers
 char *Label_getSelectedText(const Label *label);

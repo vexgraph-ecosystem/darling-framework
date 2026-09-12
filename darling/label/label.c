@@ -25,10 +25,15 @@
  * Selection coordinates are stated per glyph, not estimated: ensureRaster
  * asks the same CoreText shaper that paints for one pen offset per UTF-8
  * byte (glyphX, label space) and the pointer hit-test shares that table
- * with the baked highlight, so proportional type maps 1:1. Absent table
+ * with the highlight overlay, so proportional type maps 1:1. Absent table
  * (multiline, stub platform, raster failure) falls back to uniform.
  * Mnemonic `&` stripping is index-mapped both ways: the raster paints in
  * clean coordinates while TextSelect stays in label coordinates.
+ * The raster is text-only stable: selection is never baked in. Selection
+ * edits (setSelection, pointer drag) markDirty only; the render handler
+ * paints the live span per frame as one Vk_fillRect over the stable quad,
+ * mapped through glyphX (uniform fallback when absent). No new submit,
+ * no resize, no re-raster on selection change.
  *
  * STRUCT FIELDS (Mirroring darling/label/label.h):
  * ----------------------------------------------------------------------------
@@ -277,7 +282,6 @@ void Label_handlePointer(Label *label, int kind, float localX, float localY, voi
             if (!inside) {
                 if (TextSelect_isActive(&(*label).select)) {
                     TextSelect_cancel(&(*label).select);
-                    markRasterDirty(label);
                     markDirty(label);
                 }
                 return;
@@ -285,19 +289,17 @@ void Label_handlePointer(Label *label, int kind, float localX, float localY, voi
             // Down = fixed anchor + collapsed selection. Drag then moves only the
             // active edge, so dragging left (backward) then right past the anchor
             // selects exactly [anchor, active] — never a rolling union.
+            // Overlay-only: the stable raster is untouched, markDirty repaints.
             int32_t idx = Label_charIndexAt(label, localX);
             TextSelect_begin(&(*label).select, idx);
-            markRasterDirty(label);
             markDirty(label);
         } else if (kind == PTR_DRAG) {
             if (TextSelect_drag(&(*label).select, Label_charIndexAt(label, localX))) {
-                markRasterDirty(label);
                 markDirty(label);
             }
         } else if (kind == PTR_UP) {
             int32_t lo = -1, hi = -1;
             TextSelect_end(&(*label).select, &lo, &hi);
-            markRasterDirty(label);
             markDirty(label);
         }
     }
@@ -418,32 +420,12 @@ static bool ensureRaster(Label *lbl) {
     (*lbl).mnemonicChar = mChar;
     (*lbl).mnemonicIndex = mIndex;
 
-    int32_t selStart = -1;
-    int32_t selEnd = -1;
-    int32_t selLo = -1, selHi = -1;
-    if ((*lbl).highlightable && TextSelect_getSpan(&(*lbl).select, &selLo, &selHi)) {
-        selStart = selLo;
-        selEnd = selHi;
-    }
-    // The raster paints stripped text: map the label-space span into clean
-    // coordinates (identity when no mnemonic is parsed).
+    // Text-only stability: selection is never baked into the raster. The
+    // render handler paints the live span per frame as a Vk_fillRect overlay
+    // mapped through glyphX, so span edits never re-rasterize.
     int32_t cleanLen = (int32_t) strlen(srcText);
-    int32_t selStartClean = selStart;
-    int32_t selEndClean = selEnd;
-    if (toClean && selStart >= 0) {
-        int32_t a = selStart;
-        int32_t b = selEnd;
-        if (a < 0)
-            a = 0;
-        if (b < 0)
-            b = 0;
-        if (a > (int32_t) srcLen)
-            a = (int32_t) srcLen;
-        if (b > (int32_t) srcLen)
-            b = (int32_t) srcLen;
-        selStartClean = toClean[a];
-        selEndClean = toClean[b];
-    }
+    int32_t selStartClean = -1;
+    int32_t selEndClean = -1;
 
     // Stated positions from the same shaper that paints (single line only,
     // bounded by the strip buffer). Installed below iff the raster succeeds,
@@ -454,6 +436,9 @@ static bool ensureRaster(Label *lbl) {
         offCount = TextCore_lineOffsets(srcText, family, pxH, (*lbl).ligatures,
                                         (*lbl).spacingWidth, cleanOff, 512);
 
+    Panel *rasterPanel = &(*lbl).base;
+    Container *rasterBox = &(*rasterPanel).base;
+    float boundsW = (*rasterBox).w;
     TextStyleDescriptor style = {
         .ligatures = (*lbl).ligatures,
         .spacingWidth = (*lbl).spacingWidth,
@@ -465,6 +450,8 @@ static bool ensureRaster(Label *lbl) {
         .selectionEnd = selEndClean,
         .highlightRadius = (*lbl).highlightRadius,
         .highlightColor = (*lbl).highlightColor,
+        .align = (*lbl).textAlign,
+        .boundsWidth = boundsW,
     };
 
     uint8_t *rgba = nullptr;
@@ -510,13 +497,20 @@ static bool ensureRaster(Label *lbl) {
     if (offCount == cleanLen + 1) {
         float *gx = (float*) Memory_alloc(TYPE_ARRAY, (srcLen + 1) * sizeof(float));
         if (gx) {
+            float totalAdvPts = cleanOff[cleanLen];
+            float alignOffsetPts = 0.0f;
+            if ((*lbl).textAlign == TEXT_ALIGN_CENTER && boundsW > totalAdvPts) {
+                alignOffsetPts = (boundsW - totalAdvPts) * 0.5f;
+            } else if ((*lbl).textAlign == TEXT_ALIGN_RIGHT && boundsW > totalAdvPts) {
+                alignOffsetPts = boundsW - totalAdvPts;
+            }
             for (size_t i = 0; i <= srcLen; i++) {
                 int32_t c = toClean ? toClean[i] : (int32_t) i;
                 if (c < 0)
                     c = 0;
                 if (c > cleanLen)
                     c = cleanLen;
-                gx[i] = cleanOff[c];
+                gx[i] = cleanOff[c] + alignOffsetPts;
             }
             if (skipMark) {
                 for (size_t i = 0; i <= srcLen; i++) {
@@ -646,6 +640,63 @@ static void drawSdfFallback(Panel *panel, void *cmdBuffer, float surfaceW, float
     }
 }
 
+// Per-frame selection highlight over the stable text-only raster quad.
+// Reads the live TextSelect span (label coordinates, ordered) and maps each
+// edge through the stated glyphX table (label space, mnemonic-folded, 1px
+// pad in points); an absent table falls back to uniform advance. Paints one
+// Vk_fillRect like RichLabel drawSelectionSpans — no new submit, no resize,
+// no raster work. Hot-minimal: entry guards + early returns, no log/alloc.
+static void drawSelectionOverlay(Label *lbl, void *cmdBuffer, float surfaceW, float surfaceH,
+                                 float qx, float qy, float qh, float op) {
+    if (!lbl)
+        return;
+    if (!(*lbl).highlightable)
+        return;
+    int32_t s0 = -1, s1 = -1;
+    if (!TextSelect_getSpan(&(*lbl).select, &s0, &s1))
+        return;
+    if (s1 <= s0)
+        return;
+    const char *text = (*lbl).text;
+    if (!text)
+        return;
+    int32_t len = (int32_t) strlen(text);
+    if (len <= 0)
+        return;
+    int32_t lo = s0 < 0 ? 0 : s0;
+    int32_t hi = s1 > len ? len : s1;
+    if (hi <= lo)
+        return;
+    uint32_t hl = (*lbl).highlightColor;
+    float ba = ((hl >> 24) & 0xFF) / 255.0f * op;
+    if (ba <= 0.0f)
+        return;
+    float br = ((hl >> 16) & 0xFF) / 255.0f;
+    float bgc = ((hl >> 8) & 0xFF) / 255.0f;
+    float bb = (hl & 0xFF) / 255.0f;
+    float x0 = 0.0f, x1 = 0.0f;
+    const float *gx = (*lbl).glyphX;
+    if (gx && (*lbl).glyphN == len + 1) {
+        float backing = (*lbl).rasterBacking > 0.0f ? (*lbl).rasterBacking : 1.0f;
+        float pad = 1.0f / backing;
+        x0 = gx[lo] + pad;
+        x1 = gx[hi] + pad;
+    } else {
+        float qw = (float) len * ((*lbl).fontSize * 0.5f);
+        if ((*lbl).rasterW > 0) {
+            float backing = (*lbl).rasterBacking > 0.0f ? (*lbl).rasterBacking : 1.0f;
+            qw = (float) (*lbl).rasterW / backing;
+        }
+        if (qw <= 0.0f)
+            return;
+        x0 = qw * (float) lo / (float) len;
+        x1 = qw * (float) hi / (float) len;
+    }
+    if (x1 <= x0)
+        return;
+    Vk_fillRect(cmdBuffer, surfaceW, surfaceH, qx + x0, qy, x1 - x0, qh, br, bgc, bb, ba);
+}
+
 static void Label_renderFn(Panel *panel, void *renderer, void *cmdBuffer, float surfaceW, float surfaceH,
                            float x, float y, float w, float h) {
     Label *lbl = (Label*) panel;
@@ -684,6 +735,7 @@ static void Label_renderFn(Panel *panel, void *renderer, void *cmdBuffer, float 
 
         Vk_drawTexture(cmdBuffer, surfaceW, surfaceH, qx, qy, qw, qh, 1.0f, 1.0f, 1.0f, op,
             (*lbl).rasterTex, PICTURE_MODE_FIT, (float) (*lbl).rasterW, (float) (*lbl).rasterH);
+        drawSelectionOverlay(lbl, cmdBuffer, surfaceW, surfaceH, qx, qy, qh, op);
         return;
     }
     drawSdfFallback(panel, cmdBuffer, surfaceW, surfaceH, x, y, w, h);
@@ -728,6 +780,7 @@ Label *Label_0(void) {
     (*lbl).spacingHeight = 0.0f;
     (*lbl).underline = UNDERLINE_NONE;
     (*lbl).underlineColor = 0;
+    (*lbl).textAlign = TEXT_ALIGN_LEFT;
     (*lbl).cursor = Cursor_getPredefined(CURSOR_DEFAULT);
     (*lbl).select = TextSelect_default();
     (*lbl).highlightRadius = 3.0f;
@@ -891,6 +944,8 @@ void Label_setSize(Label *label, float w, float h) {
     if (!label)
         return;
     Panel_setSize(&(*label).base, w, h);
+    if ((*label).textAlign != TEXT_ALIGN_LEFT)
+        markRasterDirty(label);
 }
 
 void Label_setBackgroundColor(Label *label, uint32_t color) {
@@ -992,7 +1047,6 @@ void Label_setSelection(Label *label, int32_t start, int32_t end) {
         TextSelect_begin(&(*label).select, start);
         TextSelect_drag(&(*label).select, end);
     }
-    markRasterDirty(label);
     markDirty(label);
 }
 
@@ -1019,6 +1073,14 @@ void Label_setHighlightColorRGBA(Label *label, uint8_t r, uint8_t g, uint8_t b, 
         return;
     uint32_t packed = ((uint32_t) a << 24) | ((uint32_t) r << 16) | ((uint32_t) g << 8) | (uint32_t) b;
     Label_setHighlightColor(label, packed);
+}
+
+void Label_setTextAlign(Label *label, TextAlign align) {
+    if (!label || (*label).textAlign == align)
+        return;
+    (*label).textAlign = align;
+    markRasterDirty(label);
+    markDirty(label);
 }
 
 void Label_setHovered(Label *label, bool hovered) {
@@ -1181,6 +1243,10 @@ void Label_getHighlightColorRGBA(const Label *label, uint8_t *outR, uint8_t *out
 
 bool Label_isHovered(const Label *label) {
     return label ? TextSelect_isHovered(&(*label).select) : false;
+}
+
+TextAlign Label_getTextAlign(const Label *label) {
+    return label ? (*label).textAlign : TEXT_ALIGN_LEFT;
 }
 
 char *Label_getSelectedText(const Label *label) {

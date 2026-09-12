@@ -207,6 +207,14 @@ if(NOT TARGET label_test AND EXISTS "${DARLING_TEST_DIR}/label_test.c")
     target_link_libraries(label_test PRIVATE darling)
 endif()
 
+# LabelHighlight artifact: selection-overlay split (text-only stable raster, per-frame highlight) suite.
+if(NOT TARGET label_highlight_test AND EXISTS "${DARLING_TEST_DIR}/label_highlight_test.c")
+    add_executable(label_highlight_test
+        ${DARLING_TEST_DIR}/label_highlight_test.c
+    )
+    target_link_libraries(label_highlight_test PRIVATE darling)
+endif()
+
 # RichLabel artifact: headless selection, synthetic-quad hit-test, and fixed-anchor drag suite.
 if(NOT TARGET rich_label_test AND EXISTS "${DARLING_TEST_DIR}/rich_label_test.c")
     add_executable(rich_label_test
