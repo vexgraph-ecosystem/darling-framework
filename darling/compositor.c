@@ -58,6 +58,12 @@
  *   - Darling_compositorIdleForResize(void)    : settled alias for pane/
  *     texture resize callers — resize-class work (replaceRaw-resize) runs
  *     only when idle, else defers to a same-size update or skips the tick
+ *   - darlingRetireGuard(void) (private)       : texture-retire drain probe
+ *     registered into graphvex (Rule 33 downward seam) — destroys a retired
+ *     texture only when NO bindless-sampling Submit flies: batch settled, the
+ *     board present fence signaled, AND every pane fence signaled. Closes the
+ *     page-fault window where texture.c's 2-frame CPU lag freed an old image
+ *     under a still-flying batch/pane/present CB.
  *   - Darling_compositorBatchDepth(void)       : live in-flight slot count
  *   - Darling_compositorBatchCapacity(void)    : COMPOSITOR_BATCH_SLOTS (3)
  *     (Rule 39: batch submit carries the VkGuard_check seam guard)
@@ -84,6 +90,7 @@ extern bool VkSceneCanvas_initModule(VkInstance instance, PFN_vkGetInstanceProcA
 extern bool VkIOSurface_initModule(VkInstance instance, PFN_vkGetInstanceProcAddr gpa, VkPhysicalDevice phys, VkDevice device);
 extern bool Texture_initModule(void *instance, void *gpa, void *phys, void *device, void *queue, uint32_t queueFamily);
 extern void Texture_shutdown(void);
+extern void Texture_setRetireGuard(bool (*guard)(void));
 extern void VkView_shutdown(void);
 extern void VkSceneCanvas_shutdownModule(void);
 
@@ -505,6 +512,28 @@ bool Darling_compositorSettled(void) {
     return !s_batchPending;
 }
 
+// Retire-guard callback registered into the texture module (Rule 33
+// canonical downward seam — the graphvex leaf never reaches up for sampler
+// flight state; the composer, which owns every bindless-sampling Submit,
+// answers instead). A retired texture is destroyed only when NO sampler CB
+// referencing it is in flight: every compositor batch slot settled, the
+// board present fence signaled, AND every pane submit fence signaled. A
+// false answer only defers destroys (retireDrain retries); it never blocks,
+// allocates, or samples the driver beyond GetFenceStatus polls. This closes
+// the page-fault window where texture.c's 2-frame CPU lag freed an old image
+// while a flying batch/pane/present CB still read it. Trade (Rule 35): while
+// sampler submits saturate, retired rows stay ringed and resize/free
+// rollovers drop-degrade to keep-old-content until a quiescent tick.
+static bool darlingRetireGuard(void) {
+    if (s_batchPending)
+        return false;
+    if (!Vk_presentFlightIdle())
+        return false;
+    if (!VkPane_flightIdle())
+        return false;
+    return true;
+}
+
 // Resize gate for pane/texture callers: resize-class work (a
 // Texture_replaceRaw that changes dimensions, an IOSurface rewrap) runs
 // only when the batch ring is idle; otherwise the caller defers to a
@@ -811,6 +840,14 @@ void Darling_initCompositor(Window *window) {
     VkIOSurface_initModule(inst, gpa, phys, dev);
     Texture_initModule(inst, (void*) gpa, phys, dev, queue, qf);
     SdfGpu_initModule(inst, (void*) gpa, phys, dev, queue, qf);
+
+    // Texture-retire destroy guard: this composer owns the only bindless-
+    // sampling Submits (batch ring + board present frame renderer + panes),
+    // so it certifies when a retired texture's memory is provably
+    // unreferenced. Without it texture.c falls back to a CPU frame lag that
+    // can free an old image under a still-flying batch/pane/present CB and
+    // page-fault the GPU (Rule 39 net).
+    Texture_setRetireGuard(darlingRetireGuard);
 
     Vk_setPreFrameRenderer(Darling_preFrame, window);
     Vk_setFrameRenderer(Darling_renderFrame, window);
