@@ -631,10 +631,14 @@ static void drawSdfFallback(Panel *panel, void *cmdBuffer, float surfaceW, float
                 int32_t texId = Font_pageTextureId((*lbl).font, (size_t)gm.page);
                 if (texId < 0)
                     texId = page0Tex;
-                if (gm.color)
-                    Vk_drawColorGlyph(cmdBuffer, surfaceW, surfaceH, qx, qy, gm.width, gm.height, ca, texId, gm.u0, gm.v0, gm.u1, gm.v1);
-                else
-                    Vk_drawSDFText(cmdBuffer, surfaceW, surfaceH, qx, qy, gm.width, gm.height, cr, cg, cb, ca, texId, 0.0f, (*lbl).smoothness, gm.u0, gm.v0, gm.u1, gm.v1);
+                // Rule 39: a page-less glyph with no page-0 fallback keeps a
+                // negative id; skip the quad rather than sample OOB bindless.
+                if (texId >= 0) {
+                    if (gm.color)
+                        Vk_drawColorGlyph(cmdBuffer, surfaceW, surfaceH, qx, qy, gm.width, gm.height, ca, texId, gm.u0, gm.v0, gm.u1, gm.v1);
+                    else
+                        Vk_drawSDFText(cmdBuffer, surfaceW, surfaceH, qx, qy, gm.width, gm.height, cr, cg, cb, ca, texId, 0.0f, (*lbl).smoothness, gm.u0, gm.v0, gm.u1, gm.v1);
+                }
             }
             cx += gm.advance;
         }
