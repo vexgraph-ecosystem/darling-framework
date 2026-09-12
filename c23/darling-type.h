@@ -46,7 +46,7 @@
 
 // --- DARLING COMPONENTS (fields + inputs + dialogs + content panels) ---
 // One ID per component class; all descend from ID_PANEL (see the parent
-// table in add.c, registered via Type_registerParents).
+// table in c23/darling_parents.h, registered via Type_registerParents).
 // Shell-first: struct + accessors land before behavior.
 #define ID_BUTTON          18u
 #define ID_SWITCH          19u

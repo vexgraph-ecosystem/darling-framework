@@ -320,5 +320,16 @@ if(NOT TARGET panel_dirty_test)
     target_link_libraries(panel_dirty_test PRIVATE darling)
 endif()
 
+# Manifest emitter artifact: build-time tool printing the module manifest
+# JSON (name/version from argv) with fully stated type rows. Links nothing;
+# sizeof/macros/parent table only. Run manually, never in the build graph.
+if(NOT TARGET emit_darling_manifest)
+    add_executable(emit_darling_manifest
+        tools/emit_manifest.c
+    )
+    target_include_directories(emit_darling_manifest PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+    target_compile_options(emit_darling_manifest PRIVATE -Wall -Wextra -Werror)
+endif()
+
 
 
