@@ -1,5 +1,6 @@
 #import <QuartzCore/CALayer.h>
 #import <QuartzCore/CAMetalLayer.h>
+#import <QuartzCore/CATransaction.h>
 #import <Metal/Metal.h>
 #import <IOSurface/IOSurface.h>
 #import <stdatomic.h>
@@ -36,6 +37,7 @@
  *     int maxWidth, maxHeight; // Max IOSurface allocation (never reallocates)
  *     _Atomic bool dirty;  // Repaint-needed flag
  *     bool isMetal;        // CAMetalLayer pane (own VkPane swapchain)
+ *     bool isBoard;        // Full-window board (scene/content), resizes w/ window
  *     int chain;           // VkPane chain index (-1 when not metal)
  *   }
  *
@@ -44,6 +46,7 @@
  * Constructors:
  *   - PanelCocoa_new(panel, width, height)
  *   - PanelCocoa_newMetal(panel, width, height)
+ *   - PanelCocoa_newBoard(panel, width, height)
  *
  * Core Functions:
  *   - PanelCocoa_free(pc)
@@ -54,11 +57,13 @@
  *   - PanelCocoa_markDirty(pc)
  *   - PanelCocoa_fromPanel(panel)
  *   - PanelCocoa_isMetal(pc)
+ *   - PanelCocoa_isBoard(pc)
  *   - PanelCocoa_chain(pc)
  *
  * Setters:
  *   - PanelCocoa_setSize(pc, width, height)
  *   - PanelCocoa_setAnchors(pc, parentAnchor, selfAnchor)
+ *   - PanelCocoa_setLiveResizingAll(live)
  *
  * Getters:
  *   - PanelCocoa_isDirty(pc)
@@ -95,6 +100,7 @@ struct PanelCocoa {
     int maxWidth, maxHeight; // max IOSurface size (fixed allocation)
     _Atomic bool dirty;     // needs repaint
     bool isMetal;           // CAMetalLayer pane of glass (own VkPane chain)
+    bool isBoard;           // full-window board (scene/content), resizes w/ window
     int chain;              // VkPane chain index (-1 when not metal)
 };
 
@@ -364,6 +370,46 @@ void *PanelCocoa_surface(PanelCocoa *pc) { return pc ? (void*) (*pc).surface : n
 
 bool PanelCocoa_isMetal(const PanelCocoa *pc) { return pc ? (*pc).isMetal : false; }
 int PanelCocoa_chain(const PanelCocoa *pc) { return pc ? (*pc).chain : -1; }
+bool PanelCocoa_isBoard(const PanelCocoa *pc) { return pc ? (*pc).isBoard : false; }
+
+// Board backing: a full-window pane with the board flag set. Same layer
+// contract as PanelCocoa_newMetal (TopLeft pin, transaction-synced
+// presents); the flag only changes resize behavior — boards follow the
+// window (VkPane_resize at settle, Resize-gravity stretch mid-drag),
+// fixed panes never move their swapchain.
+PanelCocoa *PanelCocoa_newBoard(void *panel, int width, int height) {
+    PanelCocoa *pc = PanelCocoa_newMetal(panel, width, height);
+    if (pc)
+        (*pc).isBoard = true;
+    return pc;
+}
+
+// Board live-resize flip (thread 0 only — touches CoreAnimation state).
+// Mid-drag boards stretch their frozen drawable (Resize gravity,
+// transaction-decoupled presents, mirroring the legacy board VulkanView);
+// at settle they return to the TopLeft transaction-synced pin. Fixed
+// panes keep TopLeft throughout: their exact-size drawables never need it.
+void PanelCocoa_setLiveResizingAll(bool live) {
+    if (!s_registry)
+        return;
+    [CATransaction begin];
+    [CATransaction setDisableActions:YES];
+    for (size_t i = 0; i < s_registryCount; i++) {
+        PanelCocoa *pc = s_registry[i].pc;
+        if (!pc || !(*pc).isMetal || !(*pc).isBoard || !(*pc).layer)
+            continue;
+        if (![(*pc).layer isKindOfClass:[CAMetalLayer class]])
+            continue;
+        if (live) {
+            (*pc).layer.contentsGravity = kCAGravityResize;
+            [(CAMetalLayer*) (*pc).layer setPresentsWithTransaction:NO];
+        } else {
+            (*pc).layer.contentsGravity = kCAGravityTopLeft;
+            [(CAMetalLayer*) (*pc).layer setPresentsWithTransaction:YES];
+        }
+    }
+    [CATransaction commit];
+}
 
 void PanelCocoa_markDirty(PanelCocoa *pc) {
     if (pc) atomic_store(&(*pc).dirty, true);

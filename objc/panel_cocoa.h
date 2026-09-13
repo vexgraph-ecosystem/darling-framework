@@ -38,9 +38,27 @@ PanelCocoa *PanelCocoa_new(void *panel, int width, int height);
 // the pane's fixed pixel size. Returns nullptr on failure.
 PanelCocoa *PanelCocoa_newMetal(void *panel, int width, int height);
 
+// Attach a full-window board backing: a CAMetalLayer + VkPane chain sized
+// to the window, owned by the scene or content panel itself (the two named
+// boards of the NSWindow -> Metal -> Vulkan-rect-children stack). Unlike a
+// fixed pane, a board resizes with the window (VkPane_resize at settle) and
+// stretches mid-drag (Resize gravity, restored TopLeft at settle).
+// Returns nullptr on failure.
+PanelCocoa *PanelCocoa_newBoard(void *panel, int width, int height);
+
 // True when the backing is a CAMetalLayer pane (Vulkan swapchain host)
 // rather than an IOSurface.
 bool PanelCocoa_isMetal(const PanelCocoa *pc);
+
+// True when the backing is a full-window board (scene/content), not a
+// fixed child pane. Boards resize with the window; panes never do.
+bool PanelCocoa_isBoard(const PanelCocoa *pc);
+
+// Live-resize flip for boards only (thread 0): true stretches board
+// drawables mid-drag (Resize gravity, transaction-decoupled presents),
+// false restores the TopLeft transaction-synced pin at settle. Fixed
+// panes are untouched — their exact-size drawables stay TopLeft throughout.
+void PanelCocoa_setLiveResizingAll(bool live);
 
 // The registered VkPane chain index, or -1 when not a metal pane.
 int PanelCocoa_chain(const PanelCocoa *pc);
