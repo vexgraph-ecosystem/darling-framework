@@ -323,6 +323,25 @@ void Darling_preFrame(Window *window, int drawW, int drawH, void *userdata) {
         bool needsComposite = (winW != s_lastCompW || winH != s_lastCompH
                                || curChildCount != s_lastCompChildren
                                || Panel_isTreeDirty(contentPanel));
+        // Scenes stay dirty: a present scene (or pane) means motion, so the
+        // window composites every tick while one is on screen — layer frames
+        // track layout at idle exactly as they do mid-drag. Present-on-demand:
+        // the window always serves scenes, never freezes them.
+        if (!needsComposite) {
+            extern void *PanelCocoa_fromPanel(void *panel);
+            for (int ci = 0; ci < curChildCount; ci++) {
+                Panel *child = Panel_getChild(contentPanel, ci);
+                if (!child)
+                    continue;
+                uint64_t t = Memory_type(child);
+                bool scene = (t == TYPE_SCENE3D_SINGLETON || t == TYPE_SCENE2D_SINGLETON
+                              || t == TYPE_SCENE_SINGLETON);
+                if (scene || PanelCocoa_fromPanel(child)) {
+                    needsComposite = true;
+                    break;
+                }
+            }
+        }
         Container_setSize(&(*contentPanel).base, (float)winW, (float)winH);
         // No IOSurface transport anymore: children are Vulkan rects — nested
         // scenes own pane chains (attached here), everything else paints
