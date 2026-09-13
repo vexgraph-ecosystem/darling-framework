@@ -2,8 +2,6 @@
 #import <QuartzCore/CAMetalLayer.h>
 #import <QuartzCore/CATransaction.h>
 #import <Metal/Metal.h>
-#import <IOSurface/IOSurface.h>
-#import <stdatomic.h>
 #include <string.h>
 
 #include "panel_cocoa.h"
@@ -12,16 +10,14 @@
 ;;OVERVIEW
 /**
  * ============================================================================
- * CLASS: PanelCocoa (IOSurface-backed panel shim)
- * LEVEL: L4 — Self-Management (OS IOSurface/CALayer panel shim)
+ * CLASS: PanelCocoa (Metal pane shim)
+ * LEVEL: L4 — Self-Management (OS CAMetalLayer panel shim)
  * ============================================================================
- * IOSurface-backed panel compositor: each cocoa-backed panel owns a GPU
- * buffer plus a CALayer target, with the panel subtree painted into the
- * surface and composited by AppKit. Metal panes (PanelCocoa_newMetal) own
- * a CAMetalLayer + VkPane swapchain pinned top-left (contentsGravity
- * TopLeft, anchorPoint (0,0), geometryFlipped YES) presenting with the
- * WindowServer transaction (presentsWithTransaction YES) — stack:
- * NSWindow -> CAMetalLayer -> Vulkan rect children, recursively.
+ * Metal pane compositor: each Metal-backed panel owns a CAMetalLayer plus
+ * a VkPane swapchain, with the panel subtree painted into the chain and
+ * composited by AppKit. Fixed panes (PanelCocoa_newMetal) keep their size;
+ * boards (PanelCocoa_newBoard) track the window — stack: NSWindow ->
+ * CAMetalLayer -> Vulkan rect children, recursively.
  *
  * STRUCT FIELDS (local to this file):
  * ----------------------------------------------------------------------------
@@ -29,13 +25,10 @@
  *     void *panel;         // Panel * key (opaque to the ObjC side)
  *     PanelCocoa *pc;      // Backing value for the key
  *   }
- *   PanelCocoa {           // Opaque IOSurface backing (see panel_cocoa.h)
+ *   PanelCocoa {           // Opaque Metal backing (see panel_cocoa.h)
  *     void *panel;         // Panel * (opaque to ObjC side)
- *     IOSurfaceRef surface; // GPU buffer backing (max-size allocation)
- *     CALayer *layer;      // AppKit composite target
+ *     CALayer *layer;      // AppKit composite target (always CAMetalLayer)
  *     int width, height;   // Current display size shown in the window
- *     int maxWidth, maxHeight; // Max IOSurface allocation (never reallocates)
- *     _Atomic bool dirty;  // Repaint-needed flag
  *     bool isMetal;        // CAMetalLayer pane (own VkPane swapchain)
  *     bool isBoard;        // Full-window board (scene/content), resizes w/ window
  *     int chain;           // VkPane chain index (-1 when not metal)
@@ -44,7 +37,6 @@
  * FUNCTION REGISTRY:
  * ----------------------------------------------------------------------------
  * Constructors:
- *   - PanelCocoa_new(panel, width, height)
  *   - PanelCocoa_newMetal(panel, width, height)
  *   - PanelCocoa_newBoard(panel, width, height)
  *
@@ -53,8 +45,6 @@
  *   - PanelCocoa_layer(pc)
  *   - PanelCocoa_width(pc)
  *   - PanelCocoa_height(pc)
- *   - PanelCocoa_surface(pc)
- *   - PanelCocoa_markDirty(pc)
  *   - PanelCocoa_fromPanel(panel)
  *   - PanelCocoa_isMetal(pc)
  *   - PanelCocoa_isBoard(pc)
@@ -64,9 +54,6 @@
  *   - PanelCocoa_setSize(pc, width, height)
  *   - PanelCocoa_setAnchors(pc, parentAnchor, selfAnchor)
  *   - PanelCocoa_setLiveResizingAll(live)
- *
- * Getters:
- *   - PanelCocoa_isDirty(pc)
  * ============================================================================
  */
 
@@ -86,126 +73,21 @@ static PanelEntry *s_registry = nullptr;
 static size_t s_registryCount = 0;
 static size_t s_registryCapacity = 0;
 
-// objc/panel_cocoa.m — IOSurface-backed panel compositor.
+// objc/panel_cocoa.m — Metal pane compositor.
 //
-// Each cocoa-backed panel owns an IOSurface (GPU buffer) + CALayer (AppKit
-// composite target). The panel subtree is painted into the IOSurface; AppKit
-// composites the layer. No Metal code — just IOSurface + CALayer.
+// Each Metal-backed panel owns a CAMetalLayer + VkPane swapchain (AppKit
+// composite target). The panel subtree paints into the chain via
+// Darling_layerRender; AppKit composites the layer. No IOSurface remains —
+// every panel is a Vulkan rect.
 
 struct PanelCocoa {
     void *panel;            // Panel * (opaque to ObjC side)
-    IOSurfaceRef surface;   // GPU buffer backing (allocated at MAX size, never reallocates)
-    CALayer *layer;         // AppKit composite target
+    CALayer *layer;         // AppKit composite target (always CAMetalLayer)
     int width, height;      // current display size (what's shown in window)
-    int maxWidth, maxHeight; // max IOSurface size (fixed allocation)
-    _Atomic bool dirty;     // needs repaint
     bool isMetal;           // CAMetalLayer pane of glass (own VkPane chain)
     bool isBoard;           // full-window board (scene/content), resizes w/ window
     int chain;              // VkPane chain index (-1 when not metal)
 };
-
-// Pixel format: BGRA8 — safe for both Vulkan import/export and AppKit.
-static const int kBytesPerPixel = 4;
-
-static IOSurfaceRef makeSurface(int width, int height) {
-    if (width <= 0 || height <= 0) return nullptr;
-    CFMutableDictionaryRef props = CFDictionaryCreateMutable(
-        kCFAllocatorDefault, 0,
-        &kCFTypeDictionaryKeyCallBacks,
-        &kCFTypeDictionaryValueCallBacks);
-    if (!props) return nullptr;
-
-    // IOSurface properties
-    int bpr = width * kBytesPerPixel;
-    CFNumberRef w = CFNumberCreate(kCFAllocatorDefault, kCFNumberIntType, &width);
-    CFNumberRef h = CFNumberCreate(kCFAllocatorDefault, kCFNumberIntType, &height);
-    CFNumberRef bprNum = CFNumberCreate(kCFAllocatorDefault, kCFNumberIntType, &bpr);
-    int format = 'BGRA'; // kCVPixelFormatType_32BGRA
-    CFNumberRef fmt = CFNumberCreate(kCFAllocatorDefault, kCFNumberIntType, &format);
-
-    CFDictionarySetValue(props, kIOSurfaceWidth, w);
-    CFDictionarySetValue(props, kIOSurfaceHeight, h);
-    CFDictionarySetValue(props, kIOSurfaceBytesPerRow, bprNum);
-    
-    int bpe = kBytesPerPixel;
-    CFNumberRef bpeNum = CFNumberCreate(kCFAllocatorDefault, kCFNumberIntType, &bpe);
-    CFDictionarySetValue(props, kIOSurfaceBytesPerElement, bpeNum);
-    
-    CFDictionarySetValue(props, kIOSurfacePixelFormat, fmt);
-    // Allocate in VRAM so Vulkan can import without a copy
-    int pool = 1; // kIOSurfaceCacheModeWriteThrough (write-combined-ish)
-    CFNumberRef cache = CFNumberCreate(kCFAllocatorDefault, kCFNumberIntType, &pool);
-    CFDictionarySetValue(props, kIOSurfaceCacheMode, cache);
-
-    IOSurfaceRef surface = IOSurfaceCreate(props);
-
-    CFRelease(w); CFRelease(h); CFRelease(bprNum);
-    CFRelease(fmt); CFRelease(cache); CFRelease(props);
-    return surface;
-}
-
-PanelCocoa *PanelCocoa_new(void *panel, int width, int height) {
-    if (!panel || width <= 0 || height <= 0) return nullptr;
-
-    PanelCocoa *pc = (PanelCocoa*) calloc(1, sizeof(PanelCocoa));
-    if (!pc) return nullptr;
-
-    (*pc).panel = panel;
-    (*pc).width = width;
-    (*pc).height = height;
-    (*pc).maxWidth = width;
-    (*pc).maxHeight = height;
-    atomic_init(&(*pc).dirty, true);
-
-    // Allocate IOSurface at MAX size (fixed, never reallocates)
-    (*pc).surface = makeSurface(width, height);
-    if (!(*pc).surface) {
-        free(pc);
-        return nullptr;
-    }
-
-    (*pc).layer = [[CALayer alloc] init];
-    (*pc).layer.contentsGravity = kCAGravityTopLeft;
-    (*pc).layer.geometryFlipped = YES; // Top-down coordinate space matching Vulkan
-    (*pc).layer.contents = (__bridge id)(*pc).surface;
-    extern float TextCore_backingScale(void);
-    float scale = TextCore_backingScale();
-    if (scale <= 0.0f) scale = 1.0f;
-    (*pc).layer.contentsScale = (CGFloat) scale;
-    (*pc).layer.opaque = NO;
-    (*pc).layer.anchorPoint = CGPointMake(0, 0);
-    (*pc).layer.drawsAsynchronously = NO;
-    (*pc).layer.contentsRect = CGRectMake(0, 0, 1, 1); // show full surface
-
-    // Register in dynamic lookup table
-    size_t slot = SIZE_MAX;
-    for (size_t i = 0; i < s_registryCount; i++) {
-        if (s_registry[i].panel == nullptr) {
-            slot = i;
-            break;
-        }
-    }
-    if (slot == SIZE_MAX) {
-        if (s_registryCount >= s_registryCapacity) {
-            size_t newCap = s_registryCapacity == 0 ? 16 : s_registryCapacity * 2;
-            PanelEntry *newArr = (PanelEntry*) realloc(s_registry, newCap * sizeof(PanelEntry));
-            if (newArr) {
-                s_registry = newArr;
-                memset(s_registry + s_registryCapacity, 0, (newCap - s_registryCapacity) * sizeof(PanelEntry));
-                s_registryCapacity = newCap;
-            }
-        }
-        if (s_registryCount < s_registryCapacity) {
-            slot = s_registryCount++;
-        }
-    }
-    if (slot != SIZE_MAX) {
-        s_registry[slot].panel = panel;
-        s_registry[slot].pc = pc;
-    }
-
-    return pc;
-}
 
 // Register (or reuse) the Panel -> PanelCocoa lookup row.
 static void registerPanelEntry(void *panel, PanelCocoa *pc) {
@@ -245,11 +127,8 @@ PanelCocoa *PanelCocoa_newMetal(void *panel, int width, int height) {
     (*pc).panel = panel;
     (*pc).width = width;
     (*pc).height = height;
-    (*pc).maxWidth = width;
-    (*pc).maxHeight = height;
     (*pc).isMetal = true;
     (*pc).chain = -1;
-    atomic_init(&(*pc).dirty, false);
 
     // The "pane of glass": a CAMetalLayer with its own Vulkan swapchain.
     // LAYER CONTRACT (window stack, bottom to top):
@@ -277,7 +156,7 @@ PanelCocoa *PanelCocoa_newMetal(void *panel, int width, int height) {
     layer.presentsWithTransaction = YES;
     // Rule 12: contentsScale = backingScaleFactor so native physical pixels
     // of the pane's swapchain map 1:1 to logical points. drawableSize is
-    // points * scale (physical pixels), matching the IOSurface path.
+    // points * scale (physical pixels).
     extern float TextCore_backingScale(void);
     float scale = TextCore_backingScale();
     if (scale <= 0.0f) scale = 1.0f;
@@ -321,7 +200,6 @@ void PanelCocoa_free(PanelCocoa *pc) {
         }
     }
     if ((*pc).layer) [(*pc).layer removeFromSuperlayer];
-    if ((*pc).surface) CFRelease((*pc).surface);
     free(pc);
 }
 
@@ -329,35 +207,19 @@ bool PanelCocoa_setSize(PanelCocoa *pc, int width, int height) {
     if (!pc || width <= 0 || height <= 0) return false;
     if (width == (*pc).width && height == (*pc).height) return true;
 
-    if ((*pc).isMetal) {
-        // Pane of glass: the swapchain extent follows the pane's OWN size.
-        // The window-resize path never reaches here with a changed pane size
-        // (anchored panes keep their rect while the window moves), so the
-        // chain rebuilds only on true pane drift.
-        extern bool VkPane_resize(int index, int width, int height);
-        bool ok = VkPane_resize((*pc).chain, width, height);
-        if (ok) {
-            (*pc).width = width;
-            (*pc).height = height;
-        }
-        return ok;
+    if (!(*pc).isMetal)
+        return false;
+    // Pane of glass: the swapchain extent follows the pane's OWN size.
+    // Fixed panes never reach here with a changed size (anchored panes keep
+    // their rect while the window moves); boards rebuild at settle. Either
+    // way the chain rebuilds only on true pane drift.
+    extern bool VkPane_resize(int index, int width, int height);
+    bool ok = VkPane_resize((*pc).chain, width, height);
+    if (ok) {
+        (*pc).width = width;
+        (*pc).height = height;
     }
-
-    // IOSurface path: Update display size (IOSurface stays at max size, never reallocates)
-    (*pc).width = width;
-    (*pc).height = height;
-
-    // Update contentsRect to show only the current-size portion of the max-size IOSurface
-    if ((*pc).maxWidth > 0 && (*pc).maxHeight > 0) {
-        CGFloat rectW = (CGFloat)width / (CGFloat)(*pc).maxWidth;
-        CGFloat rectH = (CGFloat)height / (CGFloat)(*pc).maxHeight;
-        CGFloat rectX = 0.0f;
-        CGFloat rectY = 0.0f;
-        (*pc).layer.contentsRect = CGRectMake(rectX, rectY, rectW, rectH);
-    }
-
-    atomic_store(&(*pc).dirty, true);
-    return true;
+    return ok;
 }
 
 void *PanelCocoa_layer(PanelCocoa *pc) {
@@ -366,8 +228,6 @@ void *PanelCocoa_layer(PanelCocoa *pc) {
 
 int PanelCocoa_width(const PanelCocoa *pc) { return pc ? (*pc).width : 0; }
 int PanelCocoa_height(const PanelCocoa *pc) { return pc ? (*pc).height : 0; }
-void *PanelCocoa_surface(PanelCocoa *pc) { return pc ? (void*) (*pc).surface : nullptr; }
-
 bool PanelCocoa_isMetal(const PanelCocoa *pc) { return pc ? (*pc).isMetal : false; }
 int PanelCocoa_chain(const PanelCocoa *pc) { return pc ? (*pc).chain : -1; }
 bool PanelCocoa_isBoard(const PanelCocoa *pc) { return pc ? (*pc).isBoard : false; }
@@ -411,12 +271,8 @@ void PanelCocoa_setLiveResizingAll(bool live) {
     [CATransaction commit];
 }
 
-void PanelCocoa_markDirty(PanelCocoa *pc) {
-    if (pc) atomic_store(&(*pc).dirty, true);
-}
-
 // Lookup: retrieve the PanelCocoa backing for a Panel. Returns nullptr if the
-// panel has no IOSurface backing. Used by the window bridge.
+// panel has no Metal backing. Used by the window bridge.
 void *PanelCocoa_fromPanel(void *panel) {
     if (!panel || !s_registry) return nullptr;
     for (size_t i = 0; i < s_registryCount; i++) {
@@ -466,7 +322,7 @@ void PanelCocoa_setAnchors(PanelCocoa *pc, int anchor, int pivot) {
     // WindowServer-accelerated anchor — CA lays the layer out inside the
     // window-resize transaction, in lockstep with the window edge. Explicit
     // frames (anti_GetChildLayout) are applied at attach/settle only, never
-    // per drag event (Window_compositeIOSurfaceChildren early-returns while
+    // per drag event (Window_compositePanes early-returns while
     // Window_isLiveResizing).
     CAAutoresizingMask mask = kCALayerMaxXMargin | kCALayerMaxYMargin; // Default: Top-Left (Right & Bottom flexible)
     switch (anchor) {
@@ -487,6 +343,3 @@ void PanelCocoa_setAnchors(PanelCocoa *pc, int anchor, int pivot) {
     (*pc).layer.autoresizingMask = mask;
 }
 
-bool PanelCocoa_isDirty(const PanelCocoa *pc) {
-    return pc ? atomic_load(&(*pc).dirty) : false;
-}
