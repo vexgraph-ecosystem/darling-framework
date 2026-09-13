@@ -31,6 +31,8 @@
 #include "darling/field/input.h"
 #include "darling/field/textarea.h"
 #include "darling/field/inputotp.h"
+#include "darling/field/searchfield.h"
+#include "darling/field/codefield.h"
 #include "darling/field/select.h"
 #include "darling/field/datepicker.h"
 #include "darling/field/colorpicker.h"
@@ -150,6 +152,8 @@ static const EmitRow kRows[] = {
     { "ID_TREE_EVENT", (uint64_t) TYPE_TREE_EVENT_SINGLETON, ID_TREE_EVENT, sizeof(TreeEvent) },
     { "ID_GESTURE_EVENT", (uint64_t) TYPE_GESTURE_EVENT_SINGLETON, ID_GESTURE_EVENT, sizeof(GestureEvent) },
     { "ID_CURSOR", (uint64_t) TYPE_CURSOR_SINGLETON, ID_CURSOR, sizeof(Cursor) },
+    { "ID_SEARCHFIELD", (uint64_t) TYPE_SEARCHFIELD_SINGLETON, ID_SEARCHFIELD, sizeof(SearchField) },
+    { "ID_CODEFIELD", (uint64_t) TYPE_CODEFIELD_SINGLETON, ID_CODEFIELD, sizeof(CodeField) },
 };
 
 _Static_assert(sizeof(kRows) / sizeof(kRows[0]) == DARLING_PARENT_COUNT - 1u,

@@ -4,19 +4,13 @@
 #include <stdint.h>
 #include <stdbool.h>
 #include "font/font.h"
+#include "text/text_core.h"
 
 typedef enum {
     WRAP_NONE,
     WRAP_WORD,
     WRAP_CHAR
 } WrapMode;
-
-typedef enum {
-    ALIGN_LEFT,
-    ALIGN_CENTER,
-    ALIGN_RIGHT,
-    ALIGN_JUSTIFY
-} TextAlign;
 
 typedef enum {
     DECOR_NONE,

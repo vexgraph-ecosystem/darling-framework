@@ -15,6 +15,12 @@ typedef struct RichLabel {
     RichText *textModel;
     WrapMode wrapMode; // Inherited by the layout engine during validation
 
+    // Typography additions
+    TextAlign textAlign;
+    float spacingWidth;
+    float spacingHeight;
+    bool ligatures;
+
     // Highlight & cursor state
     Cursor *cursor;           // active mouse cursor style (I-beam when highlightable)
     bool highlightable;       // enables text selection drag (labels aren't editable)
@@ -28,6 +34,14 @@ void RichLabel_free(RichLabel *label);
 
 void RichLabel_setTextModel(RichLabel *label, RichText *model);
 void RichLabel_setWrapMode(RichLabel *label, WrapMode mode);
+void RichLabel_setTextAlign(RichLabel *label, TextAlign align);
+TextAlign RichLabel_getTextAlign(const RichLabel *label);
+void RichLabel_setSpacingWidth(RichLabel *label, float width);
+float RichLabel_getSpacingWidth(const RichLabel *label);
+void RichLabel_setSpacingHeight(RichLabel *label, float height);
+float RichLabel_getSpacingHeight(const RichLabel *label);
+void RichLabel_setLigatures(RichLabel *label, bool flag);
+bool RichLabel_hasLigatures(const RichLabel *label);
 
 // Selection & interaction
 void RichLabel_setHighlightable(RichLabel *label, bool flag);

@@ -75,6 +75,7 @@ int32_t TextCore_lineOffsets(const char *utf8, const char *family, float pxHeigh
 
 static bool s_testClip = false;
 static char s_testClipBuf[8192];
+static char s_globalClipBuf[65536] = {0};
 
 void TextCore_setTestClipboard(bool enable) {
     s_testClip = enable;
@@ -83,14 +84,15 @@ void TextCore_setTestClipboard(bool enable) {
 }
 
 void TextCore_copyToClipboard(const char *utf8) {
+    if (!utf8)
+        return;
     if (s_testClip) {
-        if (!utf8)
-            return;
         s_testClipBuf[0] = '\0';
         strncat(s_testClipBuf, utf8, sizeof(s_testClipBuf) - 1);
         return;
     }
-    (void) utf8;
+    s_globalClipBuf[0] = '\0';
+    strncat(s_globalClipBuf, utf8, sizeof(s_globalClipBuf) - 1);
 }
 
 char *TextCore_pasteFromClipboard(void) {
@@ -99,5 +101,7 @@ char *TextCore_pasteFromClipboard(void) {
             return nullptr;
         return strdup(s_testClipBuf);
     }
-    return nullptr;
+    if (s_globalClipBuf[0] == '\0')
+        return nullptr;
+    return strdup(s_globalClipBuf);
 }

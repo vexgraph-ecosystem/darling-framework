@@ -11,6 +11,7 @@
 #include "event/keyevent.h"
 #include "font/font.h"
 #include "oop/type.h"
+#include "text/text_core.h"
 #include "text/text_select.h"
 
 // darling/panel/markdown_panel.h — markdown-fed document panel
@@ -40,6 +41,10 @@ typedef struct MarkdownPanel {
     bool highlightable;
     TextSelect select;      // shared fixed-anchor selection part (doc-byte space)
     uint32_t highlightColor;
+    TextAlign textAlign;
+    float spacingWidth;
+    float spacingHeight;
+    bool ligatures;
 } MarkdownPanel;
 
 // Constructors:
@@ -63,6 +68,10 @@ void MarkdownPanel_setHighlightable(MarkdownPanel *s, bool flag);
 void MarkdownPanel_setSelection(MarkdownPanel *s, int32_t start, int32_t end);
 void MarkdownPanel_setHighlightColor(MarkdownPanel *s, uint32_t color);
 void MarkdownPanel_setHighlightColorRGBA(MarkdownPanel *s, uint8_t r, uint8_t g, uint8_t b, uint8_t a);
+void MarkdownPanel_setTextAlign(MarkdownPanel *s, TextAlign align);
+void MarkdownPanel_setSpacingWidth(MarkdownPanel *s, float width);
+void MarkdownPanel_setSpacingHeight(MarkdownPanel *s, float height);
+void MarkdownPanel_setLigatures(MarkdownPanel *s, bool flag);
 
 // Symmetric Getters (Java-library standard)
 const char *MarkdownPanel_getText(const MarkdownPanel *s);
@@ -76,6 +85,10 @@ bool MarkdownPanel_isHighlightable(const MarkdownPanel *s);
 void MarkdownPanel_getSelection(const MarkdownPanel *s, int32_t *outStart, int32_t *outEnd);
 uint32_t MarkdownPanel_getHighlightColor(const MarkdownPanel *s);
 void MarkdownPanel_getHighlightColorRGBA(const MarkdownPanel *s, uint8_t *outR, uint8_t *outG, uint8_t *outB, uint8_t *outA);
+TextAlign MarkdownPanel_getTextAlign(const MarkdownPanel *s);
+float MarkdownPanel_getSpacingWidth(const MarkdownPanel *s);
+float MarkdownPanel_getSpacingHeight(const MarkdownPanel *s);
+bool MarkdownPanel_hasLigatures(const MarkdownPanel *s);
 
 // Pointer seam (driven by event/dispatch when the panel owns a document's
 // text rows): down anchors, drag moves the active edge, up orders and

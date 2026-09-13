@@ -229,6 +229,8 @@ bool TextCore_rasterStyled(const char *utf8, const char *family, float pxHeight,
                 advs[k] = CTLineGetTypographicBounds(line, &asc[k], &desc[k], &lead[k]);
         }
         CFRelease(font);
+        TextAlign align = style ? (*style).align : TEXT_ALIGN_LEFT;
+        CGFloat targetW = (style && (*style).boundsWidth > 0.0f) ? ((*style).boundsWidth * backing) : 0.0f;
         double maxAdv = 0;
         double totalH = 0;
         for (size_t k = 0; k < nlines; k++) {
@@ -236,6 +238,8 @@ bool TextCore_rasterStyled(const char *utf8, const char *family, float pxHeight,
                 maxAdv = advs[k];
             totalH += asc[k] + desc[k] + lead[k] + (k > 0 ? extraLineHeight : 0.0);
         }
+        if (targetW > maxAdv)
+            maxAdv = targetW;
         int w = (int) ceil(maxAdv) + 2;
         int h = (int) ceil(totalH) + (int) (2 * nlines);
         bool okLines = true;
@@ -304,6 +308,12 @@ bool TextCore_rasterStyled(const char *utf8, const char *family, float pxHeight,
             for (size_t k = nlines; k > 0; k--) {
                 size_t idx = k - 1;
                 CGFloat baselineY = penY + desc[idx];
+                double lineX = 1.0;
+                if (align == TEXT_ALIGN_CENTER) {
+                    lineX = 1.0 + fmax(0.0, (maxAdv - advs[idx]) * 0.5);
+                } else if (align == TEXT_ALIGN_RIGHT) {
+                    lineX = 1.0 + fmax(0.0, maxAdv - advs[idx]);
+                }
 
                 // Selection highlight rounded rectangle behind text
                 if (style && (*style).selectionStart >= 0 && (*style).selectionEnd > (*style).selectionStart) {
@@ -325,7 +335,7 @@ bool TextCore_rasterStyled(const char *utf8, const char *family, float pxHeight,
                             sx0 = sx1;
                             sx1 = tmp;
                         }
-                        CGFloat rectX = 1.0 + sx0;
+                        CGFloat rectX = lineX + sx0;
                         CGFloat rectW = sx1 - sx0;
                         CGFloat rectY = fmax(0.0, penY - 1.0 * backing);
                         CGFloat rectH = asc[idx] + desc[idx] + 2.0 * backing;
@@ -358,7 +368,7 @@ bool TextCore_rasterStyled(const char *utf8, const char *family, float pxHeight,
                     }
                 }
 
-                CGContextSetTextPosition(ctx, 1.0, baselineY);
+                CGContextSetTextPosition(ctx, lineX, baselineY);
                 CTLineDraw(lines[idx], ctx);
 
                 // Underline decorations
@@ -366,8 +376,8 @@ bool TextCore_rasterStyled(const char *utf8, const char *family, float pxHeight,
                     CGContextSaveGState(ctx);
                     CGContextSetRGBStrokeColor(ctx, ur, ug, ub, ua);
                     CGContextSetLineWidth(ctx, strokeW);
-                    CGFloat x0 = 1.0;
-                    CGFloat x1 = 1.0 + advs[idx];
+                    CGFloat x0 = lineX;
+                    CGFloat x1 = lineX + advs[idx];
 
                     if (ustyle == UNDERLINE_BASIC) {
                         CGFloat lineY = baselineY - fmax(1.0 * backing, desc[idx] * 0.4);
@@ -411,8 +421,8 @@ bool TextCore_rasterStyled(const char *utf8, const char *family, float pxHeight,
                             CGContextSetRGBStrokeColor(ctx, ur, ug, ub, ua);
                             CGContextSetLineWidth(ctx, strokeW);
                             CGFloat lineY = baselineY - fmax(1.0 * backing, desc[idx] * 0.4);
-                            CGContextMoveToPoint(ctx, 1.0 + mx0, lineY);
-                            CGContextAddLineToPoint(ctx, 1.0 + mx1, lineY);
+                            CGContextMoveToPoint(ctx, lineX + mx0, lineY);
+                            CGContextAddLineToPoint(ctx, lineX + mx1, lineY);
                             CGContextStrokePath(ctx);
                             CGContextRestoreGState(ctx);
                         }

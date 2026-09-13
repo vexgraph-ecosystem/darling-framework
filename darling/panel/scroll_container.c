@@ -68,7 +68,7 @@
  *
  * DIRECTION (which way deltas push content):
  * ----------------------------------------------------------------------------
- *   setNatural(true)  — gesture-following (ox+dx, oy-dy): fingers-down
+ *   setNatural(true)  — gesture-following (ox-dx, oy-dy): fingers-down
  *                       (dy>0) pushes the content down, like a hand on paper.
  *   setNatural(false) — legacy inverted mapping for rigs that disagree.
  *   scrollBy(dx, dy)  — the ONLY call-site entry for raw deltas; it owns
@@ -100,7 +100,7 @@
  *   float slippery;              // 0 stops dead, 1 long glide (default 0)
  *   float overscroll;            // Rubber-band px past ends (0 = disabled)
  *   --- Direction part (owner field) ---
- *   bool natural;                // True: deltas as-is; false: flipped
+ *   bool natural;                // True: deltas subtracted (ox-dx, oy-dy); false: added (ox+dx, oy+dy)
  *
  * FUNCTION REGISTRY:
  * ----------------------------------------------------------------------------
@@ -460,7 +460,7 @@ void ScrollContainer_stop(ScrollContainer *sp) {
 // DIRECTION PART
 
 // Deltas arrive raw from the OS. natural=true applies the gesture-following
-// mapping (ox+dx, oy-dy): fingers-down (dy>0) pushes the content down, the
+// mapping (ox-dx, oy-dy): fingers-down (dy>0) pushes the content down, the
 // way a hand on paper behaves. false restores the legacy inverted mapping
 // for rigs that disagree. If fingers and content ever disagree, this one
 // flag is the entire argument — never hand-negate at the call site.
@@ -476,9 +476,9 @@ void ScrollContainer_scrollBy(ScrollContainer *sp, float dx, float dy) {
     float ox = 0.0f, oy = 0.0f;
     ScrollContainer_getOffset(sp, &ox, &oy);
     if ((*sp).natural)
-        ScrollContainer_setOffset(sp, ox + dx, oy - dy);
+        ScrollContainer_setOffset(sp, ox - dx, oy - dy);
     else
-        ScrollContainer_setOffset(sp, ox - dx, oy + dy);
+        ScrollContainer_setOffset(sp, ox + dx, oy + dy);
 }
 
 static float tickAxis(float off, float *vel, float lo, float hi, float over, float friction, double dt) {

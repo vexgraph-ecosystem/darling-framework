@@ -22,6 +22,18 @@ typedef enum UnderlineStyle {
     UNDERLINE_JAGGED        = 3,
 } UnderlineStyle;
 
+// Text alignment modes
+typedef enum TextAlign {
+    TEXT_ALIGN_LEFT    = 0,
+    TEXT_ALIGN_CENTER  = 1,
+    TEXT_ALIGN_RIGHT   = 2,
+    TEXT_ALIGN_JUSTIFY = 3,
+    ALIGN_LEFT         = 0,
+    ALIGN_CENTER       = 1,
+    ALIGN_RIGHT        = 2,
+    ALIGN_JUSTIFY      = 3,
+} TextAlign;
+
 // Rich typography style descriptor passed to native rasterizer
 typedef struct TextStyleDescriptor {
     bool ligatures;           // true = enable ligatures (default true)
@@ -34,6 +46,8 @@ typedef struct TextStyleDescriptor {
     int selectionEnd;         // -1 = none; character end index of selection
     float highlightRadius;    // corner radius of selection rounded rect in points (default 3.0f)
     uint32_t highlightColor;  // packed 0xAARRGGBB selection background fill (0 = default 0x662563EB)
+    TextAlign align;          // text alignment (default TEXT_ALIGN_LEFT)
+    float boundsWidth;        // container bounding width in points (0 = auto / text width)
 } TextStyleDescriptor;
 
 // Active backing scale: NSScreen backingScaleFactor (Retina points to pixels).

@@ -142,6 +142,7 @@ struct MarkdownRowSlot {
 #define MARKDOWN_H1_SIZE 28.0f
 #define MARKDOWN_H2_SIZE 22.0f
 #define MARKDOWN_H3_SIZE 17.0f
+#define MARKDOWN_H4_SIZE 15.0f
 #define MARKDOWN_CODE_SIZE 12.0f
 #define MARKDOWN_LINE_FACTOR 1.35f
 #define MARKDOWN_TEXT_COLOR 0xFFFFFFFFu
@@ -183,6 +184,10 @@ MarkdownPanel *MarkdownPanel_0(void) {
     (*s).highlightable = false;
     (*s).select = TextSelect_default();
     (*s).highlightColor = 0x662563EBu;
+    (*s).textAlign = TEXT_ALIGN_LEFT;
+    (*s).spacingWidth = 0.0f;
+    (*s).spacingHeight = 0.0f;
+    (*s).ligatures = true;
     ListContainer_setSpacing(box, MARKDOWN_DEFAULT_SPACING);
     (*s).slots = nullptr;
     (*s).rowCount = 0;
@@ -291,19 +296,36 @@ static int32_t markdownDocIndexAt(MarkdownPanel *s, float localX, float localY) 
     if (n == 0)
         return 0;
     struct MarkdownRowSlot *slots = (*s).slots;
-    float accY = 0.0f;
     float spacing = (*s).rowSpacing;
-    size_t ri = n - 1;
-    for (size_t i = 0; i < n; i++) {
-        float h = slots[i].height;
-        if (localY < accY + h) {
-            ri = i;
-            break;
+
+    // Vertical clamping & midpoint boundary resolution:
+    // Pointers above row 0 clamp to row 0; pointers below the last row clamp to row n-1.
+    // Inter-row gaps divide at their halfway point to eliminate dead zones.
+    size_t ri = 0;
+    float accY = 0.0f;
+    if (localY <= 0.0f) {
+        ri = 0;
+    } else {
+        ri = n - 1;
+        for (size_t i = 0; i < n; i++) {
+            float h = slots[i].height;
+            float boundary = accY + h + (i + 1 < n ? spacing * 0.5f : 0.0f);
+            if (localY < boundary) {
+                ri = i;
+                break;
+            }
+            accY += h + spacing;
         }
-        accY += h + spacing;
     }
     struct MarkdownRowSlot *slot = &slots[ri];
-    int32_t idx = markdownRowIndexAt(s, ri, localX, localY, accY);
+    int32_t idx = 0;
+    if (localY <= 0.0f && localX <= 0.0f) {
+        idx = 0;
+    } else if (localY >= accY + (*slot).height && localX >= 0.0f && ri == n - 1) {
+        idx = (int32_t) (*slot).textLen;
+    } else {
+        idx = markdownRowIndexAt(s, ri, localX, localY, accY);
+    }
     uint32_t cellStart = (*slot).cellStart;
     uint32_t textLen = (*slot).textLen;
     if (idx < 0)
@@ -330,8 +352,14 @@ static void applyRowSelection(MarkdownPanel *s, size_t rowIndex, int32_t lo, int
         b = textLen;
     bool hit = a < b;
     uint32_t color = (*s).highlightColor;
+    int32_t wantA = hit ? a : -1;
+    int32_t wantB = hit ? b : -1;
     if ((*slot).isRich) {
         RichLabel *rl = (RichLabel*) (*slot).panel;
+        int32_t curA = -1, curB = -1;
+        RichLabel_getSelection(rl, &curA, &curB);
+        if (RichLabel_getHighlightColor(rl) == color && curA == wantA && curB == wantB)
+            return;
         RichLabel_setHighlightColor(rl, color);
         if (hit)
             RichLabel_setSelection(rl, a, b);
@@ -339,6 +367,10 @@ static void applyRowSelection(MarkdownPanel *s, size_t rowIndex, int32_t lo, int
             RichLabel_setSelection(rl, -1, -1);
     } else {
         Label *lbl = (Label*) (*slot).panel;
+        int32_t curA = -1, curB = -1;
+        Label_getSelection(lbl, &curA, &curB);
+        if (Label_getHighlightColor(lbl) == color && curA == wantA && curB == wantB)
+            return;
         Label_setHighlightColor(lbl, color);
         if (hit)
             Label_setSelection(lbl, a, b);
@@ -352,14 +384,8 @@ static void refreshRowSelection(MarkdownPanel *s) {
     if (!s)
         return;
     int32_t lo = -1, hi = -1;
-    int32_t wantA = hit ? a : -1;
-    int32_t wantB = hit ? b : -1;
     (void) TextSelect_getSpan(&(*s).select, &lo, &hi);
     if (lo < 0) {
-        int32_t curA = -1, curB = -1;
-        RichLabel_getSelection(rl, &curA, &curB);
-        if (RichLabel_getHighlightColor(rl) == color && curA == wantA && curB == wantB)
-            return;
         lo = 0;
         hi = 0;
     }
@@ -367,10 +393,6 @@ static void refreshRowSelection(MarkdownPanel *s) {
     for (size_t i = 0; i < n; i++)
         applyRowSelection(s, i, lo, hi);
     markDirty(s);
-        int32_t curA = -1, curB = -1;
-        Label_getSelection(lbl, &curA, &curB);
-        if (Label_getHighlightColor(lbl) == color && curA == wantA && curB == wantB)
-            return;
 }
 
 void MarkdownPanel_handlePointer(MarkdownPanel *s, int32_t kind, float localX, float localY, void *window) {
@@ -433,8 +455,7 @@ void MarkdownPanel_handlePointer(MarkdownPanel *s, int32_t kind, float localX, f
     if (kind == PTR_UP) {
         int32_t lo = -1, hi = -1;
         if (TextSelect_isActive(&(*s).select)) {
-            if (inside)
-                TextSelect_drag(&(*s).select, markdownDocIndexAt(s, localX, localY));
+            TextSelect_drag(&(*s).select, markdownDocIndexAt(s, localX, localY));
             TextSelect_end(&(*s).select, &lo, &hi);
         }
         refreshRowSelection(s);
@@ -461,7 +482,7 @@ static LineKind classifyLine(const char *line, size_t len, size_t *contentStart,
     }
     if (line[i] == '#') {
         size_t hashes = 0;
-        while (i + hashes < len && line[i + hashes] == '#' && hashes < 3)
+        while (i + hashes < len && line[i + hashes] == '#' && hashes < 4)
             hashes++;
         size_t after = i + hashes;
         if (after >= len || line[after] == ' ' || line[after] == '\t') {
@@ -474,8 +495,10 @@ static LineKind classifyLine(const char *line, size_t len, size_t *contentStart,
                 (*size) = MARKDOWN_H1_SIZE;
             else if (hashes == 2)
                 (*size) = MARKDOWN_H2_SIZE;
-            else
+            else if (hashes == 3)
                 (*size) = MARKDOWN_H3_SIZE;
+            else
+                (*size) = MARKDOWN_H4_SIZE;
             return LINE_HEADING;
         }
     }
@@ -663,6 +686,10 @@ static void addLabelRow(MarkdownPanel *s, const char *line, size_t len, bool bul
         return;
     Label_setFontSize(lbl, size);
     Label_setTextColor(lbl, color);
+    Label_setTextAlign(lbl, (*s).textAlign);
+    Label_setSpacingWidth(lbl, (*s).spacingWidth);
+    Label_setSpacingHeight(lbl, (*s).spacingHeight);
+    Label_setLigatures(lbl, (*s).ligatures);
     if (bg != 0u)
         Label_setBackgroundColor(lbl, bg);
     Panel *row = &(*lbl).base;
@@ -728,6 +755,10 @@ static void addRichRow(MarkdownPanel *s, const char *line, size_t len, bool bull
         return;
     }
     RichLabel_setTextModel(rl, rt);
+    RichLabel_setTextAlign(rl, (*s).textAlign);
+    RichLabel_setSpacingWidth(rl, (*s).spacingWidth);
+    RichLabel_setSpacingHeight(rl, (*s).spacingHeight);
+    RichLabel_setLigatures(rl, (*s).ligatures);
     Panel *row = &(*rl).base;
     ListContainer_add(box, row);
     float height = (*rt).layoutHeight;
@@ -823,6 +854,7 @@ static void rebuild(MarkdownPanel *s) {
     float w = Container_getWidth(c);
     if (w < 0.0f)
         w = 0.0f;
+    Panel_setSize(b, w, cursor);
     Panel_setSize(&(*box).base, w, cursor);
     // Authoritative pass: rows were sized after their per-add layouts ran,
     // so re-stack once with final heights (cold path, documents only).
@@ -949,6 +981,34 @@ void MarkdownPanel_setHighlightColorRGBA(MarkdownPanel *s, uint8_t r, uint8_t g,
     MarkdownPanel_setHighlightColor(s, packed);
 }
 
+void MarkdownPanel_setTextAlign(MarkdownPanel *s, TextAlign align) {
+    if (!s || (*s).textAlign == align)
+        return;
+    (*s).textAlign = align;
+    rebuild(s);
+}
+
+void MarkdownPanel_setSpacingWidth(MarkdownPanel *s, float width) {
+    if (!s)
+        return;
+    (*s).spacingWidth = width;
+    rebuild(s);
+}
+
+void MarkdownPanel_setSpacingHeight(MarkdownPanel *s, float height) {
+    if (!s)
+        return;
+    (*s).spacingHeight = height;
+    rebuild(s);
+}
+
+void MarkdownPanel_setLigatures(MarkdownPanel *s, bool flag) {
+    if (!s || (*s).ligatures == flag)
+        return;
+    (*s).ligatures = flag;
+    rebuild(s);
+}
+
 // GETTERS
 // ============================================================================
 
@@ -968,8 +1028,10 @@ uint32_t MarkdownPanel_getCodeBackground(const MarkdownPanel *s) {
 }
 
 Panel *MarkdownPanel_getRows(const MarkdownPanel *s) {
-    ListContainer *rows = s ? (*s).rows : nullptr;
-    return rows ? &(*rows).base : nullptr;
+    if (!s || !(*s).rows)
+        return nullptr;
+    ListContainer *box = (*s).rows;
+    return &(*box).base;
 }
 
 float MarkdownPanel_getRowSpacing(const MarkdownPanel *s) {
@@ -1016,6 +1078,22 @@ void MarkdownPanel_getHighlightColorRGBA(const MarkdownPanel *s, uint8_t *outR, 
         (*outG) = (uint8_t) ((c >> 8) & 0xFF);
     if (outB)
         (*outB) = (uint8_t) (c & 0xFF);
+}
+
+TextAlign MarkdownPanel_getTextAlign(const MarkdownPanel *s) {
+    return s ? (*s).textAlign : TEXT_ALIGN_LEFT;
+}
+
+float MarkdownPanel_getSpacingWidth(const MarkdownPanel *s) {
+    return s ? (*s).spacingWidth : 0.0f;
+}
+
+float MarkdownPanel_getSpacingHeight(const MarkdownPanel *s) {
+    return s ? (*s).spacingHeight : 0.0f;
+}
+
+bool MarkdownPanel_hasLigatures(const MarkdownPanel *s) {
+    return s ? (*s).ligatures : true;
 }
 
 // ----------------------------------------------------------------------------
@@ -1143,11 +1221,15 @@ char *MarkdownPanel_getSelectedText(const MarkdownPanel *s) {
         return nullptr;
 
     size_t cap = 0;
+    size_t rowSelectedCount = 0;
     for (size_t i = 0; i < n; i++) {
         int32_t a = 0, b = 0;
         int32_t len = clampRowRange(s, i, lo, hi, &a, &b);
         if (len <= 0)
             continue;
+        if (rowSelectedCount > 0)
+            cap += 1;
+        rowSelectedCount++;
         struct MarkdownRowSlot *slots = (*s).slots;
         struct MarkdownRowSlot *slot = &slots[i];
         if ((*slot).isRich)
@@ -1164,11 +1246,15 @@ char *MarkdownPanel_getSelectedText(const MarkdownPanel *s) {
     if (!out)
         return nullptr;
     size_t at = 0;
+    bool hadPrevRow = false;
     for (size_t i = 0; i < n; i++) {
         int32_t a = 0, b = 0;
         int32_t len = clampRowRange(s, i, lo, hi, &a, &b);
         if (len <= 0)
             continue;
+        if (hadPrevRow)
+            out[at++] = '\n';
+        hadPrevRow = true;
         struct MarkdownRowSlot *slots = (*s).slots;
         struct MarkdownRowSlot *slot = &slots[i];
         if ((*slot).isRich) {

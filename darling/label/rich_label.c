@@ -371,6 +371,10 @@ RichLabel *RichLabel_0(void) {
 
     (*rl).textModel = NULL;
     (*rl).wrapMode = WRAP_WORD;
+    (*rl).textAlign = TEXT_ALIGN_LEFT;
+    (*rl).spacingWidth = 0.0f;
+    (*rl).spacingHeight = 0.0f;
+    (*rl).ligatures = true;
     (*rl).cursor = Cursor_getPredefined(CURSOR_DEFAULT);
     (*rl).highlightable = false;
     (*rl).select = TextSelect_default();
@@ -413,6 +417,46 @@ void RichLabel_setWrapMode(RichLabel *label, WrapMode mode) {
         RichText_setWrapMode((*label).textModel, mode);
     }
     Container_markDirty(&(*label).base.base);
+}
+
+void RichLabel_setTextAlign(RichLabel *label, TextAlign align) {
+    if (!label) return;
+    (*label).textAlign = align;
+    Container_markDirty(&(*label).base.base);
+}
+
+TextAlign RichLabel_getTextAlign(const RichLabel *label) {
+    return label ? (*label).textAlign : TEXT_ALIGN_LEFT;
+}
+
+void RichLabel_setSpacingWidth(RichLabel *label, float width) {
+    if (!label) return;
+    (*label).spacingWidth = width;
+    Container_markDirty(&(*label).base.base);
+}
+
+float RichLabel_getSpacingWidth(const RichLabel *label) {
+    return label ? (*label).spacingWidth : 0.0f;
+}
+
+void RichLabel_setSpacingHeight(RichLabel *label, float height) {
+    if (!label) return;
+    (*label).spacingHeight = height;
+    Container_markDirty(&(*label).base.base);
+}
+
+float RichLabel_getSpacingHeight(const RichLabel *label) {
+    return label ? (*label).spacingHeight : 0.0f;
+}
+
+void RichLabel_setLigatures(RichLabel *label, bool flag) {
+    if (!label) return;
+    (*label).ligatures = flag;
+    Container_markDirty(&(*label).base.base);
+}
+
+bool RichLabel_hasLigatures(const RichLabel *label) {
+    return label ? (*label).ligatures : true;
 }
 
 void RichLabel_setHighlightable(RichLabel *label, bool flag) {

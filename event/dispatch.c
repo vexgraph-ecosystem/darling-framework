@@ -104,6 +104,7 @@ typedef struct Input Input;
 typedef struct Textarea Textarea;
 typedef struct Label Label;
 typedef struct RichLabel RichLabel;
+typedef struct InputOTP InputOTP;
 
 void Button_handlePointer(Button *self, int kind, float localX, float localY) __attribute__((weak));
 void Switch_handlePointer(Switch *self, int kind, float localX, float localY) __attribute__((weak));
@@ -114,11 +115,13 @@ void Knob_handlePointer(Knob *self, int kind, float localX, float localY) __attr
 void ScrollBar_handlePointer(ScrollBar *self, int kind, float localX, float localY) __attribute__((weak));
 void Input_handlePointer(Input *self, int kind, float localX, float localY) __attribute__((weak));
 void Textarea_handlePointer(Textarea *self, int kind, float localX, float localY) __attribute__((weak));
+void InputOTP_handlePointer(InputOTP *self, int kind, float localX, float localY) __attribute__((weak));
 void MarkdownPanel_handlePointer(MarkdownPanel *self, int kind, float localX, float localY, void *window) __attribute__((weak));
 void Label_handlePointer(Label *self, int kind, float localX, float localY, void *window) __attribute__((weak));
 void RichLabel_handlePointer(RichLabel *self, int kind, float localX, float localY, void *window) __attribute__((weak));
 void Input_handleKey(Input *self, const UIKeyEvent *ev) __attribute__((weak));
 void Textarea_handleKey(Textarea *self, const UIKeyEvent *ev) __attribute__((weak));
+void InputOTP_handleKey(InputOTP *self, const UIKeyEvent *ev) __attribute__((weak));
 void MarkdownPanel_handleKey(MarkdownPanel *self, const UIKeyEvent *ev) __attribute__((weak));
 void Label_handleKey(Label *self, const UIKeyEvent *ev) __attribute__((weak));
 void RichLabel_handleKey(RichLabel *self, const UIKeyEvent *ev) __attribute__((weak));
@@ -256,6 +259,12 @@ static void dispatchPointerTo(Panel *target, int kind, float lx, float ly) {
             fn((Textarea*) target, kind, lx, ly);
         return;
     }
+    if (cls == ID_INPUTOTP) {
+        void (*fn)(InputOTP *, int, float, float) = InputOTP_handlePointer;
+        if (fn)
+            fn((InputOTP*) target, kind, lx, ly);
+        return;
+    }
     if (cls == ID_MARKDOWN_PANEL) {
         void (*fn)(MarkdownPanel *, int, float, float, void *) = MarkdownPanel_handlePointer;
         if (fn)
@@ -290,6 +299,12 @@ static void dispatchKeyTo(Panel *target, const UIKeyEvent *ev) {
         void (*fn)(Textarea *, const UIKeyEvent *) = Textarea_handleKey;
         if (fn)
             fn((Textarea*) target, ev);
+        return;
+    }
+    if (cls == ID_INPUTOTP) {
+        void (*fn)(InputOTP *, const UIKeyEvent *) = InputOTP_handleKey;
+        if (fn)
+            fn((InputOTP*) target, ev);
         return;
     }
     if (cls == ID_MARKDOWN_PANEL) {
