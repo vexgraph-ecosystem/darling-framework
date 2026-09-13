@@ -149,11 +149,14 @@ PanelCocoa *PanelCocoa_newMetal(void *panel, int width, int height) {
     // the layer's top-left corner — never stretched (Resize gravity would
     // smear the frozen drawable; TopLeft crops nothing on an exact fit).
     layer.contentsGravity = kCAGravityTopLeft;
-    // WindowServer sync: presents join the CoreAnimation transaction so pane
-    // anchoring (autoresizingMask + anchorPoint from PanelCocoa_setAnchors)
-    // lands on the same vsync as the window edge — edge-locked, zero CPU
-    // catch-up. Mirrors the board VulkanView steady-state contract.
-    layer.presentsWithTransaction = YES;
+    // Decoupled presents: standalone layers (no hosting view) get no
+    // AppKit display-cycle commits at idle, so presentsWithTransaction=YES
+    // holds every frame hostage until an unrelated commit releases it
+    // (blank-until-resize, freeze-at-idle). NO displays the instant the
+    // scene presents — present-on-demand, scenes demand realtime. Anchoring
+    // stays WindowServer-side (autoresizingMask + anchorPoint), unaffected
+    // by present timing. Boards (view-backed) keep YES; see newBoard.
+    layer.presentsWithTransaction = NO;
     // Rule 12: contentsScale = backingScaleFactor so native physical pixels
     // of the pane's swapchain map 1:1 to logical points. drawableSize is
     // points * scale (physical pixels).
@@ -239,8 +242,13 @@ bool PanelCocoa_isBoard(const PanelCocoa *pc) { return pc ? (*pc).isBoard : fals
 // fixed panes never move their swapchain.
 PanelCocoa *PanelCocoa_newBoard(void *panel, int width, int height) {
     PanelCocoa *pc = PanelCocoa_newMetal(panel, width, height);
-    if (pc)
+    if (pc) {
         (*pc).isBoard = true;
+        // Boards are view-hierarchy backed and ride AppKit's display cycle,
+        // so transaction-synced presents release normally — keep YES for
+        // edge-locked anchoring. Fixed panes stay NO (see newMetal).
+        [(CAMetalLayer*) (*pc).layer setPresentsWithTransaction:YES];
+    }
     return pc;
 }
 
