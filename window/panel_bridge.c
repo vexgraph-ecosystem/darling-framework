@@ -28,6 +28,7 @@
  *
  * Core Functions:
  *   - Darling_attachPanelIOSurfaceChildren(window, contentPanel, width, height)
+ *   - Darling_attachPanelBoards(window, width, height)
  *   - TextCore_backingScale(void)
  *   - for(i++)
  *   - PanelCocoa_fromPanel(panel)
@@ -80,6 +81,49 @@
 // This file iterates children and calls into ObjC PanelCocoa for the
 // IOSurface/CALayer plumbing.
 
+// Attach full-window Metal board backing (PanelCocoa_newBoard, one VkPane
+// chain each) to the scene + content panels — the two named boards of the
+// NSWindow -> Metal -> Vulkan-rect-children stack. Boards track the window
+// size (VkPane_resize at settle); their subtrees paint into the board chain
+// instead of per-child IOSurfaces. Live-gated: mid-drag sizes freeze and
+// the WindowServer stretches board drawables; the final size lands at
+// settle. Returns the number of boards attached or resized.
+int Darling_attachPanelBoards(Window *window, int width, int height) {
+    if (!window || width <= 0 || height <= 0)
+        return 0;
+    if (Window_isLiveResizing(window))
+        return 0;
+    extern float TextCore_backingScale(void);
+    float scale = TextCore_backingScale();
+    if (scale <= 0.0f)
+        scale = 1.0f;
+    int pxW = (int) (width * scale + 0.5f);
+    int pxH = (int) (height * scale + 0.5f);
+    if (pxW <= 0 || pxH <= 0 || pxW > 16384 || pxH > 16384)
+        return 0;
+    Panel *boards[2] = { Window_getScenePanel(window), Window_getContentPanel(window) };
+    extern void *PanelCocoa_fromPanel(void *panel);
+    extern void *PanelCocoa_newBoard(void *panel, int w, int h);
+    extern bool PanelCocoa_setSize(void *pc, int w, int h);
+    int done = 0;
+    for (int i = 0; i < 2; i++) {
+        Panel *board = boards[i];
+        if (!board)
+            continue;
+        void *pc = PanelCocoa_fromPanel(board);
+        if (pc) {
+            extern bool PanelCocoa_isBoard(const void *pc);
+            if (!PanelCocoa_isBoard(pc))
+                continue;
+            if (PanelCocoa_setSize(pc, pxW, pxH))
+                done++;
+        } else if (PanelCocoa_newBoard(board, pxW, pxH)) {
+            done++;
+        }
+    }
+    return done;
+}
+
 // Attach IOSurface backing to ALL children of a content panel.
 // Returns the number of IOSurface backings attached.
 int Darling_attachPanelIOSurfaceChildren(Window *window, Panel *contentPanel, int width, int height) {
@@ -92,6 +136,14 @@ int Darling_attachPanelIOSurfaceChildren(Window *window, Panel *contentPanel, in
     float scale = TextCore_backingScale();
     if (scale <= 0.0f)
         scale = 1.0f;
+
+    // Board-parent gate: when the parent paints its whole subtree into its
+    // own Metal board chain, plain UI children need no IOSurface — only
+    // nested scenes keep their own panes (the recursive Vulkan-rect tree).
+    extern void *PanelCocoa_fromPanel(void *panel);
+    extern bool PanelCocoa_isBoard(const void *pc);
+    void *parentPc = PanelCocoa_fromPanel(contentPanel);
+    bool parentIsBoard = parentPc && PanelCocoa_isBoard(parentPc);
 
     for (size_t i = 0; i < childCount; i++) {
         Panel *child = Panel_getChild(contentPanel, i);
@@ -106,6 +158,10 @@ int Darling_attachPanelIOSurfaceChildren(Window *window, Panel *contentPanel, in
         bool isScene = (childType == TYPE_SCENE3D_SINGLETON || childType == TYPE_SCENE2D_SINGLETON
                         || childType == TYPE_SCENE_SINGLETON);
         if (bg == PANEL_COLOR_CLEAR && !rfn && !isScene)
+            continue;
+
+        // Board-parent gate (see above): UI paints into the board chain.
+        if (parentIsBoard && !isScene)
             continue;
 
         // Get the child's MAX size for IOSurface allocation (fixed, never reallocates)
@@ -128,7 +184,6 @@ int Darling_attachPanelIOSurfaceChildren(Window *window, Panel *contentPanel, in
             continue;
 
         // Check if already attached
-        extern void *PanelCocoa_fromPanel(void *panel);
         void *pc = PanelCocoa_fromPanel(child);
         if (pc) {
             extern bool PanelCocoa_setSize(void *pc, int w, int h);
