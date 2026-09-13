@@ -9,6 +9,8 @@
 #include "darling/panel/panel.h"
 #include "event/keyevent.h"
 #include "font/font.h"
+#include "text/text_core.h"
+#include "text/text_select.h"
 
 // Single-line text input: Panel layout plus an owned bounded buffer.
 //
@@ -50,6 +52,24 @@ typedef struct Input {
     bool focused;       // Focus-request flag (DOWN sets, dispatch consumes later)
     int32_t cursor;
     Font *font;
+
+    // --- Typography & Native Raster Styling ---
+    float fontSize;           // font size in points (default 13.0f)
+    uint32_t textColor;       // text color packed ARGB (default 0xFFFFFFFF)
+    uint32_t placeholderColor;// placeholder color packed ARGB (default 0x88888888)
+    TextAlign align;          // text alignment (TEXT_ALIGN_LEFT, TEXT_ALIGN_CENTER, TEXT_ALIGN_RIGHT)
+    float spacingWidth;       // kerning/tracking delta in points (default 0.0f)
+    bool ligatures;           // enable standard typography ligatures (default true)
+    TextSelect select;        // text selection state
+    uint32_t selectionColor;  // highlight fill (default 0x662563EB)
+    int32_t rasterTex;
+    int rasterW;
+    int rasterH;
+    float rasterBacking;
+    bool rasterDirty;
+    float *glyphX;
+    int32_t glyphN;
+
     // --- Caret part (field->caret->verb; views only, never pierce) ---
     int caretMode;          // BLINK/SOLID/GLIDE (default BLINK)
     uint32_t caretColor;    // packed 0xAARRGGBB
@@ -99,6 +119,16 @@ void Input_setOnChange(Input *inp, Input_ChangeFn fn);
 void Input_setOnSubmit(Input *inp, Input_SubmitFn fn);
 void Input_setCtx(Input *inp, void *ctx);
 void Input_setMeasurer(Input *inp, Input_MeasureFn fn, void *ctx);
+void Input_setFontSize(Input *inp, float size);
+void Input_setTextColor(Input *inp, uint32_t color);
+void Input_setPlaceholderColor(Input *inp, uint32_t color);
+void Input_setTextAlign(Input *inp, TextAlign align);
+void Input_setSpacingWidth(Input *inp, float width);
+void Input_setLigatures(Input *inp, bool ligatures);
+void Input_setSelection(Input *inp, int32_t start, int32_t end);
+void Input_setSelectionColor(Input *inp, uint32_t color);
+char *Input_getSelectedText(const Input *inp);
+void Input_setSelectedText(Input *inp, const char *text);
 
 // Caret part (field->caret->verb, ergonomic — the caret is a view).
 void Input_caret_setMode(Input *inp, int mode);
@@ -118,6 +148,14 @@ bool Input_isReadonly(const Input *inp);
 bool Input_isFocused(const Input *inp);
 int32_t Input_getCursor(const Input *inp);
 Font *Input_getFont(const Input *inp);
+float Input_getFontSize(const Input *inp);
+uint32_t Input_getTextColor(const Input *inp);
+uint32_t Input_getPlaceholderColor(const Input *inp);
+TextAlign Input_getTextAlign(const Input *inp);
+float Input_getSpacingWidth(const Input *inp);
+bool Input_hasLigatures(const Input *inp);
+void Input_getSelection(const Input *inp, int32_t *outStart, int32_t *outEnd);
+uint32_t Input_getSelectionColor(const Input *inp);
 Input_ChangeFn Input_getOnChange(const Input *inp);
 Input_SubmitFn Input_getOnSubmit(const Input *inp);
 void *Input_getCtx(const Input *inp);

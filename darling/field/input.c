@@ -1,6 +1,7 @@
 #include "darling/field/input.h"
 
 #include <math.h>
+#include <stdlib.h>
 #include <string.h>
 
 #include "annotation/incomplete.h"
@@ -10,6 +11,9 @@
 #include "input/key.h"
 #include "nio/mem.h"
 #include "oop/type.h"
+#include "text/text_core.h"
+#include "vulkan/texture/texture.h"
+#include "vulkan/vk.h"
 #include "annotation/overview.h"
 
 ;;OVERVIEW
@@ -130,6 +134,186 @@
 
 #define INPUT_DEFAULT_CAP 256
 
+static void markRasterDirty(Input *inp) {
+    if (!inp)
+        return;
+    (*inp).rasterDirty = true;
+}
+
+static bool ensureInputRaster(Input *inp, const char *displayText, bool isPlaceholder, float innerW) {
+    if (!inp || !displayText || displayText[0] == '\0')
+        return false;
+    if (!(*inp).rasterDirty && (*inp).rasterTex >= 0)
+        return true;
+
+    float backing = TextCore_backingScale();
+    if (backing <= 0.0f)
+        backing = 1.0f;
+    float pxH = (*inp).fontSize * backing;
+    if (pxH <= 0.0f)
+        pxH = 13.0f * backing;
+
+    int32_t selStart = -1, selEnd = -1;
+    if (!isPlaceholder) {
+        (void) TextSelect_getSpan(&(*inp).select, &selStart, &selEnd);
+        if (selStart == selEnd) {
+            selStart = -1;
+            selEnd = -1;
+        }
+    }
+
+    TextStyleDescriptor style = {
+        .ligatures = (*inp).ligatures,
+        .spacingWidth = (*inp).spacingWidth,
+        .spacingHeight = 0.0f,
+        .underline = UNDERLINE_NONE,
+        .underlineColor = 0,
+        .mnemonicIndex = -1,
+        .selectionStart = selStart,
+        .selectionEnd = selEnd,
+        .highlightRadius = 2.0f,
+        .highlightColor = (*inp).selectionColor ? (*inp).selectionColor : 0x662563EBu,
+        .align = (*inp).align,
+        .boundsWidth = innerW,
+    };
+
+    uint32_t col = isPlaceholder ? (*inp).placeholderColor : (*inp).textColor;
+    uint8_t *rgba = nullptr;
+    int w = 0, h = 0;
+    bool ok = TextCore_rasterStyled(displayText, "Helvetica", pxH, col, &style, &rgba, &w, &h);
+    if (!ok || !rgba || w <= 0 || h <= 0)
+        return false;
+
+    if ((*inp).rasterTex >= 0) {
+        (*inp).rasterTex = Texture_replaceRaw((*inp).rasterTex, rgba, (uint32_t) w, (uint32_t) h);
+    } else {
+        (*inp).rasterTex = Texture_loadRaw(rgba, (uint32_t) w, (uint32_t) h);
+    }
+    free(rgba);
+    (*inp).rasterW = w;
+    (*inp).rasterH = h;
+    (*inp).rasterBacking = backing;
+    (*inp).rasterDirty = false;
+
+    size_t len = strlen(displayText);
+    if (!isPlaceholder && len < 512) {
+        float cleanOff[512];
+        int32_t n = TextCore_lineOffsets(displayText, "Helvetica", pxH, (*inp).ligatures, (*inp).spacingWidth, cleanOff, 512);
+        if (n == (int32_t)(len + 1)) {
+            if ((*inp).glyphX)
+                Memory_free((*inp).glyphX);
+            (*inp).glyphX = (float*) Memory_alloc(TYPE_ARRAY, (len + 1) * sizeof(float));
+            if ((*inp).glyphX) {
+                float totalAdv = cleanOff[len];
+                float alignOff = 0.0f;
+                if ((*inp).align == TEXT_ALIGN_CENTER && innerW > totalAdv)
+                    alignOff = (innerW - totalAdv) * 0.5f;
+                else if ((*inp).align == TEXT_ALIGN_RIGHT && innerW > totalAdv)
+                    alignOff = innerW - totalAdv;
+                for (size_t i = 0; i <= len; i++)
+                    (*inp).glyphX[i] = cleanOff[i] + alignOff;
+                (*inp).glyphN = (int32_t)(len + 1);
+            }
+        }
+    }
+    return true;
+}
+
+static void Input_renderFn(Panel *panel, void *renderer, void *cmdBuffer, float surfaceW, float surfaceH,
+                           float x, float y, float w, float h) {
+    Input *inp = (Input*) panel;
+    (void) renderer;
+    if (!inp || w <= 0.0f || h <= 0.0f)
+        return;
+    float op = Container_getOpacity(&(*panel).base);
+    if (op <= 0.0f)
+        return;
+
+    // 1. Background fill
+    uint32_t bg = Panel_getBackgroundColor(panel);
+    if ((bg >> 24) == 0)
+        bg = 0xFF18181Bu;
+    float br = ((bg >> 16) & 0xFF) / 255.0f;
+    float bgc = ((bg >> 8) & 0xFF) / 255.0f;
+    float bb = (bg & 0xFF) / 255.0f;
+    float ba = ((bg >> 24) & 0xFF) / 255.0f * op;
+    Vk_fillRect(cmdBuffer, surfaceW, surfaceH, x, y, w, h, br, bgc, bb, ba);
+
+    // 2. Border stroke
+    uint32_t borderColor = (*inp).focused ? 0xFF3B82F6u : 0xFF3F3F46u;
+    float b_r = ((borderColor >> 16) & 0xFF) / 255.0f;
+    float b_g = ((borderColor >> 8) & 0xFF) / 255.0f;
+    float b_b = (borderColor & 0xFF) / 255.0f;
+    float b_a = ((borderColor >> 24) & 0xFF) / 255.0f * op;
+    Vk_fillRect(cmdBuffer, surfaceW, surfaceH, x, y, w, 1.0f, b_r, b_g, b_b, b_a);
+    Vk_fillRect(cmdBuffer, surfaceW, surfaceH, x, y + h - 1.0f, w, 1.0f, b_r, b_g, b_b, b_a);
+    Vk_fillRect(cmdBuffer, surfaceW, surfaceH, x, y, 1.0f, h, b_r, b_g, b_b, b_a);
+    Vk_fillRect(cmdBuffer, surfaceW, surfaceH, x + w - 1.0f, y, 1.0f, h, b_r, b_g, b_b, b_a);
+
+    // 3. Text content
+    const char *displayText = (*inp).text;
+    bool isPlace = false;
+    if (!displayText || displayText[0] == '\0') {
+        displayText = (*inp).placeholder;
+        isPlace = true;
+    }
+
+    float padX = 8.0f;
+    float innerW = w - padX * 2.0f;
+    if (innerW < 10.0f)
+        innerW = 10.0f;
+
+    char maskBuf[256];
+    if (displayText && (*inp).password && !isPlace) {
+        size_t dlen = strlen(displayText);
+        if (dlen > sizeof(maskBuf) - 1)
+            dlen = sizeof(maskBuf) - 1;
+        memset(maskBuf, '*', dlen);
+        maskBuf[dlen] = '\0';
+        displayText = maskBuf;
+    }
+
+    if (displayText && displayText[0] != '\0') {
+        if (ensureInputRaster(inp, displayText, isPlace, innerW)) {
+            if ((*inp).rasterTex >= 0 && (*inp).rasterW > 0 && (*inp).rasterH > 0) {
+                float backing = (*inp).rasterBacking > 0.0f ? (*inp).rasterBacking : 1.0f;
+                float qw = (float) (*inp).rasterW / backing;
+                float qh = (float) (*inp).rasterH / backing;
+                float qx = x + padX;
+                float qy = y + (h - qh) * 0.5f;
+                Vk_drawTexture(cmdBuffer, surfaceW, surfaceH, qx, qy, qw, qh, 1.0f, 1.0f, 1.0f, op,
+                               (*inp).rasterTex, PICTURE_MODE_FIT, (float) (*inp).rasterW, (float) (*inp).rasterH);
+            }
+        }
+    }
+
+    // 4. Caret rendering
+    if ((*inp).focused && (*inp).caretShown) {
+        float caretX = padX;
+        if ((*inp).glyphX && (*inp).cursor >= 0 && (*inp).cursor < (*inp).glyphN) {
+            caretX = padX + (*inp).glyphX[(*inp).cursor];
+        } else if ((*inp).measurer) {
+            caretX = padX + (*inp).measurer((*inp).measureCtx, (*inp).cursor);
+        } else {
+            float charW = (*inp).fontSize > 0.0f ? (*inp).fontSize * 0.55f : 8.0f;
+            caretX = padX + (float) (*inp).cursor * charW;
+        }
+
+        uint32_t cColor = (*inp).caretColor ? (*inp).caretColor : 0xFFFFFFFFu;
+        float ca_r = ((cColor >> 16) & 0xFF) / 255.0f;
+        float ca_g = ((cColor >> 8) & 0xFF) / 255.0f;
+        float ca_b = (cColor & 0xFF) / 255.0f;
+        float ca_a = ((cColor >> 24) & 0xFF) / 255.0f * op * (*inp).caretOpacity;
+
+        float caretH = (*inp).fontSize > 0.0f ? (*inp).fontSize * 1.2f : 16.0f;
+        if (caretH > h - 4.0f)
+            caretH = h - 4.0f;
+        float caretY = y + (h - caretH) * 0.5f;
+
+        Vk_fillRect(cmdBuffer, surfaceW, surfaceH, x + caretX, caretY, 1.5f, caretH, ca_r, ca_g, ca_b, ca_a);
+    }
+}
+
 Input *Input_0(void) {
     Input *inp = (Input*) Memory_alloc(TYPE_INPUT_SINGLETON, sizeof(Input));
     if (!inp)
@@ -149,6 +333,23 @@ Input *Input_0(void) {
     (*inp).focused = false;
     (*inp).cursor = 0;
     (*inp).font = nullptr;
+
+    (*inp).fontSize = 13.0f;
+    (*inp).textColor = 0xFFFFFFFFu;
+    (*inp).placeholderColor = 0xFF888888u;
+    (*inp).align = TEXT_ALIGN_LEFT;
+    (*inp).spacingWidth = 0.0f;
+    (*inp).ligatures = true;
+    (*inp).select = TextSelect_default();
+    (*inp).selectionColor = 0x662563EBu;
+    (*inp).rasterTex = -1;
+    (*inp).rasterW = 0;
+    (*inp).rasterH = 0;
+    (*inp).rasterBacking = 1.0f;
+    (*inp).rasterDirty = true;
+    (*inp).glyphX = nullptr;
+    (*inp).glyphN = 0;
+
     (*inp).caretMode = INPUT_CARET_BLINK;
     (*inp).caretColor = 0xFFFFFFFFu;
     (*inp).caretBlinkPeriod = INPUT_CARET_DEFAULT_PERIOD;
@@ -163,6 +364,7 @@ Input *Input_0(void) {
     (*inp).ctx = nullptr;
     (*inp).measurer = nullptr;
     (*inp).measureCtx = nullptr;
+    Panel_setRenderHandler(&(*inp).base, Input_renderFn);
     return inp;
 }
 
@@ -238,43 +440,123 @@ void Input_eraseChar(Input *inp) {
     if (fn) fn(ctx);
 }
 
-// DOWN requests focus and places the caret at the click (best-effort index
-// via the measurer hook, else the end); all other kinds are minimal no-ops.
+// Pointer handling: DOWN anchors selection & places caret, DRAG expands, UP commits.
 void Input_handlePointer(Input *self, int kind, float localX, float localY) {
     if (!self) return;
-    if (kind != PTR_DOWN) return;
-    (void)localY; // single-line: the x run places the caret
-    (*self).focused = true;
+    (void) localY;
     char *cur = (*self).text;
     size_t len = cur ? strlen(cur) : 0;
-    if ((*self).measurer) {
-        int32_t best = 0;
-        float bestD = fabsf((*self).measurer((*self).measureCtx, 0) - localX);
+    float padX = 8.0f;
+    float innerX = localX - padX;
+
+    int32_t best = 0;
+    if ((*self).glyphX && (*self).glyphN > 0) {
+        float minD = 1e9f;
+        for (int32_t i = 0; i < (*self).glyphN; i++) {
+            float d = fabsf((*self).glyphX[i] - innerX);
+            if (d < minD) {
+                minD = d;
+                best = i;
+            }
+        }
+    } else if ((*self).measurer) {
+        best = 0;
+        float bestD = fabsf((*self).measurer((*self).measureCtx, 0) - innerX);
         for (int32_t i = 1; (size_t)i <= len; i++) {
-            float d = fabsf((*self).measurer((*self).measureCtx, i) - localX);
+            float d = fabsf((*self).measurer((*self).measureCtx, i) - innerX);
             if (d < bestD) {
                 bestD = d;
                 best = i;
             }
         }
+    } else {
+        best = (int32_t) len;
+    }
+
+    if (kind == PTR_DOWN) {
+        (*self).focused = true;
+        TextSelect_begin(&(*self).select, best);
         Input_goTo(self, best);
+        markRasterDirty(self);
         return;
     }
-    int32_t end = len > (size_t)INT32_MAX ? INT32_MAX : (int32_t)len;
-    Input_goTo(self, end);
+    if (kind == PTR_DRAG) {
+        if (!(*self).focused) return;
+        TextSelect_drag(&(*self).select, best);
+        Input_goTo(self, best);
+        markRasterDirty(self);
+        return;
+    }
+    if (kind == PTR_UP) {
+        int32_t s0 = -1, s1 = -1;
+        if (TextSelect_getSpan(&(*self).select, &s0, &s1) && s0 == s1) {
+            TextSelect_reset(&(*self).select);
+        }
+        markRasterDirty(self);
+        return;
+    }
 }
 
-// Pressed keys only: printable codepoints insert, backspace erases,
-// left/right step the caret (goTo clamps), enter submits. Readonly rejects
-// the edits (insert/erase gate themselves); caret moves + submit still run.
+// Pressed keys: Cmd+A/C/X/V, Left/Right (with Shift for range), Backspace, Enter, typing
 void Input_handleKey(Input *self, const UIKeyEvent *ev) {
-    if (!self) return;
-    if (!ev) return;
+    if (!self || !ev) return;
     if (!UIKeyEvent_isPressed(ev)) return;
     int32_t code = UIKeyEvent_getKeyCode(ev);
     int32_t ch = UIKeyEvent_getCh(ev);
+    uint32_t mods = UIKeyEvent_getMods(ev);
+    bool cmdOrCtrl = (mods & (8u | 2u)) != 0;
+    bool shift = (mods & 1u) != 0;
+
+    // Cmd/Ctrl combinations
+    if (cmdOrCtrl) {
+        char *cur = (*self).text;
+        size_t len = cur ? strlen(cur) : 0;
+        if (code == KEY_A) {
+            TextSelect_begin(&(*self).select, 0);
+            TextSelect_drag(&(*self).select, (int32_t) len);
+            Input_goTo(self, (int32_t) len);
+            markRasterDirty(self);
+            markDirty(self);
+            return;
+        }
+        if (code == KEY_C) {
+            char *sel = Input_getSelectedText(self);
+            if (sel) {
+                TextCore_copyToClipboard(sel);
+                Memory_free(sel);
+            }
+            return;
+        }
+        if (code == KEY_X) {
+            if (!(*self).readonly) {
+                char *sel = Input_getSelectedText(self);
+                if (sel) {
+                    TextCore_copyToClipboard(sel);
+                    Memory_free(sel);
+                    Input_setSelectedText(self, "");
+                }
+            }
+            return;
+        }
+        if (code == KEY_V) {
+            if (!(*self).readonly) {
+                char *clip = TextCore_pasteFromClipboard();
+                if (clip) {
+                    Input_setSelectedText(self, clip);
+                    free(clip);
+                }
+            }
+            return;
+        }
+    }
+
     if (code == KEY_BACKSPACE || ch == 8) {
-        Input_eraseChar(self);
+        int32_t s0 = -1, s1 = -1;
+        if (TextSelect_getSpan(&(*self).select, &s0, &s1) && s0 != s1) {
+            Input_setSelectedText(self, "");
+        } else {
+            Input_eraseChar(self);
+        }
         return;
     }
     if (code == KEY_ENTER || ch == '\r' || ch == '\n') {
@@ -284,14 +566,50 @@ void Input_handleKey(Input *self, const UIKeyEvent *ev) {
         return;
     }
     if (code == KEY_LEFT) {
-        Input_goTo(self, (*self).cursor - 1);
+        int32_t next = (*self).cursor - 1;
+        if (next < 0) next = 0;
+        if (shift) {
+            int32_t s0 = -1, s1 = -1;
+            if (!TextSelect_getSpan(&(*self).select, &s0, &s1)) {
+                TextSelect_begin(&(*self).select, (*self).cursor);
+            }
+            TextSelect_drag(&(*self).select, next);
+        } else {
+            TextSelect_reset(&(*self).select);
+        }
+        Input_goTo(self, next);
+        markRasterDirty(self);
+        markDirty(self);
         return;
     }
     if (code == KEY_RIGHT) {
-        Input_goTo(self, (*self).cursor + 1);
+        char *cur = (*self).text;
+        size_t len = cur ? strlen(cur) : 0;
+        int32_t next = (*self).cursor + 1;
+        if ((size_t)next > len) next = (int32_t) len;
+        if (shift) {
+            int32_t s0 = -1, s1 = -1;
+            if (!TextSelect_getSpan(&(*self).select, &s0, &s1)) {
+                TextSelect_begin(&(*self).select, (*self).cursor);
+            }
+            TextSelect_drag(&(*self).select, next);
+        } else {
+            TextSelect_reset(&(*self).select);
+        }
+        Input_goTo(self, next);
+        markRasterDirty(self);
+        markDirty(self);
         return;
     }
-    if (ch >= 32) Input_insertChar(self, (char)ch);
+    if (ch >= 32) {
+        int32_t s0 = -1, s1 = -1;
+        if (TextSelect_getSpan(&(*self).select, &s0, &s1) && s0 != s1) {
+            char ins[2] = {(char)ch, '\0'};
+            Input_setSelectedText(self, ins);
+        } else {
+            Input_insertChar(self, (char)ch);
+        }
+    }
 }
 
 // ============================================================================
@@ -552,6 +870,14 @@ void Input_free(Input *inp) {
     char *holder = (*inp).placeholder;
     if (holder)
         Memory_free(holder);
+    if ((*inp).rasterTex >= 0) {
+        Texture_free((*inp).rasterTex);
+        (*inp).rasterTex = -1;
+    }
+    if ((*inp).glyphX) {
+        Memory_free((*inp).glyphX);
+        (*inp).glyphX = nullptr;
+    }
     (*inp).text = nullptr;
     (*inp).placeholder = nullptr;
     (*inp).font = nullptr;
@@ -655,4 +981,164 @@ float Input_caret_getEffectiveOpacity(const Input *inp) {
     if (!inp || !(*inp).caretShown)
         return 0.0f;
     return (*inp).caretOpacity;
+}
+
+char *Input_getSelectedText(const Input *inp) {
+    if (!inp || !(*inp).text)
+        return nullptr;
+    int32_t s0 = -1, s1 = -1;
+    if (!TextSelect_getSpan(&(*inp).select, &s0, &s1) || s0 == s1)
+        return nullptr;
+    int32_t len = (int32_t) strlen((*inp).text);
+    if (s0 < 0) s0 = 0;
+    if (s1 > len) s1 = len;
+    if (s1 <= s0) return nullptr;
+    int32_t subLen = s1 - s0;
+    char *res = (char*) Memory_alloc(TYPE_ARRAY, (size_t)(subLen + 1));
+    if (!res) return nullptr;
+    memcpy(res, (*inp).text + s0, (size_t) subLen);
+    res[subLen] = '\0';
+    return res;
+}
+
+void Input_setSelectedText(Input *inp, const char *newText) {
+    if (!inp || !newText)
+        return;
+    if ((*inp).readonly)
+        return;
+    const char *orig = (*inp).text ? (*inp).text : "";
+    int32_t origLen = (int32_t) strlen(orig);
+    int32_t s0 = -1, s1 = -1;
+    (void) TextSelect_getSpan(&(*inp).select, &s0, &s1);
+    if (s0 < 0 || s1 < 0 || s0 == s1) {
+        s0 = (*inp).cursor;
+        s1 = (*inp).cursor;
+    }
+    if (s0 < 0) s0 = 0;
+    if (s0 > origLen) s0 = origLen;
+    if (s1 < 0) s1 = 0;
+    if (s1 > origLen) s1 = origLen;
+
+    size_t insLen = strlen(newText);
+    size_t cap = (*inp).cap;
+    size_t finalLen = (size_t)s0 + insLen + (size_t)(origLen - s1);
+    if (finalLen > cap) {
+        if ((size_t)s0 + (size_t)(origLen - s1) >= cap) {
+            insLen = 0;
+        } else {
+            insLen = cap - (size_t)s0 - (size_t)(origLen - s1);
+        }
+        finalLen = (size_t)s0 + insLen + (size_t)(origLen - s1);
+    }
+
+    char *buf = (char*) Memory_alloc(TYPE_ARRAY, finalLen + 1);
+    if (!buf) return;
+    if (s0 > 0) memcpy(buf, orig, (size_t) s0);
+    if (insLen > 0) memcpy(buf + s0, newText, insLen);
+    if (origLen - s1 > 0) memcpy(buf + s0 + insLen, orig + s1, (size_t)(origLen - s1));
+    buf[finalLen] = '\0';
+
+    if ((*inp).text) Memory_free((*inp).text);
+    (*inp).text = buf;
+    (*inp).cursor = s0 + (int32_t) insLen;
+    TextSelect_reset(&(*inp).select);
+    markRasterDirty(inp);
+    markDirty(inp);
+    if ((*inp).onChange) (*inp).onChange((*inp).ctx);
+}
+
+void Input_setFontSize(Input *inp, float size) {
+    if (!inp || (*inp).fontSize == size) return;
+    (*inp).fontSize = size;
+    markRasterDirty(inp);
+    markDirty(inp);
+}
+
+float Input_getFontSize(const Input *inp) {
+    return inp ? (*inp).fontSize : 13.0f;
+}
+
+void Input_setTextColor(Input *inp, uint32_t color) {
+    if (!inp || (*inp).textColor == color) return;
+    (*inp).textColor = color;
+    markRasterDirty(inp);
+    markDirty(inp);
+}
+
+uint32_t Input_getTextColor(const Input *inp) {
+    return inp ? (*inp).textColor : 0xFFFFFFFFu;
+}
+
+void Input_setPlaceholderColor(Input *inp, uint32_t color) {
+    if (!inp || (*inp).placeholderColor == color) return;
+    (*inp).placeholderColor = color;
+    markRasterDirty(inp);
+    markDirty(inp);
+}
+
+uint32_t Input_getPlaceholderColor(const Input *inp) {
+    return inp ? (*inp).placeholderColor : 0xFF888888u;
+}
+
+void Input_setTextAlign(Input *inp, TextAlign align) {
+    if (!inp || (*inp).align == align) return;
+    (*inp).align = align;
+    markRasterDirty(inp);
+    markDirty(inp);
+}
+
+TextAlign Input_getTextAlign(const Input *inp) {
+    return inp ? (*inp).align : TEXT_ALIGN_LEFT;
+}
+
+void Input_setSpacingWidth(Input *inp, float width) {
+    if (!inp || (*inp).spacingWidth == width) return;
+    (*inp).spacingWidth = width;
+    markRasterDirty(inp);
+    markDirty(inp);
+}
+
+float Input_getSpacingWidth(const Input *inp) {
+    return inp ? (*inp).spacingWidth : 0.0f;
+}
+
+void Input_setLigatures(Input *inp, bool ligatures) {
+    if (!inp || (*inp).ligatures == ligatures) return;
+    (*inp).ligatures = ligatures;
+    markRasterDirty(inp);
+    markDirty(inp);
+}
+
+bool Input_hasLigatures(const Input *inp) {
+    return inp ? (*inp).ligatures : true;
+}
+
+void Input_setSelection(Input *inp, int32_t start, int32_t end) {
+    if (!inp) return;
+    if (start < 0 || end < 0 || start == end) {
+        TextSelect_reset(&(*inp).select);
+    } else {
+        TextSelect_begin(&(*inp).select, start);
+        TextSelect_drag(&(*inp).select, end);
+    }
+    markRasterDirty(inp);
+    markDirty(inp);
+}
+
+void Input_getSelection(const Input *inp, int32_t *outStart, int32_t *outEnd) {
+    int32_t s0 = -1, s1 = -1;
+    if (inp) (void) TextSelect_getSpan(&(*inp).select, &s0, &s1);
+    if (outStart) *outStart = s0;
+    if (outEnd) *outEnd = s1;
+}
+
+void Input_setSelectionColor(Input *inp, uint32_t color) {
+    if (!inp || (*inp).selectionColor == color) return;
+    (*inp).selectionColor = color;
+    markRasterDirty(inp);
+    markDirty(inp);
+}
+
+uint32_t Input_getSelectionColor(const Input *inp) {
+    return inp ? (*inp).selectionColor : 0x662563EBu;
 }
