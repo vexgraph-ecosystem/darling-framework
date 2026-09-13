@@ -16,7 +16,6 @@
 #include "window/window.h"
 
 #include <vulkan/vulkan_core.h>
-#include <IOSurface/IOSurface.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -70,8 +69,6 @@ extern VkInstance Vk_getInstance(void);
 extern PFN_vkGetInstanceProcAddr Vk_getGpa(void);
 extern VkPhysicalDevice Vk_getPhys(void);
 extern uint32_t Vk_getQueueFamily(void);
-extern bool VkMac_ensureIOSurfacePass(void);
-extern VkRenderPass VkMac_getIOSurfacePass(void);
 
 extern bool VkView_refreshAll(VkInstance instance, PFN_vkGetInstanceProcAddr gpa, VkPhysicalDevice phys, VkDevice device);
 extern bool VkSceneCanvas_initModule(VkInstance instance, PFN_vkGetInstanceProcAddr gpa, VkPhysicalDevice phys, VkDevice device);
@@ -234,7 +231,7 @@ static void Darling_layerRender(void *cmdBuffer, int w, int h, void *owner) {
     // flight. Resize-class work the handler triggers (a Texture_replaceRaw
     // that changes dimensions) must consult Darling_compositorIdleForResize
     // first: when the ring flies it defers to a same-size update or skips
-    // the tick, exactly like the IOSurface drift-defer above.
+    // the tick, exactly like the pane drift-defer in the resize gate.
 
     size_t childCount = Panel_childCount(panel);
     if (childCount == 0) {

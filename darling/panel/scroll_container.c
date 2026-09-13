@@ -38,7 +38,7 @@
  * TOP_RIGHT at (0,0), 10px wide, full viewport height. Anchors are the
  * whole trick — the layer bridge (anti_GetChildLayout + autoresizingMask)
  * resolves them live per resize, so the thumb tracks the edge with zero
- * repaint: Vulkan layers below, IOSurface in the middle, CALayer on top
+ * repaint: board Metal below, child panes above, WindowServer on top
  * (the vk_test stack), all moving without touching a pixel. That is why
  * the bar lives at the right: it is a layer pinned to an edge, not a
  * painted rect.
@@ -225,8 +225,7 @@ static void markDirty(ScrollContainer *sp) {
 // at (0,0), 10px wide, full viewport height). Anchors are the whole trick:
 // the layer bridge resolves them live per resize (anti_GetChildLayout +
 // autoresizingMask), so the thumb tracks the edge with zero repaint —
-// Vulkan layers below, IOSurface in the middle, CALayer on top, all moving
-// without touching a pixel. Max tracks the viewport so later growth is
+// board Metal below, child panes above, all moving without touching a pixel. Max tracks the viewport so later growth is
 // never clamped by the first layout's ceiling. Idempotent: safe to run on
 // every content/bar/sync pass.
 #define SCROLLBAR_THICKNESS 10.0f
