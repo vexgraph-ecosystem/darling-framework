@@ -54,6 +54,11 @@
  * Core Functions:
  *   - Darling_initCompositor(window)
  *   - Darling_renderFrame(cmdBuffer, drawW, drawH, userdata)
+ *   - Darling_preFrame(window, drawW, drawH, userdata)
+ *   - Darling_layerRender(cmdBuffer, w, h, owner) : pane pass (leaf panel
+ *     or board subtree via paintChildIntoPass)
+ *   - paintChildIntoPass(cmdBuffer, child, ...) (private) : one child
+ *     into board or board-pane pass (Rule 14 pane-skip inside)
  *   - Darling_compositorSettled(void)          : true when no batch slot is flying
  *   - Darling_compositorIdleForResize(void)    : settled alias for pane/
  *     texture resize callers — resize-class work (replaceRaw-resize) runs
@@ -109,11 +114,29 @@ typedef struct IOSurfaceChild {
     bool valid;
 } IOSurfaceChild;
 
-#define IOSURFACE_CHILD_MAX 256
+#define IOSURFACE_CHILD_MAX 32
 #define COMPOSITOR_BATCH_SLOTS 3
 #define COMPOSITOR_FENCE_WAIT_NS 100000000ULL
 static IOSurfaceChild s_iosurfaceChildren[IOSURFACE_CHILD_MAX] = {0};
 static int s_iosurfaceChildCount = 0;
+
+// Two-frame deferred destruction ring for evicted IOSurfaceChildren.
+// An evicted VkImage/VkFramebuffer may still be referenced by a command
+// buffer submitted in a previous frame that hasn't drained yet. We push
+// the destroyed child into this ring (indexed by the 3-slot batch ring)
+// and only free it when that slot's fence has signaled — closing
+// the page-fault window where texture.c's 2-frame CPU lag frees an image
+// under a still-flying CB (Rule 39).
+#define ZOMBIE_LIFETIME_FRAMES 32
+typedef struct ZombieSurface {
+    VkIOSurface *surf;
+    uint64_t birthFrame;   // frame number when pushed to zombie ring
+} ZombieSurface;
+#define ZOMBIE_RING_SIZE 64
+static ZombieSurface s_zombieRing[ZOMBIE_RING_SIZE] = {0};
+static int s_zombieHead = 0;
+static int s_zombieCount = 0;
+static uint64_t s_frameCounter = 0;
 static VkCommandPool s_compositorCmdPool = VK_NULL_HANDLE;
 static VkCommandBuffer s_batchCb[COMPOSITOR_BATCH_SLOTS] = {VK_NULL_HANDLE, VK_NULL_HANDLE, VK_NULL_HANDLE};
 static VkFence s_batchFence[COMPOSITOR_BATCH_SLOTS] = {VK_NULL_HANDLE, VK_NULL_HANDLE, VK_NULL_HANDLE};
@@ -132,6 +155,8 @@ static bool s_batchPending = false;
 static void refenceSlotSignaled(VkDevice dev, int slot);
 static int claimBatchSlot(VkDevice dev);
 static void refreshBatchPending(void);
+static void zombieReap(void);
+static void zombiePush(VkIOSurface *surf);
 
 // Mirror "any slot busy" into s_batchPending for the settled query.
 static void refreshBatchPending(void) {
@@ -143,6 +168,49 @@ static void refreshBatchPending(void) {
         }
     }
     s_batchPending = any;
+}
+
+// Push a VkImage to the zombie ring for deferred destruction. VkImages that
+// were exported to Metal via VkIOSurface_export are still being sampled by
+// CoreAnimation when we free them — vkDeviceWaitIdle only waits for Vulkan
+// work, not Metal compositing. The zombie ring holds the image for
+// ZOMBIE_LIFETIME_FRAMES (32 @ 60fps = ~533ms) so CoreAnimation finishes
+// compositing before we call vkDestroyImage.
+static void zombiePush(VkIOSurface *surf) {
+    if (!surf) return;
+    if (s_zombieCount >= ZOMBIE_RING_SIZE) {
+        // Ring full: drain oldest
+        ZombieSurface *z = &s_zombieRing[s_zombieHead];
+        if (z->surf) {
+            VkIOSurface_free(z->surf);
+            z->surf = nullptr;
+        }
+        s_zombieHead = (s_zombieHead + 1) % ZOMBIE_RING_SIZE;
+        s_zombieCount--;
+    }
+    int tail = (s_zombieHead + s_zombieCount) % ZOMBIE_RING_SIZE;
+    s_zombieRing[tail].surf = surf;
+    s_zombieRing[tail].birthFrame = s_frameCounter;
+    s_zombieCount++;
+}
+
+// Reclaim zombies older than ZOMBIE_LIFETIME_FRAMES. Called at the start
+// of each frame.
+static void zombieReap(void) {
+    while (s_zombieCount > 0) {
+        ZombieSurface *z = &s_zombieRing[s_zombieHead];
+        if (!z->surf) {
+            s_zombieHead = (s_zombieHead + 1) % ZOMBIE_RING_SIZE;
+            s_zombieCount--;
+            continue;
+        }
+        if (s_frameCounter - z->birthFrame < ZOMBIE_LIFETIME_FRAMES)
+            break;
+        VkIOSurface_free(z->surf);
+        z->surf = nullptr;
+        s_zombieHead = (s_zombieHead + 1) % ZOMBIE_RING_SIZE;
+        s_zombieCount--;
+    }
 }
 
 // Claim the next non-flying batch slot (non-blocking poll, Rule 27).
@@ -163,12 +231,42 @@ static int claimBatchSlot(VkDevice dev) {
                 if (GetFenceStatus_fn(dev, s_batchFence[slot]) != VK_SUCCESS)
                     continue;
                 s_batchSlotBusy[slot] = false;
+                // (deferred destruction handled by zombieReap)
             }
         }
         s_batchCursor = (slot + 1) % COMPOSITOR_BATCH_SLOTS;
         return slot;
     }
     return -1;
+}
+
+// Evict the LRU IOSurfaceChild (last in array — oldest) when the pool is full.
+// Destroys the VkImage + framebuffer but leaves the IOSurface itself alive in
+// the CALayer (VkIOSurface_free only releases the VkImage; CFRetain keeps the
+// backing IOSurface until the layer drops its reference). Next render of the
+// same panel wraps a fresh VkImage over the same IOSurface. Rule 39: never free
+// a VkImage that a flying command buffer references — defer if batch is pending.
+static void evictLRUChild(VkDevice dev) {
+    if (s_iosurfaceChildCount == 0) return;
+    IOSurfaceChild *lru = &s_iosurfaceChildren[s_iosurfaceChildCount - 1];
+    COMPOSITOR_LOAD_DEVICE(DestroyFramebuffer);
+    // DEFER: destroy framebuffer now (not referenced by CB), but defer
+    // VkImage destruction to the two-frame ring. The VkImage may still be
+    // sampled by a command buffer in a previous frame's batch ring that
+    // hasn't drained. Pushing into s_deferredEvict[slot] delays the free
+    // until that slot's fence signals (drainDeferredEvict).
+    if ((*lru).fb != VK_NULL_HANDLE && DestroyFramebuffer_fn) {
+        DestroyFramebuffer_fn(dev, (*lru).fb, nullptr);
+    }
+    // Push to zombie ring: the VkImage may still be referenced by a flying
+    // command buffer or by CoreAnimation compositing the exported Metal
+    // texture. zombieReap() will free it after ZOMBIE_LIFETIME_FRAMES.
+    zombiePush((*lru).surf);
+    (*lru).panel = nullptr;
+    (*lru).surf = nullptr;
+    (*lru).fb = VK_NULL_HANDLE;
+    (*lru).valid = false;
+    s_iosurfaceChildCount--;
 }
 
 static IOSurfaceChild *recordChildToIOSurface(VkCommandBuffer cb, Panel *child, void *surface, int w, int h) {
@@ -196,14 +294,33 @@ static IOSurfaceChild *recordChildToIOSurface(VkCommandBuffer cb, Panel *child, 
     for (int i = 0; i < s_iosurfaceChildCount; i++) {
         if (s_iosurfaceChildren[i].panel == child) {
             ioChild = &s_iosurfaceChildren[i];
+            // LRU promotion: move to front (most recently used) so the tail
+            // is always the LRU victim. Only promote when not already first.
+            if (i > 0) {
+                IOSurfaceChild tmp = *ioChild;
+                memmove(&s_iosurfaceChildren[1], &s_iosurfaceChildren[0],
+                        sizeof(IOSurfaceChild) * (size_t)i);
+                s_iosurfaceChildren[0] = tmp;
+                ioChild = &s_iosurfaceChildren[0];
+            }
             break;
         }
     }
     if (!ioChild) {
         if (s_iosurfaceChildCount >= IOSURFACE_CHILD_MAX) {
-            fprintf(stderr, "[compositor] WARNING: IOSURFACE_CHILD_MAX (%d) exceeded, dropping panel %p\n",
-                    IOSURFACE_CHILD_MAX, (void*) child);
-            return nullptr;
+            // LRU eviction: recycle the oldest (tail) entry instead of dropping
+            // the panel. The VkImage + framebuffer are destroyed, but the
+            // underlying IOSurface stays alive (CALayer holds the ref). Next
+            // render of this panel wraps a fresh VkImage over the same surface.
+            // Rule 39 guard: never evict a surface referenced by a flying
+            // command buffer — defer if batch is pending.
+            if (!s_batchPending) {
+                evictLRUChild(dev);
+            } else {
+                fprintf(stderr, "[compositor] WARNING: IOSURFACE_CHILD_MAX (%d) reached, batch pending, deferring panel %p\n",
+                        IOSURFACE_CHILD_MAX, (void*) child);
+                return nullptr;
+            }
         }
         ioChild = &s_iosurfaceChildren[s_iosurfaceChildCount++];
         (*ioChild).panel = child;
@@ -221,8 +338,11 @@ static IOSurfaceChild *recordChildToIOSurface(VkCommandBuffer cb, Panel *child, 
             canvasW = (int) VkIOSurface_width((*ioChild).surf);
             canvasH = (int) VkIOSurface_height((*ioChild).surf);
         } else {
+            // Push to zombie ring: the old VkImage may still be sampled by
+            // CoreAnimation compositing the previously exported Metal texture.
+            // A fresh VkImage is wrapped below over the same IOSurface.
             if ((*ioChild).fb) DestroyFramebuffer_fn(dev, (*ioChild).fb, nullptr);
-            VkIOSurface_free((*ioChild).surf);
+            zombiePush((*ioChild).surf);
             (*ioChild).surf = nullptr;
             (*ioChild).fb = VK_NULL_HANDLE;
             (*ioChild).valid = false;
@@ -319,6 +439,12 @@ static void renderNativeContent(Window *window, Panel *contentPanel, int winW, i
     VkDevice dev = Vk_getDevice();
     VkQueue queue = Vk_getQueue();
 
+    // Reap zombie VkImages that have survived ZOMBIE_LIFETIME_FRAMES frames,
+    // giving CoreAnimation ample time to finish compositing their exported
+    // Metal textures before we call vkDestroyImage (page-fault fix).
+    s_frameCounter++;
+    zombieReap();
+
     // Ring claim: the next non-flying slot, or -1 when every slot flies —
     // skip-and-retry next tick (dirty stays set). Never reset a flying CB.
     int slot = claimBatchSlot(dev);
@@ -341,7 +467,13 @@ static void renderNativeContent(Window *window, Panel *contentPanel, int winW, i
     VkCommandBufferBeginInfo bi = { .sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO };
     BeginCommandBuffer_fn(cb, &bi);
 
-    IOSurfaceChild *recorded[IOSURFACE_CHILD_MAX];
+    // Track recorded IOSurfaceChild indices alongside their Panel* — the LRU
+    // memmove in the cache-hit path (below) and recordChildToIOSurface can
+    // shift s_iosurfaceChildren[] entries, making a bare index point to the
+    // wrong slot by the time the post-loop re-validation runs. Storing the
+    // Panel* lets us re-resolve the correct index after any shifts occurred.
+    int recordedIdx[IOSURFACE_CHILD_MAX];
+    Panel *recordedPanel[IOSURFACE_CHILD_MAX];
     int recordedCount = 0;
 
     // TEMP DIAGNOSIS: VEX_EMPTY_BATCH=1 / VEX_HALF_BATCH=1 slice the recorded
@@ -397,14 +529,29 @@ static void renderNativeContent(Window *window, Panel *contentPanel, int winW, i
             if (cached && (*cached).valid
                 && (*cached).lastPxW == pxW
                 && (*cached).lastPxH == pxH) {
+                // LRU promotion for non-dirty cached entries: the panel is
+                // still visible so this entry is recently used. Move to front
+                // so it isn't evicted next.
+                for (int ci = 0; ci < s_iosurfaceChildCount; ci++) {
+                    if (s_iosurfaceChildren[ci].panel == child && ci > 0) {
+                        IOSurfaceChild tmp = s_iosurfaceChildren[ci];
+                        memmove(&s_iosurfaceChildren[1], &s_iosurfaceChildren[0],
+                                sizeof(IOSurfaceChild) * (size_t)ci);
+                        s_iosurfaceChildren[0] = tmp;
+                        break;
+                    }
+                }
                 continue;
             }
         }
 
         IOSurfaceChild *ioChild = recordChildToIOSurface(cb, child, surface, pxW, pxH);
         if (ioChild) {
+            int ioIdx = (int)(ioChild - s_iosurfaceChildren);
             if (recordedCount < IOSURFACE_CHILD_MAX) {
-                recorded[recordedCount++] = ioChild;
+                recordedIdx[recordedCount] = ioIdx;
+                recordedPanel[recordedCount] = child;
+                recordedCount++;
             } else {
                 fprintf(stderr, "[compositor] WARNING: recordedCount exceeded IOSURFACE_CHILD_MAX (%d)\n", IOSURFACE_CHILD_MAX);
             }
@@ -421,6 +568,19 @@ static void renderNativeContent(Window *window, Panel *contentPanel, int winW, i
             s_noBatch = getenv("VEX_NO_BATCH") != nullptr;
         if (s_noBatch)
             return;
+    }
+
+    // Re-resolve recorded entries by Panel* (not stored index) — the LRU
+    // memmove above may have shuffled s_iosurfaceChildren[] since recording,
+    // so the index we stored could point to a different entry now.
+    for (int i = 0; i < recordedCount; i++) {
+        Panel *p = recordedPanel[i];
+        for (int ci = 0; ci < s_iosurfaceChildCount; ci++) {
+            if (s_iosurfaceChildren[ci].panel == p) {
+                recordedIdx[i] = ci;
+                break;
+            }
+        }
     }
 
     if (recordedCount > 0) {
@@ -476,9 +636,10 @@ static void renderNativeContent(Window *window, Panel *contentPanel, int winW, i
         refreshBatchPending();
 
         for (int i = 0; i < recordedCount; i++) {
-            VkIOSurface_export((*recorded[i]).surf);
-            (*recorded[i]).valid = true;
-            Panel_clearTreeDirty((*recorded[i]).panel);
+            IOSurfaceChild *rc = &s_iosurfaceChildren[recordedIdx[i]];
+            VkIOSurface_export((*rc).surf);
+            (*rc).valid = true;
+            Panel_clearTreeDirty((*rc).panel);
         }
     }
 }
@@ -559,14 +720,104 @@ int32_t Darling_compositorBatchCapacity(void) {
 
 // // CORE FUNCTIONS
 
+// Paint one child panel into an already-begun render pass — shared by the
+// legacy board (Darling_renderFrame) and board panes (Darling_layerRender
+// subtree walk). Scenes always paint (handler or tri fallback); plain UI
+// paints only when paintUI is set (content-board subtree — the legacy
+// board stamps scenes alone). Pane-backed children never paint here: they
+// present their OWN chain (Rule 14, recursive Vulkan-rect tree).
+static void paintChildIntoPass(void *cmdBuffer, Panel *child, float winW, float winH, float kx, float ky, float drawW, float drawH, bool paintUI) {
+    if (!cmdBuffer || !child)
+        return;
+    Vec4 rect;
+    Container_resolve(&(*child).base, 0.0f, 0.0f, winW, winH, &rect);
+    if (rect.z <= 0.0f || rect.w <= 0.0f)
+        return;
+
+    uint64_t cType = Memory_type(child);
+    bool childIsScene = (cType == TYPE_SCENE3D_SINGLETON || cType == TYPE_SCENE2D_SINGLETON
+                         || cType == TYPE_SCENE_SINGLETON);
+    if (!childIsScene && !paintUI)
+        return;
+
+    // Pane-backed child (CAMetalLayer + own swapchain): renders into its
+    // OWN chain — the pass must never stamp it (Rule 14).
+    extern void *PanelCocoa_fromPanel(void *panel);
+    extern bool PanelCocoa_isMetal(const void *pc);
+    void *panePc = PanelCocoa_fromPanel(child);
+    if (panePc && PanelCocoa_isMetal(panePc))
+        return;
+
+    float px = rect.x * kx;
+    float py = rect.y * ky;
+    float pw = rect.z * kx;
+    float ph = rect.w * ky;
+    if (px < 0.0f) { pw += px; px = 0.0f; }
+    if (py < 0.0f) { ph += py; py = 0.0f; }
+    if (pw <= 0.0f || ph <= 0.0f) return;
+    if (px + pw > drawW) pw = drawW - px;
+    if (py + ph > drawH) ph = drawH - py;
+    if (pw <= 0.0f || ph <= 0.0f) return;
+
+    uint64_t childType = Memory_type(child);
+    bool isScene = (childType == TYPE_SCENE3D_SINGLETON || childType == TYPE_SCENE2D_SINGLETON
+                    || childType == TYPE_SCENE_SINGLETON);
+    if (isScene) {
+        Panel_RenderFn handler = Panel_getRenderHandler(child);
+        if (handler) {
+            handler(child, nullptr, cmdBuffer, drawW, drawH, px, py, pw, ph);
+        } else {
+            COMPOSITOR_LOAD_DEVICE(CmdSetViewport);
+            COMPOSITOR_LOAD_DEVICE(CmdSetScissor);
+            COMPOSITOR_LOAD_DEVICE(CmdBindPipeline);
+            COMPOSITOR_LOAD_DEVICE(CmdPushConstants);
+            COMPOSITOR_LOAD_DEVICE(CmdDraw);
+
+            float uTime = (float)((double)(NanoTime_now() - Vk_getAnimStartNanos()) / 1e9);
+            CmdBindPipeline_fn((VkCommandBuffer) cmdBuffer, VK_PIPELINE_BIND_POINT_GRAPHICS, Vk_getTriPipeline());
+            CmdPushConstants_fn((VkCommandBuffer) cmdBuffer, Vk_getTriLayout(), VK_SHADER_STAGE_VERTEX_BIT, 0, 4, &uTime);
+            VkViewport vp = { .x = px, .y = py, .width = pw, .height = ph, .minDepth = 0.0f, .maxDepth = 1.0f };
+            VkRect2D sc = { .offset = { (int32_t)px, (int32_t)py }, .extent = { (uint32_t)pw, (uint32_t)ph } };
+            CmdSetViewport_fn((VkCommandBuffer) cmdBuffer, 0, 1, &vp);
+            CmdSetScissor_fn((VkCommandBuffer) cmdBuffer, 0, 1, &sc);
+            CmdDraw_fn((VkCommandBuffer) cmdBuffer, 3, 1, 0, 0);
+
+            VkViewport defaultVp = { .x = 0.0f, .y = 0.0f, .width = drawW, .height = drawH, .minDepth = 0.0f, .maxDepth = 1.0f };
+            VkRect2D defaultSc = { .offset = { 0, 0 }, .extent = { (uint32_t)drawW, (uint32_t)drawH } };
+            CmdSetViewport_fn((VkCommandBuffer) cmdBuffer, 0, 1, &defaultVp);
+            CmdSetScissor_fn((VkCommandBuffer) cmdBuffer, 0, 1, &defaultSc);
+        }
+    } else {
+        Panel_RenderFn handler = Panel_getRenderHandler(child);
+        if (handler) {
+            handler(child, nullptr, cmdBuffer, drawW, drawH, px, py, pw, ph);
+        } else {
+            uint32_t color = Panel_getBackgroundColor(child);
+            if (color != 0) {
+                float r = (float)((color >> 16) & 0xFF) / 255.0f;
+                float g = (float)((color >> 8)  & 0xFF) / 255.0f;
+                float b = (float)( color        & 0xFF) / 255.0f;
+                float a = (float)((color >> 24) & 0xFF) / 255.0f
+                    * Container_getOpacity(&(*child).base);
+                if (a > 0.0f)
+                    Vk_fillRect(cmdBuffer, drawW, drawH, px, py, pw, ph, r, g, b, a);
+            }
+        }
+    }
+}
+
 // Pane render hook: called by VkPane_presentAll per CAMetalLayer pane, inside
 // that pane's OWN render pass (already begun, cleared, viewport at 0,0 = pane
-// size). Renders the pane's Panel handler, or the fallback spinning tri for a
-// scene with no handler. Mirror of the board's Darling_renderFrame scene path,
-// but with NO window-absolute transform — a pane owns its whole extent.
+// size). A leaf pane renders its Panel handler (or the fallback spinning tri
+// for a scene with no handler). A board pane (scene/content panel with
+// children) paints its whole subtree — scenes AND ui — through
+// paintChildIntoPass, so nested panes keep their own chains while everything
+// else lands in the board pass. Mirror of the board's Darling_renderFrame
+// scene path, but with NO window-absolute transform — a pane owns its whole
+// extent.
 static void Darling_layerRender(void *cmdBuffer, int w, int h, void *owner) {
-    Panel *child = (Panel*) owner;
-    if (!child || !cmdBuffer || w <= 0 || h <= 0)
+    Panel *panel = (Panel*) owner;
+    if (!panel || !cmdBuffer || w <= 0 || h <= 0)
         return;
 
     // Resize contract (Rule 39): this pane paints into its OWN chain — never
@@ -576,33 +827,54 @@ static void Darling_layerRender(void *cmdBuffer, int w, int h, void *owner) {
     // first: when the ring flies it defers to a same-size update or skips
     // the tick, exactly like the IOSurface drift-defer above.
 
-    Panel_RenderFn handler = Panel_getRenderHandler(child);
-    if (handler) {
-        handler(child, nullptr, cmdBuffer, (float) w, (float) h, 0.0f, 0.0f, (float) w, (float) h);
+    size_t childCount = Panel_childCount(panel);
+    if (childCount == 0) {
+        Panel_RenderFn handler = Panel_getRenderHandler(panel);
+        if (handler) {
+            handler(panel, nullptr, cmdBuffer, (float) w, (float) h, 0.0f, 0.0f, (float) w, (float) h);
+            return;
+        }
+
+        uint64_t panelType = Memory_type(panel);
+        bool isScene = (panelType == TYPE_SCENE3D_SINGLETON || panelType == TYPE_SCENE2D_SINGLETON
+                        || panelType == TYPE_SCENE_SINGLETON);
+        if (!isScene)
+            return;
+
+        // Fallback scene content: the animated triangle, full pane.
+        COMPOSITOR_LOAD_DEVICE(CmdSetViewport);
+        COMPOSITOR_LOAD_DEVICE(CmdSetScissor);
+        COMPOSITOR_LOAD_DEVICE(CmdBindPipeline);
+        COMPOSITOR_LOAD_DEVICE(CmdPushConstants);
+        COMPOSITOR_LOAD_DEVICE(CmdDraw);
+
+        float uTime = (float)((double)(NanoTime_now() - Vk_getAnimStartNanos()) / 1e9);
+        CmdBindPipeline_fn((VkCommandBuffer) cmdBuffer, VK_PIPELINE_BIND_POINT_GRAPHICS, Vk_getTriPipeline());
+        CmdPushConstants_fn((VkCommandBuffer) cmdBuffer, Vk_getTriLayout(), VK_SHADER_STAGE_VERTEX_BIT, 0, 4, &uTime);
+        VkViewport vp = { .x = 0.0f, .y = 0.0f, .width = (float) w, .height = (float) h, .minDepth = 0.0f, .maxDepth = 1.0f };
+        VkRect2D sc = { .offset = { 0, 0 }, .extent = { (uint32_t) w, (uint32_t) h } };
+        CmdSetViewport_fn((VkCommandBuffer) cmdBuffer, 0, 1, &vp);
+        CmdSetScissor_fn((VkCommandBuffer) cmdBuffer, 0, 1, &sc);
+        CmdDraw_fn((VkCommandBuffer) cmdBuffer, 3, 1, 0, 0);
         return;
     }
 
-    uint64_t childType = Memory_type(child);
-    bool isScene = (childType == TYPE_SCENE3D_SINGLETON || childType == TYPE_SCENE2D_SINGLETON
-                    || childType == TYPE_SCENE_SINGLETON);
-    if (!isScene)
+    // Board subtree: children resolve against the board's own point size,
+    // scaled to pane pixels — the same contract the legacy board honors
+    // against window points.
+    extern void Darling_getPanelSize(Panel *p, int *outW, int *outH);
+    int panelW = 0, panelH = 0;
+    Darling_getPanelSize(panel, &panelW, &panelH);
+    if (panelW <= 0 || panelH <= 0)
         return;
-
-    // Fallback scene content: the animated triangle, full pane.
-    COMPOSITOR_LOAD_DEVICE(CmdSetViewport);
-    COMPOSITOR_LOAD_DEVICE(CmdSetScissor);
-    COMPOSITOR_LOAD_DEVICE(CmdBindPipeline);
-    COMPOSITOR_LOAD_DEVICE(CmdPushConstants);
-    COMPOSITOR_LOAD_DEVICE(CmdDraw);
-
-    float uTime = (float)((double)(NanoTime_now() - Vk_getAnimStartNanos()) / 1e9);
-    CmdBindPipeline_fn((VkCommandBuffer) cmdBuffer, VK_PIPELINE_BIND_POINT_GRAPHICS, Vk_getTriPipeline());
-    CmdPushConstants_fn((VkCommandBuffer) cmdBuffer, Vk_getTriLayout(), VK_SHADER_STAGE_VERTEX_BIT, 0, 4, &uTime);
-    VkViewport vp = { .x = 0.0f, .y = 0.0f, .width = (float) w, .height = (float) h, .minDepth = 0.0f, .maxDepth = 1.0f };
-    VkRect2D sc = { .offset = { 0, 0 }, .extent = { (uint32_t) w, (uint32_t) h } };
-    CmdSetViewport_fn((VkCommandBuffer) cmdBuffer, 0, 1, &vp);
-    CmdSetScissor_fn((VkCommandBuffer) cmdBuffer, 0, 1, &sc);
-    CmdDraw_fn((VkCommandBuffer) cmdBuffer, 3, 1, 0, 0);
+    float kx = (float) w / (float) panelW;
+    float ky = (float) h / (float) panelH;
+    for (size_t i = 0; i < childCount; i++) {
+        Panel *child = Panel_getChild(panel, i);
+        if (!child)
+            continue;
+        paintChildIntoPass(cmdBuffer, child, (float) panelW, (float) panelH, kx, ky, (float) w, (float) h, true);
+    }
 }
 
 void Darling_preFrame(Window *window, int drawW, int drawH, void *userdata) {
@@ -628,6 +900,12 @@ void Darling_preFrame(Window *window, int drawW, int drawH, void *userdata) {
     float kx = (float)drawW / (float)winW;
     float ky = (float)drawH / (float)winH;
 
+    // Boards first: scene + content panels attach their full-window Metal
+    // boards here so the IOSurface attach below sees board backing (its
+    // metal-parent gate) and the subtree painters see board sizes.
+    extern int Darling_attachPanelBoards(Window *window, int width, int height);
+    Darling_attachPanelBoards(window, winW, winH);
+
     Panel *root = Window_getContainer(window);
     Panel *contentPanel = Window_getContentPanel(window);
     Panel *scenePanel = Window_getScenePanel(window);
@@ -648,6 +926,10 @@ void Darling_preFrame(Window *window, int drawW, int drawH, void *userdata) {
             s_lastCompChildren = curChildCount;
         }
     }
+
+    // Board layers parent under the root layer every tick (scene below
+    // content); the call self-gates live resize and off-thread delivery.
+    Window_compositeBoards(window);
 
     if (scenePanel) {
         Container_setSize(&(*scenePanel).base, (float)winW, (float)winH);
@@ -684,87 +966,24 @@ void Darling_renderFrame(void *cmdBuffer, int drawW, int drawH, void *userdata) 
 
     Panel *root = Window_getContainer(window);
 
+    // Board-owned scenes (Rule 14): a metal-backed scenePanel paints its
+    // whole subtree into its own board chain — the legacy board stamps
+    // nothing and degrades to its clear pass.
+    Panel *boardScene = Window_getScenePanel(window);
+    if (boardScene) {
+        extern void *PanelCocoa_fromPanel(void *panel);
+        extern bool PanelCocoa_isBoard(const void *pc);
+        void *boardPc = PanelCocoa_fromPanel(boardScene);
+        if (boardPc && PanelCocoa_isBoard(boardPc))
+            return;
+    }
+
     if (root) {
         size_t childCount = Panel_childCount(root);
         for (size_t i = 0; i < childCount; i++) {
             Panel *child = Panel_getChild(root, i);
             if (!child) continue;
-
-            Vec4 rect;
-            Container_resolve(&(*child).base, 0.0f, 0.0f, (float)winW, (float)winH, &rect);
-            if (rect.z <= 0.0f || rect.w <= 0.0f) continue;
-
-            uint64_t cType = Memory_type(child);
-            bool childIsScene = (cType == TYPE_SCENE3D_SINGLETON || cType == TYPE_SCENE2D_SINGLETON
-                                 || cType == TYPE_SCENE_SINGLETON);
-            if (!childIsScene) {
-                continue;
-            }
-
-            // Pane-backed scene (CAMetalLayer + own swapchain): renders into
-            // its OWN chain — the board must never stamp it (Rule 14).
-            extern void *PanelCocoa_fromPanel(void *panel);
-            extern bool PanelCocoa_isMetal(const void *pc);
-            void *panePc = PanelCocoa_fromPanel(child);
-            if (panePc && PanelCocoa_isMetal(panePc))
-                continue;
-
-            float px = rect.x * kx;
-            float py = rect.y * ky;
-            float pw = rect.z * kx;
-            float ph = rect.w * ky;
-            if (px < 0.0f) { pw += px; px = 0.0f; }
-            if (py < 0.0f) { ph += py; py = 0.0f; }
-            if (pw <= 0.0f || ph <= 0.0f) continue;
-            if (px + pw > (float)drawW) pw = (float)drawW - px;
-            if (py + ph > (float)drawH) ph = (float)drawH - py;
-            if (pw <= 0.0f || ph <= 0.0f) continue;
-
-            uint64_t childType = Memory_type(child);
-            bool isScene = (childType == TYPE_SCENE3D_SINGLETON || childType == TYPE_SCENE2D_SINGLETON
-                            || childType == TYPE_SCENE_SINGLETON);
-            if (isScene) {
-                Panel_RenderFn handler = Panel_getRenderHandler(child);
-                if (handler) {
-                    handler(child, nullptr, cmdBuffer, (float) drawW, (float) drawH, px, py, pw, ph);
-                } else {
-                    COMPOSITOR_LOAD_DEVICE(CmdSetViewport);
-                    COMPOSITOR_LOAD_DEVICE(CmdSetScissor);
-                    COMPOSITOR_LOAD_DEVICE(CmdBindPipeline);
-                    COMPOSITOR_LOAD_DEVICE(CmdPushConstants);
-                    COMPOSITOR_LOAD_DEVICE(CmdDraw);
-
-                    float uTime = (float)((double)(NanoTime_now() - Vk_getAnimStartNanos()) / 1e9);
-                    CmdBindPipeline_fn((VkCommandBuffer) cmdBuffer, VK_PIPELINE_BIND_POINT_GRAPHICS, Vk_getTriPipeline());
-                    CmdPushConstants_fn((VkCommandBuffer) cmdBuffer, Vk_getTriLayout(), VK_SHADER_STAGE_VERTEX_BIT, 0, 4, &uTime);
-                    VkViewport vp = { .x = px, .y = py, .width = pw, .height = ph, .minDepth = 0.0f, .maxDepth = 1.0f };
-                    VkRect2D sc = { .offset = { (int32_t)px, (int32_t)py }, .extent = { (uint32_t)pw, (uint32_t)ph } };
-                    CmdSetViewport_fn((VkCommandBuffer) cmdBuffer, 0, 1, &vp);
-                    CmdSetScissor_fn((VkCommandBuffer) cmdBuffer, 0, 1, &sc);
-                    CmdDraw_fn((VkCommandBuffer) cmdBuffer, 3, 1, 0, 0);
-
-                    VkViewport defaultVp = { .x = 0.0f, .y = 0.0f, .width = (float)drawW, .height = (float)drawH, .minDepth = 0.0f, .maxDepth = 1.0f };
-                    VkRect2D defaultSc = { .offset = { 0, 0 }, .extent = { (uint32_t)drawW, (uint32_t)drawH } };
-                    CmdSetViewport_fn((VkCommandBuffer) cmdBuffer, 0, 1, &defaultVp);
-                    CmdSetScissor_fn((VkCommandBuffer) cmdBuffer, 0, 1, &defaultSc);
-                }
-            } else {
-                Panel_RenderFn handler = Panel_getRenderHandler(child);
-                if (handler) {
-                    handler(child, nullptr, cmdBuffer, (float) drawW, (float) drawH, px, py, pw, ph);
-                } else {
-                    uint32_t color = Panel_getBackgroundColor(child);
-                    if (color != 0) {
-                        float r = ((color >> 16) & 0xFF) / 255.0f;
-                        float g = ((color >> 8) & 0xFF) / 255.0f;
-                        float b = (color & 0xFF) / 255.0f;
-                        float a = ((color >> 24) & 0xFF) / 255.0f
-                            * Container_getOpacity(&(*child).base);
-                        if (a > 0.0f)
-                            Vk_fillRect(cmdBuffer, (float)drawW, (float)drawH, px, py, pw, ph, r, g, b, a);
-                    }
-                }
-            }
+            paintChildIntoPass(cmdBuffer, child, (float)winW, (float)winH, kx, ky, (float)drawW, (float)drawH, false);
         }
     }
 }
@@ -773,7 +992,15 @@ void Darling_initCompositor(Window *window) {
     if (!window) return;
 
     if (!Vk_ready()) {
-        Vk_init(window);
+        Vk_setWindowSeam(window,
+                         (void *(*)(void *))Window_metalLayer,
+                         (bool (*)(void *))Window_isTransparent,
+                         (VkWindowPresentMode (*)(void *))Window_getPresentMode,
+                         (uint64_t (*)(void *))Window_renderGeneration,
+                         (bool (*)(void *))Window_isLiveResizing,
+                         (void (*)(void *, void *, void *))Window_setResizeRenderHook,
+                         (void (*)(void *))Window_setGravityTopLeft);
+        Vk_init();
     }
 
     VkInstance inst = Vk_getInstance();
@@ -849,7 +1076,7 @@ void Darling_initCompositor(Window *window) {
     // page-fault the GPU (Rule 39 net).
     Texture_setRetireGuard(darlingRetireGuard);
 
-    Vk_setPreFrameRenderer(Darling_preFrame, window);
+    Vk_setPreFrameRenderer((VkPreFrameFn)Darling_preFrame, window);
     Vk_setFrameRenderer(Darling_renderFrame, window);
 
     // Pane hook: per-CAMetalLayer swapchain children render through here.
@@ -895,6 +1122,17 @@ void Darling_shutdownCompositor(void) {
             s_batchSlotBusy[i] = false;
         }
         s_batchCursor = 0;
+
+        // Drain zombie ring (all frames allowed to survive at shutdown).
+        for (int i = 0; i < s_zombieCount; i++) {
+            int idx = (s_zombieHead + i) % ZOMBIE_RING_SIZE;
+            if (s_zombieRing[idx].surf) {
+                VkIOSurface_free(s_zombieRing[idx].surf);
+                s_zombieRing[idx].surf = nullptr;
+            }
+        }
+        s_zombieCount = 0;
+        s_zombieHead = 0;
 
         if (s_compositorCmdPool != VK_NULL_HANDLE) {
             PFN_vkDestroyCommandPool DestroyCommandPool_fn = (PFN_vkDestroyCommandPool)gdpa(dev, "vkDestroyCommandPool");
