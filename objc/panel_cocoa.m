@@ -16,7 +16,11 @@
  * ============================================================================
  * IOSurface-backed panel compositor: each cocoa-backed panel owns a GPU
  * buffer plus a CALayer target, with the panel subtree painted into the
- * surface and composited by AppKit.
+ * surface and composited by AppKit. Metal panes (PanelCocoa_newMetal) own
+ * a CAMetalLayer + VkPane swapchain pinned top-left (contentsGravity
+ * TopLeft, anchorPoint (0,0), geometryFlipped YES) presenting with the
+ * WindowServer transaction (presentsWithTransaction YES) — stack:
+ * NSWindow -> CAMetalLayer -> Vulkan rect children, recursively.
  *
  * STRUCT FIELDS (local to this file):
  * ----------------------------------------------------------------------------
@@ -242,6 +246,10 @@ PanelCocoa *PanelCocoa_newMetal(void *panel, int width, int height) {
     atomic_init(&(*pc).dirty, false);
 
     // The "pane of glass": a CAMetalLayer with its own Vulkan swapchain.
+    // LAYER CONTRACT (window stack, bottom to top):
+    //   NSWindow -> CAMetalLayer (this pane, the canvas) -> Vulkan rect child
+    //   -> Vulkan rect child, recursively. Each pane presents its OWN chain;
+    //   the window board never stamps panes (Rule 14 double-render law).
     CAMetalLayer *layer = [CAMetalLayer layer];
     if (!layer) {
         free(pc);
@@ -249,9 +257,18 @@ PanelCocoa *PanelCocoa_newMetal(void *panel, int width, int height) {
     }
     layer.device = MTLCreateSystemDefaultDevice();
     layer.pixelFormat = MTLPixelFormatBGRA8Unorm;
-    layer.geometryFlipped = YES;            // Vulkan top-down space
+    layer.geometryFlipped = YES;            // Vulkan top-down space: (0,0) is
+                                            // top-left, (+,+) runs bottom-right
     layer.opaque = NO;                      // blur show-through
-    layer.presentsWithTransaction = NO;     // panes present independently
+    // Top-left pivot: the fixed-size pane pins its exact-size drawable to
+    // the layer's top-left corner — never stretched (Resize gravity would
+    // smear the frozen drawable; TopLeft crops nothing on an exact fit).
+    layer.contentsGravity = kCAGravityTopLeft;
+    // WindowServer sync: presents join the CoreAnimation transaction so pane
+    // anchoring (autoresizingMask + anchorPoint from PanelCocoa_setAnchors)
+    // lands on the same vsync as the window edge — edge-locked, zero CPU
+    // catch-up. Mirrors the board VulkanView steady-state contract.
+    layer.presentsWithTransaction = YES;
     // Rule 12: contentsScale = backingScaleFactor so native physical pixels
     // of the pane's swapchain map 1:1 to logical points. drawableSize is
     // points * scale (physical pixels), matching the IOSurface path.
