@@ -16,9 +16,10 @@
  *
  * STRUCT FIELDS (Mirroring darling/scene/scene.h):
  * ----------------------------------------------------------------------------
- *   Scene:                 // The scene root (Panel + mapping mode)
+ *   Scene:                 // The scene root (Panel + mapping + present mode)
  *     Panel base;          // Inherited layout/bounds/tree state (see panel.h)
  *     int32_t mode;        // SCENE_MODE_STRETCH/FIT/PIXEL mapping mode
+ *     int32_t presentMode; // SCENE_PRESENT_COMPOSITED/DIRECT destination
  *   Scene2D:               // 2D dispatch tag, no extra payload
  *     Scene base;          // Embedded scene root
  *   Scene3D:               // 3D dispatch tag, no extra payload
@@ -35,6 +36,7 @@
  *
  * Setters:
  *   - Scene_setMode(s, mode)
+ *   - Scene_setPresentMode(s, presentMode)
  *   - Scene_setLocation(s, x, y)
  *   - Scene_setSize(s, w, h)
  *   - Scene_setAnchor(s, anchor)
@@ -53,6 +55,7 @@
  *
  * Getters:
  *   - Scene_getMode(s)
+ *   - Scene_getPresentMode(s)
  *   - Scene_getVirtualWidth(s)
  *   - Scene_getVirtualHeight(s)
  * ============================================================================
@@ -75,6 +78,7 @@ static Scene *allocScene(uint64_t typeId) {
     Memory_free(p);
 
     (*s).mode = SCENE_MODE_PIXEL; // legacy default: resize reveals more canvas
+    (*s).presentMode = SCENE_PRESENT_COMPOSITED; // Rule 14: retained target
     return s;
 }
 
@@ -118,6 +122,17 @@ void Scene_setMode(Scene *s, int mode) {
     if (!s || mode < SCENE_MODE_STRETCH || mode > SCENE_MODE_PIXEL)
         return;
     (*s).mode = mode;
+    Container_markDirty(sceneLayout(s));
+}
+
+int Scene_getPresentMode(const Scene *s) {
+    return s ? (*s).presentMode : SCENE_PRESENT_COMPOSITED;
+}
+
+void Scene_setPresentMode(Scene *s, int presentMode) {
+    if (!s || (presentMode != SCENE_PRESENT_COMPOSITED && presentMode != SCENE_PRESENT_DIRECT))
+        return;
+    (*s).presentMode = presentMode;
     Container_markDirty(sceneLayout(s));
 }
 

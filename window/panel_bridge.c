@@ -8,6 +8,8 @@
 #include "darling/container.h"
 #include "darling/panel/panel.h"
 #include "darling/panel/scroll_container.h"
+#include "darling/scene/scene.h"
+#include "vulkan/vk_layer.h"
 #include "window/window.h"
 #include "annotation/overview.h"
 
@@ -30,6 +32,13 @@
  * Core Functions:
  *   - Darling_attachPanes(window, contentPanel, width, height)
  *   - Darling_attachPanelBoards(window, width, height)
+ *   - Darling_attachLayers(window, contentPanel, width, height)
+ *   - Darling_propagatePaneDirty(window, contentPanel)
+ *     (Panel_isTreeDirty -> VkPane_markDirty per DIRECT chain; COMPOSITED
+ *     scenes re-arm their VkLayer every tick so animation never freezes;
+ *     boards re-arm on tree dirt or a layer-backed scene descendant
+ *     painting into the board pass; bool stores only, safe on the worker
+ *     mid-drag)
  *   - TextCore_backingScale(void)
  *   - for(i++)
  *   - PanelCocoa_fromPanel(panel)
@@ -53,26 +62,34 @@
 // src/window/panel_bridge.c — pure-C bridge for Metal pane operations.
 //
 // LAYER MODEL (the stack, front to back):
-//   content board ..... full-window CAMetalLayer + VkPane chain (UI subtree)
+//   content board ..... full-window CAMetalLayer + VkPane chain (UI subtree;
+//                       samples every COMPOSITED scene layer)
 //   scene board ....... full-window CAMetalLayer + VkPane chain (scene subtree)
-//   child panes ....... one CAMetalLayer + VkPane chain EACH (nested scenes)
+//   child panes ....... one CAMetalLayer + VkPane chain EACH (DIRECT scenes)
+//   COMPOSITED layers . retained offscreen VkLayer targets (Rule 14) —
+//                       NO CAMetalLayer; the canvas samples them as quads
 //   window ............ CAMetalLayer, clear-transparent glass bottom
 //
 // Darling numbering:
 //   layer 1 = window (CAMetalLayer, the glass bottom)
 //   layer 2 = contentPanel board + scenePanel board (full-window Metal)
-//   layer 3 = first-gen scene panes (own chain each; deeper nesting —
+//   layer 3 = DIRECT scene panes (own chain each; deeper nesting —
 //             a1/a2/a3 inside a — paints inside the parent pass via
 //             Vulkan render handlers, NOT as nested layers).
+//   COMPOSITED scenes live inside the content board pass — one canvas
+//   total, no per-scene surfaces.
 //   Scroll offsets reach layers through ScrollContainer_childFrame (content
 //   shifts by -offset, chrome stays) — C-side resolve is the source of
 //   truth, exactly as vk_test's hand-placed anchors proved.
 //
-// TRAFFIC LAW: every panel renders into its own VkPane chain (boards paint
-// whole subtrees, scenes paint themselves) and WindowServer composites the
-// stack onto the glass. Resize = layer moves via anchors, zero rebuild.
+// TRAFFIC LAW: DIRECT scenes render into their own VkPane chains and
+// COMPOSITED scenes into retained VkLayer flight targets (boards paint whole
+// subtrees); WindowServer composites the layer stack onto the glass. Resize
+// = layer moves via anchors (DIRECT) or the composite rect tracks the anchor
+// (COMPOSITED), zero rebuild.
 //
-// Each scene child gets its own Metal pane. Plain UI paints into the board
+// Each DIRECT scene child gets its own Metal pane; each COMPOSITED scene
+// child gets a retained offscreen target. Plain UI paints into the board
 // pass. This file iterates children and calls into ObjC PanelCocoa for the
 // Metal/CALayer plumbing.
 
@@ -119,11 +136,14 @@ int Darling_attachPanelBoards(Window *window, int width, int height) {
     return done;
 }
 
-// Attach Metal pane backing to the scene children of a content panel —
-// every scene is a "pane of glass" (own CAMetalLayer + Vulkan swapchain).
-// Plain UI needs no backing: it paints into the board pass. Spacers
-// (transparent, no handler, no scene) own nothing. Returns the number of
-// panes attached or resized.
+// Attach Metal pane backing to the DIRECT scene children of a content panel —
+// the "pane of glass" model: own CAMetalLayer + Vulkan swapchain (Rule 11.5,
+// the managed exception for full-window or latency-locked scenes). COMPOSITED
+// scenes (Rule 14 default) are skipped here and registered as retained
+// offscreen VkLayer targets by Darling_attachLayers instead. Plain UI needs
+// no backing: it paints into the board pass. Spacers (transparent, no
+// handler, no scene) own nothing. Returns the number of panes attached or
+// resized.
 int Darling_attachPanes(Window *window, Panel *contentPanel, int width, int height) {
     if (!window || !contentPanel)
         return 0;
@@ -149,6 +169,10 @@ int Darling_attachPanes(Window *window, Panel *contentPanel, int width, int heig
                         || childType == TYPE_SCENE_SINGLETON);
         if (!isScene)
             continue;
+        // COMPOSITED scenes own no Metal surface — they render into a
+        // retained VkLayer and the canvas samples it (Darling_attachLayers).
+        if (Scene_getPresentMode((Scene*) child) != SCENE_PRESENT_DIRECT)
+            continue;
 
         Vec4 rect;
         Container_resolve(&(*child).base, 0.0f, 0.0f, (float) width, (float) height, &rect);
@@ -166,6 +190,146 @@ int Darling_attachPanes(Window *window, Panel *contentPanel, int width, int heig
         }
     }
     return attached;
+}
+
+// Attach retained offscreen VkLayer targets to the COMPOSITED scene children
+// of a content panel (Rule 14 default: a scene keeps a fixed pixel-size
+// flight target rendered by the present worker; the canvas samples it as a
+// textured quad). DIRECT scenes own Metal panes and are skipped. A layer's
+// pixel size is FIXED at register time — VkLayer_resize is a no-op when the
+// size is unchanged, so fixed scenes never rebuild on window resize (live
+// anchoring is exactly as panes: the composite rect tracks the anchor). The
+// PANEL itself is the layer's owner handle, so VkLayer_find(child) resolves
+// the composite pass's child -> layer index. Returns the number of layers
+// registered or resized.
+int Darling_attachLayers(Window *window, Panel *contentPanel, int width, int height) {
+    if (!window || !contentPanel)
+        return 0;
+    (void) window;
+    int attached = 0;
+    size_t childCount = Panel_childCount(contentPanel);
+    extern float TextCore_backingScale(void);
+    float scale = TextCore_backingScale();
+    if (scale <= 0.0f)
+        scale = 1.0f;
+
+    for (size_t i = 0; i < childCount; i++) {
+        Panel *child = Panel_getChild(contentPanel, i);
+        if (!child)
+            continue;
+
+        uint64_t childType = Memory_type(child);
+        bool isScene = (childType == TYPE_SCENE3D_SINGLETON || childType == TYPE_SCENE2D_SINGLETON
+                        || childType == TYPE_SCENE_SINGLETON);
+        if (!isScene)
+            continue;
+        if (Scene_getPresentMode((Scene*) child) != SCENE_PRESENT_COMPOSITED)
+            continue;
+
+        Vec4 rect;
+        Container_resolve(&(*child).base, 0.0f, 0.0f, (float) width, (float) height, &rect);
+        int allocW = (int) (rect.z * scale + 0.5f);
+        int allocH = (int) (rect.w * scale + 0.5f);
+        if (allocW <= 0 || allocH <= 0 || allocW > 16384 || allocH > 16384)
+            continue;
+
+        int index = VkLayer_find(child);
+        if (index >= 0) {
+            // Rebuild gate (Rule 39): a layer resize tears down flight
+            // images the canvas's already-submitted composite pass may still
+            // reference. Defer the resize to a quiescent tick (Darling's
+            // pane flight = every submit that samples layers has drained);
+            // same gate panes and textures honor. Unchanged sizes would no-op
+            // inside resize; being gated they just wait a tick — harmless.
+            extern bool Darling_compositorIdleForResize(void);
+            if (Darling_compositorIdleForResize() && VkLayer_resize(index, allocW, allocH))
+                attached++;
+        } else if (VkLayer_register(allocW, allocH, child) >= 0) {
+            attached++;
+        }
+    }
+    return attached;
+}
+
+// Propagate repaint demand into pane chains (Panel_isTreeDirty ->
+// VkPane_markDirty). Runs every tick from Darling_preFrame's ungated tail —
+// including mid-drag — and performs zero layer mutation (bool stores only),
+// so it is safe on the present worker while thread 0 owns layer motion.
+// Scenes re-arm every tick (time-driven motion never sets tree-dirty, yet
+// must never freeze); static panes re-arm only on tree dirt and otherwise
+// rest on their stale drawable via the present walk's clean-skip. Boards
+// re-arm on tree dirt, or when a non-pane scene descendant paints into the
+// board pass (Rule 14: pane-backed scenes own their chains and never force
+// the board). Clearing happens per-chain after a successful present.
+void Darling_propagatePaneDirty(Window *window, Panel *contentPanel) {
+    if (!window || !contentPanel)
+        return;
+    extern void *PanelCocoa_fromPanel(void *panel);
+    extern bool PanelCocoa_isMetal(const void *pc);
+    extern bool PanelCocoa_isBoard(const void *pc);
+    extern int PanelCocoa_chain(const void *pc);
+    extern void VkPane_markDirty(int index, bool dirty);
+
+    size_t childCount = Panel_childCount(contentPanel);
+    for (size_t i = 0; i < childCount; i++) {
+        Panel *child = Panel_getChild(contentPanel, i);
+        if (!child)
+            continue;
+        uint64_t childType = Memory_type(child);
+        bool isScene = (childType == TYPE_SCENE3D_SINGLETON || childType == TYPE_SCENE2D_SINGLETON
+                        || childType == TYPE_SCENE_SINGLETON);
+        // COMPOSITED scenes own no Metal pane: re-arm their retained
+        // offscreen target every tick (scenes animate — time-driven motion
+        // never sets tree-dirty, yet must never freeze), so the visit walk
+        // re-renders them and the board re-samples the new frame.
+        if (isScene && Scene_getPresentMode((Scene*) child) == SCENE_PRESENT_COMPOSITED) {
+            int layer = VkLayer_find(child);
+            if (layer >= 0)
+                VkLayer_markDirty(layer, true);
+            continue;
+        }
+        void *pc = PanelCocoa_fromPanel(child);
+        if (!pc || !PanelCocoa_isMetal(pc))
+            continue;
+        if (isScene || Panel_isTreeDirty(child)) {
+            int chain = PanelCocoa_chain(pc);
+            if (chain >= 0)
+                VkPane_markDirty(chain, true);
+        }
+    }
+
+    Panel *boards[2] = { Window_getScenePanel(window), Window_getContentPanel(window) };
+    for (int i = 0; i < 2; i++) {
+        Panel *board = boards[i];
+        if (!board)
+            continue;
+        void *bpc = PanelCocoa_fromPanel(board);
+        if (!bpc || !PanelCocoa_isBoard(bpc))
+            continue;
+        int chain = PanelCocoa_chain(bpc);
+        if (chain < 0)
+            continue;
+        bool boardDirty = Panel_isTreeDirty(board);
+        if (!boardDirty) {
+            size_t subCount = Panel_childCount(board);
+            for (size_t k = 0; k < subCount && !boardDirty; k++) {
+                Panel *sub = Panel_getChild(board, k);
+                if (!sub)
+                    continue;
+                uint64_t subType = Memory_type(sub);
+                bool subScene = (subType == TYPE_SCENE3D_SINGLETON || subType == TYPE_SCENE2D_SINGLETON
+                                 || subType == TYPE_SCENE_SINGLETON);
+                if (!subScene)
+                    continue;
+                void *spc = PanelCocoa_fromPanel(sub);
+                if (spc && PanelCocoa_isMetal(spc))
+                    continue;
+                boardDirty = true;
+            }
+        }
+        if (boardDirty)
+            VkPane_markDirty(chain, true);
+    }
 }
 
 // Resize Metal pane backing for the backed children of a content panel.

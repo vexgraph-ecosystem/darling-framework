@@ -17,9 +17,19 @@
 #define SCENE_MODE_FIT     1 // uniform scale, letterboxed + centered
 #define SCENE_MODE_PIXEL   2 // 1 scene unit == 1 window px, top-left pinned
 
+// Present destination (Rule 14 / Rule 11.5): how the scene reaches the
+// screen. Default is COMPOSITED — the scene keeps a retained offscreen
+// flight target (VkLayer, own timer) that the canvas samples as a textured
+// quad at the scene's anchor rect; one canvas total, no per-scene
+// CAMetalLayer. DIRECT is the managed exception (Rule 33): a full-window or
+// latency-locked scene owns its own CAMetalLayer + VkPane swapchain.
+#define SCENE_PRESENT_COMPOSITED 0 // retained target, sampled by the canvas
+#define SCENE_PRESENT_DIRECT     1 // own CAMetalLayer + VkPane swapchain
+
 typedef struct Scene {
     Panel base;
     int32_t mode;
+    int32_t presentMode;
 } Scene;
 
 typedef struct Scene2D {
@@ -45,6 +55,8 @@ Scene3D *Scene3D_0(void);
 
 int Scene_getMode(const Scene *s);
 void Scene_setMode(Scene *s, int mode);
+int Scene_getPresentMode(const Scene *s);
+void Scene_setPresentMode(Scene *s, int presentMode);
 float Scene_getVirtualWidth(const Scene *s);   // legacy parity: reads Container w/h
 float Scene_getVirtualHeight(const Scene *s);
 

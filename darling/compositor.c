@@ -9,6 +9,7 @@
 #include "vulkan/sdf_gpu.h"
 #include "vulkan/vk.h"
 #include "vulkan/vk_iosurface.h"
+#include "vulkan/vk_layer.h"
 #include "vulkan/vk_pane.h"
 #include "vulkan/vk_guard.h"
 #include "vulkan/vk_scene.h"
@@ -29,7 +30,10 @@
  * Retained-mode UI compositor connecting Darling UI nodes and Vulkan scene
  * viewports into the host window and presentation loop. Every panel is a
  * Vulkan rect: boards (scene/content) own full-window Metal layers + VkPane
- * chains and paint their whole subtree; nested scenes own child panes.
+ * chains and paint their whole subtree; scenes reach the screen through one
+ * of two Rule 14 destinations — COMPOSITED (default) owns a retained
+ * offscreen VkLayer flight target the canvas samples as a textured quad at
+ * the anchor rect, DIRECT owns a child pane (CAMetalLayer + swapchain).
  * WindowServer composites the layer tree; no IOSurface transport remains.
  *
  * STRUCT FIELDS (local to this file): none — procedural (no owned struct).
@@ -41,10 +45,17 @@
  *   - Darling_shutdownCompositor(void)
  *   - Darling_renderFrame(cmdBuffer, drawW, drawH, userdata)
  *   - Darling_preFrame(window, drawW, drawH, userdata)
- *   - Darling_layerRender(cmdBuffer, w, h, owner) : pane pass (leaf panel
- *     or board subtree via paintChildIntoPass)
+ *     (layout-only live gate: setSize/attachPanelBoards/attachPanes/
+ *     attachLayers/composite skipped mid-drag; pane dirty propagation + clear
+ *     color run every tick; Darling_layerRender runs inside VkPane_presentAll
+ *     and VkLayer_visit regardless of the gate)
+ *   - Darling_layerRender(cmdBuffer, w, h, owner) : pane + retained-layer
+ *     pass leaf (leaf panel or board subtree via paintChildIntoPass; runs
+ *     every tick, live or not — the shared painter for DIRECT pane chains
+ *     and COMPOSITED VkLayer targets)
  *   - paintChildIntoPass(cmdBuffer, child, ...) (private) : one child
- *     into board or board-pane pass (Rule 14 pane-skip inside)
+ *     into board or board-pane pass (Rule 14 pane-skip + COMPOSITED layer
+ *     composite inside)
  *   - Darling_compositorSettled(void)          : true when no pane submit flies
  *   - Darling_compositorIdleForResize(void)    : settled alias for pane/
  *     texture resize callers — resize-class work runs only when idle
@@ -168,6 +179,21 @@ static void paintChildIntoPass(void *cmdBuffer, Panel *child, float winW, float 
     uint64_t childType = Memory_type(child);
     bool isScene = (childType == TYPE_SCENE3D_SINGLETON || childType == TYPE_SCENE2D_SINGLETON
                     || childType == TYPE_SCENE_SINGLETON);
+
+    // COMPOSITED scene (Rule 14): its pixels live in a retained offscreen
+    // VkLayer flight target rendered by the present worker. The canvas
+    // SAMPLES the last-published frame as a textured quad at the anchor rect
+    // — the scene's render handler is NEVER invoked here (composite !=
+    // render). Same visual as a DIRECT pane's presented layer, one canvas
+    // total instead of a Metal surface per scene.
+    if (isScene && Scene_getPresentMode((Scene*) child) == SCENE_PRESENT_COMPOSITED) {
+        int layer = VkLayer_find(child);
+        if (layer >= 0)
+            VkLayer_composite(cmdBuffer, drawW, drawH, layer, px, py, pw, ph,
+                              1.0f, 1.0f, 1.0f, 1.0f);
+        return;
+    }
+
     if (isScene) {
         Panel_RenderFn handler = Panel_getRenderHandler(child);
         if (handler) {
@@ -287,17 +313,19 @@ void Darling_preFrame(Window *window, int drawW, int drawH, void *userdata) {
     (void)userdata;
     if (!window) return;
 
-    // LIVE RESIZE GATE (Rule 11.6): during a drag thread 0 owns ALL layer
-    // motion — setFrameSize's synchronous composite pins every pane to its
-    // selfAnchor per drag step. The present worker must NOT mutate container
-    // layout or composite layers concurrently: that race tears the anchor
-    // math and pane layers drift away from their pinned corners. The worker
-    // still presents the board + all pane chains (panes render through
-    // Darling_layerRender, never through preFrame), so the four scenes keep
-    // animating the whole drag. On settle the flag clears and preFrame
-    // resumes: one layout, one final re-record, one board rebuild.
-    if (Window_isLiveResizing(window))
-        return;
+    // LIVE RESIZE GATE, LAYOUT-ONLY (Rule 11.6): during a drag thread 0 owns
+    // ALL layer motion — setFrameSize's synchronous composite pins every pane
+    // to its selfAnchor per drag step. The present worker must NOT mutate
+    // container layout or composite layers concurrently: that race tears the
+    // anchor math and pane layers drift away from their pinned corners. Only
+    // the layout block below is gated; repaint-demand propagation and the
+    // clear-color refresh run every tick (zero layer mutation), and pane
+    // painting runs inside VkPane_presentAll through Darling_layerRender —
+    // never through preFrame — so the four scenes keep animating the whole
+    // drag. On settle the flag clears and preFrame resumes: one layout, one
+    // final re-record, one board rebuild. Layer mutation stays thread-0-only
+    // (composite calls self-gate + dispatch to main).
+    bool live = Window_isLiveResizing(window);
 
     int winW = Window_width(window);
     int winH = Window_height(window);
@@ -306,62 +334,78 @@ void Darling_preFrame(Window *window, int drawW, int drawH, void *userdata) {
     (void)drawW;
     (void)drawH;
 
-    // Boards first: scene + content panels attach their full-window Metal
-    // boards here so the pane attach below sees board backing (its
-    // metal-parent gate) and the subtree painters see board sizes.
-    extern int Darling_attachPanelBoards(Window *window, int width, int height);
-    Darling_attachPanelBoards(window, winW, winH);
-
     Panel *root = Window_getContainer(window);
     Panel *contentPanel = Window_getContentPanel(window);
     Panel *scenePanel = Window_getScenePanel(window);
 
-    if (contentPanel) {
-        static int s_lastCompW = 0, s_lastCompH = 0;
-        static int s_lastCompChildren = -1;
-        int curChildCount = (int)Panel_childCount(contentPanel);
-        bool needsComposite = (winW != s_lastCompW || winH != s_lastCompH
-                               || curChildCount != s_lastCompChildren
-                               || Panel_isTreeDirty(contentPanel));
-        // Scenes stay dirty: a present scene (or pane) means motion, so the
-        // window composites every tick while one is on screen — layer frames
-        // track layout at idle exactly as they do mid-drag. Present-on-demand:
-        // the window always serves scenes, never freezes them.
-        if (!needsComposite) {
-            extern void *PanelCocoa_fromPanel(void *panel);
-            for (int ci = 0; ci < curChildCount; ci++) {
-                Panel *child = Panel_getChild(contentPanel, ci);
-                if (!child)
-                    continue;
-                uint64_t t = Memory_type(child);
-                bool scene = (t == TYPE_SCENE3D_SINGLETON || t == TYPE_SCENE2D_SINGLETON
-                              || t == TYPE_SCENE_SINGLETON);
-                if (scene || PanelCocoa_fromPanel(child)) {
-                    needsComposite = true;
-                    break;
+    if (!live) {
+        // Boards first: scene + content panels attach their full-window Metal
+        // boards here so the pane attach below sees board backing (its
+        // metal-parent gate) and the subtree painters see board sizes.
+        extern int Darling_attachPanelBoards(Window *window, int width, int height);
+        Darling_attachPanelBoards(window, winW, winH);
+
+        if (contentPanel) {
+            static int s_lastCompW = 0, s_lastCompH = 0;
+            static int s_lastCompChildren = -1;
+            int curChildCount = (int)Panel_childCount(contentPanel);
+            bool needsComposite = (winW != s_lastCompW || winH != s_lastCompH
+                                   || curChildCount != s_lastCompChildren
+                                   || Panel_isTreeDirty(contentPanel));
+            // Scenes stay dirty: a present scene (or pane) means motion, so the
+            // window composites every tick while one is on screen — layer frames
+            // track layout at idle exactly as they do mid-drag. Present-on-demand:
+            // the window always serves scenes, never freezes them.
+            if (!needsComposite) {
+                extern void *PanelCocoa_fromPanel(void *panel);
+                for (int ci = 0; ci < curChildCount; ci++) {
+                    Panel *child = Panel_getChild(contentPanel, ci);
+                    if (!child)
+                        continue;
+                    uint64_t t = Memory_type(child);
+                    bool scene = (t == TYPE_SCENE3D_SINGLETON || t == TYPE_SCENE2D_SINGLETON
+                                  || t == TYPE_SCENE_SINGLETON);
+                    if (scene || PanelCocoa_fromPanel(child)) {
+                        needsComposite = true;
+                        break;
+                    }
                 }
             }
+            Container_setSize(&(*contentPanel).base, (float)winW, (float)winH);
+            // No IOSurface transport anymore: children are Vulkan rects —
+            // DIRECT scenes own pane chains (attached here), COMPOSITED
+            // scenes own retained offscreen VkLayer targets (attached next),
+            // everything else paints into the board pass.
+            Window_attachPanes(window, contentPanel, winW, winH);
+            extern int Darling_attachLayers(Window *window, Panel *contentPanel, int width, int height);
+            Darling_attachLayers(window, contentPanel, winW, winH);
+            if (needsComposite) {
+                Window_compositePanes(window, contentPanel);
+                Panel_clearTreeDirty(contentPanel);
+                s_lastCompW = winW;
+                s_lastCompH = winH;
+                s_lastCompChildren = curChildCount;
+            }
         }
-        Container_setSize(&(*contentPanel).base, (float)winW, (float)winH);
-        // No IOSurface transport anymore: children are Vulkan rects — nested
-        // scenes own pane chains (attached here), everything else paints
-        // into the board pass. Only layer compositing remains.
-        Window_attachPanes(window, contentPanel, winW, winH);
-        if (needsComposite) {
-            Window_compositePanes(window, contentPanel);
-            Panel_clearTreeDirty(contentPanel);
-            s_lastCompW = winW;
-            s_lastCompH = winH;
-            s_lastCompChildren = curChildCount;
-        }
+
+        // Board layers parent under the root layer every tick (scene below
+        // content); the call self-gates live resize and off-thread delivery.
+        Window_compositeBoards(window);
+
+        if (scenePanel)
+            Container_setSize(&(*scenePanel).base, (float)winW, (float)winH);
     }
 
-    // Board layers parent under the root layer every tick (scene below
-    // content); the call self-gates live resize and off-thread delivery.
-    Window_compositeBoards(window);
+    // Every tick, live or settled: propagate repaint demand into pane chains
+    // (bool stores only — no layer mutation, safe on the worker mid-drag).
+    if (contentPanel) {
+        extern void Darling_propagatePaneDirty(Window *window, Panel *contentPanel);
+        Darling_propagatePaneDirty(window, contentPanel);
+    }
 
+    // Every tick, live or settled: clear-color refresh (uniform update only,
+    // zero layer mutation — safe on the worker mid-drag).
     if (scenePanel) {
-        Container_setSize(&(*scenePanel).base, (float)winW, (float)winH);
         uint32_t bgColor = Panel_getBackgroundColor(scenePanel);
         if (bgColor != 0) {
             float r = ((bgColor >> 16) & 0xFF) / 255.0f;
@@ -457,6 +501,10 @@ void Darling_initCompositor(Window *window) {
 
     // Pane hook: per-CAMetalLayer swapchain children render through here.
     VkPane_setRenderer(Darling_layerRender);
+    // Layer hook: COMPOSITED scene targets render through the same painter —
+    // a retained offscreen target is just a pane whose pixels the canvas
+    // samples instead of a Metal surface presenting them.
+    VkLayer_setRenderer(Darling_layerRender);
 }
 
 void Darling_shutdownCompositor(void) {
