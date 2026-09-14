@@ -38,8 +38,10 @@ PanelCocoa *PanelCocoa_newMetal(void *panel, int width, int height);
 // to the window, owned by the scene or content panel itself (the two named
 // boards of the NSWindow -> Metal -> Vulkan-rect-children stack). Unlike a
 // fixed pane, a board resizes with the window (VkPane_resize at settle) and
-// stretches mid-drag (Resize gravity, restored TopLeft at settle).
-// Returns nullptr on failure.
+// keeps its exact-size drawable TopLeft-pinned through the drag (freeze-exact:
+// gravity never flips to Resize, so the frozen frame never stretches; the seam
+// past its extent is the layer's transparent remainder). Returns nullptr on
+// failure.
 PanelCocoa *PanelCocoa_newBoard(void *panel, int width, int height);
 
 // True when the backing is a CAMetalLayer pane (Vulkan swapchain host)
@@ -50,10 +52,12 @@ bool PanelCocoa_isMetal(const PanelCocoa *pc);
 // fixed child pane. Boards resize with the window; panes never do.
 bool PanelCocoa_isBoard(const PanelCocoa *pc);
 
-// Live-resize flip for boards only (thread 0): true stretches board
-// drawables mid-drag (Resize gravity, transaction-decoupled presents),
-// false restores the TopLeft transaction-synced pin at settle. Fixed
-// panes are untouched — their exact-size drawables stay TopLeft throughout.
+// Live-resize pin for boards only (thread 0): freeze-exact — boards keep
+// their exact-size drawable TopLeft-pinned mid-drag (gravity never flips to
+// Resize, so the frozen frame is never stretched; the seam past the extent
+// is transparent, blur shows through), and the same TopLeft transaction-synced
+// pin is reasserted at settle. Fixed panes are untouched — their exact-size
+// drawables stay TopLeft throughout.
 void PanelCocoa_setLiveResizingAll(bool live);
 
 // The registered VkPane chain index, or -1 when not a metal pane.

@@ -6,6 +6,7 @@
 
 #include "panel_cocoa.h"
 #include "annotation/overview.h"
+#include "annotation/intention.h"
 
 ;;OVERVIEW
 /**
@@ -54,8 +55,16 @@
  *   - PanelCocoa_setSize(pc, width, height)
  *   - PanelCocoa_setAnchors(pc, parentAnchor, selfAnchor)
  *   - PanelCocoa_setLiveResizingAll(live)
+ *       : freeze-exact — boards stay TopLeft-pinned at their exact frozen
+ *       extent through the drag (gravity never flips to Resize, so the
+ *       frozen frame is never stretched; the seam past the extent is the
+ *       layer's transparent remainder); all layers stay
+ *       presentsWithTransaction=YES throughout (worker explicit
+ *       transaction is the sole committer)
  * ============================================================================
  */
+
+;;INTENTION("worker explicit transaction is sole committer; NO ignores commit")
 
 
 // Forward declare to avoid any ObjC umbrella header pulling in a Collection
@@ -149,14 +158,13 @@ PanelCocoa *PanelCocoa_newMetal(void *panel, int width, int height) {
     // the layer's top-left corner — never stretched (Resize gravity would
     // smear the frozen drawable; TopLeft crops nothing on an exact fit).
     layer.contentsGravity = kCAGravityTopLeft;
-    // Decoupled presents: standalone layers (no hosting view) get no
-    // AppKit display-cycle commits at idle, so presentsWithTransaction=YES
-    // holds every frame hostage until an unrelated commit releases it
-    // (blank-until-resize, freeze-at-idle). NO displays the instant the
-    // scene presents — present-on-demand, scenes demand realtime. Anchoring
+    // Transaction-synced presents: the present worker commits an explicit
+    // CATransaction per board+pane walk, so YES presents release on worker
+    // cadence with no thread-0 dependency. NO would ignore that commit
+    // (presents land whenever, tearing/drift) — never use it. Anchoring
     // stays WindowServer-side (autoresizingMask + anchorPoint), unaffected
-    // by present timing. Boards (view-backed) keep YES; see newBoard.
-    layer.presentsWithTransaction = NO;
+    // by present timing. Boards share the same YES pin; see newBoard.
+    layer.presentsWithTransaction = YES;
     // Rule 12: contentsScale = backingScaleFactor so native physical pixels
     // of the pane's swapchain map 1:1 to logical points. drawableSize is
     // points * scale (physical pixels).
@@ -164,7 +172,7 @@ PanelCocoa *PanelCocoa_newMetal(void *panel, int width, int height) {
     float scale = TextCore_backingScale();
     if (scale <= 0.0f) scale = 1.0f;
     layer.contentsScale = (CGFloat) scale;
-    layer.drawableSize = CGSizeMake((CGFloat) width * scale, (CGFloat) height * scale);
+    layer.drawableSize = CGSizeMake((CGFloat) width, (CGFloat) height);
     layer.anchorPoint = CGPointMake(0, 0);
     (*pc).layer = (CALayer*) layer;
 
@@ -221,6 +229,9 @@ bool PanelCocoa_setSize(PanelCocoa *pc, int width, int height) {
     if (ok) {
         (*pc).width = width;
         (*pc).height = height;
+        if ((*pc).layer && [(*pc).layer isKindOfClass:[CAMetalLayer class]]) {
+            ((CAMetalLayer*) (*pc).layer).drawableSize = CGSizeMake((CGFloat) width, (CGFloat) height);
+        }
     }
     return ok;
 }
@@ -238,26 +249,32 @@ bool PanelCocoa_isBoard(const PanelCocoa *pc) { return pc ? (*pc).isBoard : fals
 // Board backing: a full-window pane with the board flag set. Same layer
 // contract as PanelCocoa_newMetal (TopLeft pin, transaction-synced
 // presents); the flag only changes resize behavior — boards follow the
-// window (VkPane_resize at settle, Resize-gravity stretch mid-drag),
+// window (VkPane_resize at settle, freeze-exact TopLeft pin mid-drag),
 // fixed panes never move their swapchain.
 PanelCocoa *PanelCocoa_newBoard(void *panel, int width, int height) {
     PanelCocoa *pc = PanelCocoa_newMetal(panel, width, height);
     if (pc) {
         (*pc).isBoard = true;
-        // Boards are view-hierarchy backed and ride AppKit's display cycle,
-        // so transaction-synced presents release normally — keep YES for
-        // edge-locked anchoring. Fixed panes stay NO (see newMetal).
+        // Reassert the YES pinned at attach (idempotent): boards and fixed
+        // panes share the worker-committed pin — gravity alone moves mid-drag.
         [(CAMetalLayer*) (*pc).layer setPresentsWithTransaction:YES];
     }
     return pc;
 }
 
-// Board live-resize flip (thread 0 only — touches CoreAnimation state).
-// Mid-drag boards stretch their frozen drawable (Resize gravity,
-// transaction-decoupled presents, mirroring the legacy board VulkanView);
-// at settle they return to the TopLeft transaction-synced pin. Fixed
-// panes keep TopLeft throughout: their exact-size drawables never need it.
+// Board live-resize pin (thread 0 only — touches CoreAnimation state).
+// Freeze-exact: boards keep their exact-size drawable pinned TopLeft through
+// the drag — gravity is NEVER switched to Resize, so the frozen frame is
+// never stretched. The seam beyond the frozen extent is the layer's
+// transparent (opaque=NO) remainder, so blur / window background shows
+// through; the settle present replaces the frozen frame with an exact-size
+// rebuild at the true final size. The `live` argument is retained only for
+// call-site symmetry — drag start and settle assert the same TopLeft pin.
+// presentsWithTransaction stays YES throughout — the worker explicit
+// transaction is the sole committer. Fixed panes keep TopLeft throughout:
+// their exact-size drawables never need it.
 void PanelCocoa_setLiveResizingAll(bool live) {
+    (void) live;
     if (!s_registry)
         return;
     [CATransaction begin];
@@ -268,13 +285,8 @@ void PanelCocoa_setLiveResizingAll(bool live) {
             continue;
         if (![(*pc).layer isKindOfClass:[CAMetalLayer class]])
             continue;
-        if (live) {
-            (*pc).layer.contentsGravity = kCAGravityResize;
-            [(CAMetalLayer*) (*pc).layer setPresentsWithTransaction:NO];
-        } else {
-            (*pc).layer.contentsGravity = kCAGravityTopLeft;
-            [(CAMetalLayer*) (*pc).layer setPresentsWithTransaction:YES];
-        }
+        (*pc).layer.contentsGravity = kCAGravityTopLeft;
+        [(CAMetalLayer*) (*pc).layer setPresentsWithTransaction:YES];
     }
     [CATransaction commit];
 }
