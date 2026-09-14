@@ -35,10 +35,10 @@
  *   - Darling_attachLayers(window, contentPanel, width, height)
  *   - Darling_propagatePaneDirty(window, contentPanel)
  *     (Panel_isTreeDirty -> VkPane_markDirty per DIRECT chain; COMPOSITED
- *     scenes re-arm their VkLayer every tick so animation never freezes;
- *     boards re-arm on tree dirt or a layer-backed scene descendant
- *     painting into the board pass; bool stores only, safe on the worker
- *     mid-drag)
+ *     scenes re-arm their VkLayer from owner-subtree dirt (demand signal;
+ *     wall-clock handlers advance on re-render, registration demands the
+ *     first render); boards re-arm on tree dirt; bool stores only, safe on
+ *     the worker mid-drag)
  *   - TextCore_backingScale(void)
  *   - for(i++)
  *   - PanelCocoa_fromPanel(panel)
@@ -103,8 +103,6 @@
 int Darling_attachPanelBoards(Window *window, int width, int height) {
     if (!window || width <= 0 || height <= 0)
         return 0;
-    if (Window_isLiveResizing(window))
-        return 0;
     extern float TextCore_backingScale(void);
     float scale = TextCore_backingScale();
     if (scale <= 0.0f)
@@ -127,8 +125,12 @@ int Darling_attachPanelBoards(Window *window, int width, int height) {
             extern bool PanelCocoa_isBoard(const void *pc);
             if (!PanelCocoa_isBoard(pc))
                 continue;
-            if (PanelCocoa_setSize(pc, pxW, pxH))
-                done++;
+            // Freeze swapchain size during mouse drag — NEVER recreate swapchains on every drag pixel!
+            // WindowServer hardware-scales the layer in real-time. Swapchain rebuild occurs only at settle.
+            if (!Window_isLiveResizing(window)) {
+                if (PanelCocoa_setSize(pc, pxW, pxH))
+                    done++;
+            }
         } else if (PanelCocoa_newBoard(board, pxW, pxH)) {
             done++;
         }
@@ -255,12 +257,14 @@ int Darling_attachLayers(Window *window, Panel *contentPanel, int width, int hei
 // VkPane_markDirty). Runs every tick from Darling_preFrame's ungated tail —
 // including mid-drag — and performs zero layer mutation (bool stores only),
 // so it is safe on the present worker while thread 0 owns layer motion.
-// Scenes re-arm every tick (time-driven motion never sets tree-dirty, yet
-// must never freeze); static panes re-arm only on tree dirt and otherwise
-// rest on their stale drawable via the present walk's clean-skip. Boards
-// re-arm on tree dirt, or when a non-pane scene descendant paints into the
-// board pass (Rule 14: pane-backed scenes own their chains and never force
-// the board). Clearing happens per-chain after a successful present.
+// Demand-gated (immediate-on-demand): COMPOSITED layers re-arm only from
+// owner-subtree dirt — time-driven handlers advance by wall clock on every
+// re-render, so one mark per motion burst buys full-rate frames until the
+// tick clears it; registration/resize demand the first render. Static panes
+// and boards re-arm only on tree dirt and otherwise rest on their stale
+// drawable via the present walk's clean-skip (Rule 14: pane-backed scenes
+// own their chains and never force the board). Clearing happens per-chain
+// after a successful present.
 void Darling_propagatePaneDirty(Window *window, Panel *contentPanel) {
     if (!window || !contentPanel)
         return;
@@ -278,14 +282,17 @@ void Darling_propagatePaneDirty(Window *window, Panel *contentPanel) {
         uint64_t childType = Memory_type(child);
         bool isScene = (childType == TYPE_SCENE3D_SINGLETON || childType == TYPE_SCENE2D_SINGLETON
                         || childType == TYPE_SCENE_SINGLETON);
-        // COMPOSITED scenes own no Metal pane: re-arm their retained
-        // offscreen target every tick (scenes animate — time-driven motion
-        // never sets tree-dirty, yet must never freeze), so the visit walk
-        // re-renders them and the board re-samples the new frame.
+        // COMPOSITED scenes own no Metal pane: their retained offscreen
+        // target re-arms only from owner-subtree dirt (the demand signal —
+        // owners mark once per motion burst; the latched dirt then buys
+        // full-rate re-renders until the tick clears it, so animation
+        // survives a stalled tick and rests on pause).
         if (isScene && Scene_getPresentMode((Scene*) child) == SCENE_PRESENT_COMPOSITED) {
-            int layer = VkLayer_find(child);
-            if (layer >= 0)
-                VkLayer_markDirty(layer, true);
+            if (Panel_isTreeDirty(child)) {
+                int layer = VkLayer_find(child);
+                if (layer >= 0)
+                    VkLayer_markDirty(layer, true);
+            }
             continue;
         }
         void *pc = PanelCocoa_fromPanel(child);
@@ -309,24 +316,7 @@ void Darling_propagatePaneDirty(Window *window, Panel *contentPanel) {
         int chain = PanelCocoa_chain(bpc);
         if (chain < 0)
             continue;
-        bool boardDirty = Panel_isTreeDirty(board);
-        if (!boardDirty) {
-            size_t subCount = Panel_childCount(board);
-            for (size_t k = 0; k < subCount && !boardDirty; k++) {
-                Panel *sub = Panel_getChild(board, k);
-                if (!sub)
-                    continue;
-                uint64_t subType = Memory_type(sub);
-                bool subScene = (subType == TYPE_SCENE3D_SINGLETON || subType == TYPE_SCENE2D_SINGLETON
-                                 || subType == TYPE_SCENE_SINGLETON);
-                if (!subScene)
-                    continue;
-                void *spc = PanelCocoa_fromPanel(sub);
-                if (spc && PanelCocoa_isMetal(spc))
-                    continue;
-                boardDirty = true;
-            }
-        }
+        bool boardDirty = Panel_isTreeDirty(board) || Window_isLiveResizing(window);
         if (boardDirty)
             VkPane_markDirty(chain, true);
     }
