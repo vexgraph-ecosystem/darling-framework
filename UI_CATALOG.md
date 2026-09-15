@@ -8,7 +8,7 @@ Related sources:
 - `projects/darling/darling/` — nodes (`button/`, `field/`, `label/`, `panel/`, `dialog/`, `overlay/`, `picture/`, `plot/`, `scene/`)
 - `projects/darling/darling/container.h` — anchors, percent, margin, radius, z, clip
 - `projects/darling/darling/panel/panel.h` — bg color, render-handler slot, tree
-- `main/darling_gallery.c` — widget gallery + suite (S1–S7)
+- `../../trash/darling_gallery.c` — widget gallery + suite (S1–S7)
 - `main/darlingtest.c` — two-thread decoupled compositor demo
 
 ---
@@ -406,4 +406,4 @@ Suggested order — each unlocks the next, no dead ends:
 4. **Game pack:** `HudBar + CooldownButton + InventoryGrid + DialogBox + Minimap + ChatBox`. Shippable HUD + menus.
 5. **Tools:** `NodeEditor + DockPanel + Menu + Keybindings`. Editor/blueprint payoff.
 
-If you want, say the word and I start at P0 with `darling/theme/theme.h/.c` + `Toast/Spinner/Progress` in darling style (constructors + symmetric getters/setters + `;;OVERVIEW` headers), wired into `main/darling_gallery.c` S8.
+If you want, say the word and I start at P0 with `darling/theme/theme.h/.c` + `Toast/Spinner/Progress` in darling style (constructors + symmetric getters/setters + `;;OVERVIEW` headers), wired into `../../trash/darling_gallery.c` S8.

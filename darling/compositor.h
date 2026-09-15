@@ -42,4 +42,9 @@ bool Darling_compositorIdleForResize(void);
 // Frame rendering callback invoked by Vk_clearPresent inside active swapchain pass.
 void Darling_renderFrame(void *cmdBuffer, int drawW, int drawH, void *userdata);
 
+// Hit-test query: returns true if (px, py) hits any visible child control/panel in p.
+// Returns false on empty or transparent areas to allow hit passthrough.
+bool Darling_hitTest(Panel *p, float px, float py);
+
 #endif
+

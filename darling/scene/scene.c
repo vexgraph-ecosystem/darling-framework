@@ -130,7 +130,7 @@ int Scene_getPresentMode(const Scene *s) {
 }
 
 void Scene_setPresentMode(Scene *s, int presentMode) {
-    if (!s || (presentMode != SCENE_PRESENT_COMPOSITED && presentMode != SCENE_PRESENT_DIRECT))
+    if (!s || (presentMode != SCENE_PRESENT_COMPOSITED && presentMode != SCENE_PRESENT_DIRECT && presentMode != SCENE_PRESENT_INLINE))
         return;
     (*s).presentMode = presentMode;
     Container_markDirty(sceneLayout(s));

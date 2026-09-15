@@ -64,7 +64,7 @@
  * ============================================================================
  */
 
-;;INTENTION("worker explicit transaction is sole committer; NO ignores commit")
+;;INTENTION("board panels always presentsWithTransaction=YES; worker explicit CATransaction (Window_workerPresentBegin/End) is the sole committer on the present-worker thread")
 
 
 // Forward declare to avoid any ObjC umbrella header pulling in a Collection
@@ -158,13 +158,9 @@ PanelCocoa *PanelCocoa_newMetal(void *panel, int width, int height) {
     // the layer's top-left corner — never stretched (Resize gravity would
     // smear the frozen drawable; TopLeft crops nothing on an exact fit).
     layer.contentsGravity = kCAGravityTopLeft;
-    // Transaction-synced presents: the present worker commits an explicit
-    // CATransaction per board+pane walk, so YES presents release on worker
-    // cadence with no thread-0 dependency. NO would ignore that commit
-    // (presents land whenever, tearing/drift) — never use it. Anchoring
-    // stays WindowServer-side (autoresizingMask + anchorPoint), unaffected
-    // by present timing. Boards share the same YES pin; see newBoard.
-    layer.presentsWithTransaction = YES;
+    // Rule 11 / Continuous Live Resize: presentsWithTransaction = NO so MoltenVK
+    // presents immediately to the display compositor independent of thread 0 AppKit modal transactions.
+    layer.presentsWithTransaction = NO;
     // Rule 12: contentsScale = backingScaleFactor so native physical pixels
     // of the pane's swapchain map 1:1 to logical points. drawableSize is
     // points * scale (physical pixels).
@@ -251,28 +247,30 @@ bool PanelCocoa_isBoard(const PanelCocoa *pc) { return pc ? (*pc).isBoard : fals
 // presents); the flag only changes resize behavior — boards follow the
 // window (VkPane_resize at settle, freeze-exact TopLeft pin mid-drag),
 // fixed panes never move their swapchain.
+//
+// presentsWithTransaction=YES: board presents are synchronized with the
+// CoreAnimation compositor — the Vulkan drawable swap lands inside the same
+// display-sync window as the window-frame CA transaction, so content tracks
+// the border in real time. The worker wraps every present walk in an explicit
+// CATransaction (Window_workerPresentBegin/End) so YES-presents release on
+// worker cadence even though the worker owns no runloop.
 PanelCocoa *PanelCocoa_newBoard(void *panel, int width, int height) {
     PanelCocoa *pc = PanelCocoa_newMetal(panel, width, height);
     if (pc) {
         (*pc).isBoard = true;
-        // Reassert the YES pinned at attach (idempotent): boards and fixed
-        // panes share the worker-committed pin — gravity alone moves mid-drag.
         [(CAMetalLayer*) (*pc).layer setPresentsWithTransaction:YES];
     }
     return pc;
 }
 
 // Board live-resize pin (thread 0 only — touches CoreAnimation state).
-// Freeze-exact: boards keep their exact-size drawable pinned TopLeft through
-// the drag — gravity is NEVER switched to Resize, so the frozen frame is
-// never stretched. The seam beyond the frozen extent is the layer's
-// transparent (opaque=NO) remainder, so blur / window background shows
-// through; the settle present replaces the frozen frame with an exact-size
-// rebuild at the true final size. The `live` argument is retained only for
-// call-site symmetry — drag start and settle assert the same TopLeft pin.
-// presentsWithTransaction stays YES throughout — the worker explicit
-// transaction is the sole committer. Fixed panes keep TopLeft throughout:
-// their exact-size drawables never need it.
+// live=true  (drag begin): keep YES so the worker's per-walk explicit
+//            CATransaction (Window_workerPresentBegin/End) is the sole
+//            committer — presents release on worker cadence, not thread-0
+//            runloop cadence, and freeze-exact TopLeft is maintained.
+// live=false (settle / normal): restore YES for steady-state CA-sync
+//            presents (content tracks window resize in real time).
+// Boards are always YES; this call is kept for gravity reassertion.
 void PanelCocoa_setLiveResizingAll(bool live) {
     (void) live;
     if (!s_registry)

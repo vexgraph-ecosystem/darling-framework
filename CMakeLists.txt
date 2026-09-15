@@ -149,6 +149,8 @@ if(APPLE)
         "-framework QuartzCore"
         "-framework CoreGraphics"
         "-framework IOSurface"
+        "-framework Metal"
+        "-framework MetalKit"
     )
 else()
     target_sources(darling PRIVATE text/text_core_stub.c)

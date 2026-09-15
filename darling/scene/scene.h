@@ -25,6 +25,7 @@
 // latency-locked scene owns its own CAMetalLayer + VkPane swapchain.
 #define SCENE_PRESENT_COMPOSITED 0 // retained target, sampled by the canvas
 #define SCENE_PRESENT_DIRECT     1 // own CAMetalLayer + VkPane swapchain
+#define SCENE_PRESENT_INLINE     2 // inline into parent board render pass (direct commands, zero offscreen targets)
 
 typedef struct Scene {
     Panel base;

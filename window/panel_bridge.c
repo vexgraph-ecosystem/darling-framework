@@ -125,12 +125,8 @@ int Darling_attachPanelBoards(Window *window, int width, int height) {
             extern bool PanelCocoa_isBoard(const void *pc);
             if (!PanelCocoa_isBoard(pc))
                 continue;
-            // Freeze swapchain size during mouse drag — NEVER recreate swapchains on every drag pixel!
-            // WindowServer hardware-scales the layer in real-time. Swapchain rebuild occurs only at settle.
-            if (!Window_isLiveResizing(window)) {
-                if (PanelCocoa_setSize(pc, pxW, pxH))
-                    done++;
-            }
+            if (PanelCocoa_setSize(pc, pxW, pxH))
+                done++;
         } else if (PanelCocoa_newBoard(board, pxW, pxH)) {
             done++;
         }
@@ -265,6 +261,17 @@ int Darling_attachLayers(Window *window, Panel *contentPanel, int width, int hei
 // drawable via the present walk's clean-skip (Rule 14: pane-backed scenes
 // own their chains and never force the board). Clearing happens per-chain
 // after a successful present.
+void Darling_markLiveDirty(Panel *contentPanel) {
+    if (!contentPanel)
+        return;
+    size_t childCount = Panel_childCount(contentPanel);
+    for (size_t i = 0; i < childCount; i++) {
+        Panel *child = Panel_getChild(contentPanel, i);
+        if (child)
+            Container_markDirty(&(*child).base);
+    }
+}
+
 void Darling_propagatePaneDirty(Window *window, Panel *contentPanel) {
     if (!window || !contentPanel)
         return;
@@ -275,6 +282,7 @@ void Darling_propagatePaneDirty(Window *window, Panel *contentPanel) {
     extern void VkPane_markDirty(int index, bool dirty);
 
     size_t childCount = Panel_childCount(contentPanel);
+    bool anySceneDirty = false;
     for (size_t i = 0; i < childCount; i++) {
         Panel *child = Panel_getChild(contentPanel, i);
         if (!child)
@@ -288,10 +296,12 @@ void Darling_propagatePaneDirty(Window *window, Panel *contentPanel) {
         // full-rate re-renders until the tick clears it, so animation
         // survives a stalled tick and rests on pause).
         if (isScene && Scene_getPresentMode((Scene*) child) == SCENE_PRESENT_COMPOSITED) {
-            if (Panel_isTreeDirty(child)) {
+            if (isScene || Panel_isTreeDirty(child)) {
                 int layer = VkLayer_find(child);
-                if (layer >= 0)
+                if (layer >= 0) {
                     VkLayer_markDirty(layer, true);
+                    anySceneDirty = true;
+                }
             }
             continue;
         }
@@ -316,7 +326,7 @@ void Darling_propagatePaneDirty(Window *window, Panel *contentPanel) {
         int chain = PanelCocoa_chain(bpc);
         if (chain < 0)
             continue;
-        bool boardDirty = Panel_isTreeDirty(board) || Window_isLiveResizing(window);
+        bool boardDirty = Panel_isTreeDirty(board) || Window_isLiveResizing(window) || anySceneDirty;
         if (boardDirty)
             VkPane_markDirty(chain, true);
     }
