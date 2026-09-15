@@ -240,6 +240,19 @@ bool TextCore_rasterStyled(const char *utf8, const char *family, float pxHeight,
         }
         if (targetW > maxAdv)
             maxAdv = targetW;
+        // CLAMP: prevent float-cast-overflow abort (ASan UBSan)
+        // CTLineGetTypographicBounds or boundsWidth can carry NaN/huge
+        // values from a corrupted Panel* pointer (e.g. stale IOSurface
+        // LRU entry aliasing). The (int) cast below triggers
+        // __ubsan_handle_float_cast_overflow_abort on out-of-range values.
+        if (isnan(maxAdv) || maxAdv < 0.0)
+            maxAdv = 0.0;
+        if (maxAdv > 8190.0)
+            maxAdv = 8190.0;
+        if (isnan(totalH) || totalH < 0.0)
+            totalH = 0.0;
+        if (totalH > 4094.0)
+            totalH = 4094.0;
         int w = (int) ceil(maxAdv) + 2;
         int h = (int) ceil(totalH) + (int) (2 * nlines);
         bool okLines = true;
