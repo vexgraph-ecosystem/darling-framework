@@ -67,6 +67,7 @@ bool Dialog_init(Dialog *dialog, const char *title, int width, int height) {
     Frame_init(nullptr, nullptr, &(*dialog).frame);
     (*dialog).frame.width = width > 0 ? width : 480;
     (*dialog).frame.height = height > 0 ? height : 320;
+    (*dialog).frame.ownerDialog = dialog;
     (*dialog).title = title ? strdup(title) : nullptr;
     (*dialog).content = nullptr;
     (*dialog).modal = true;
@@ -188,9 +189,10 @@ void Dialog_close(Dialog *dialog) {
         Window_setShouldClose((*dialog).frame.window, true);
     }
 
-    // Return focus to handler frame if available
-    if ((*dialog).handler != nullptr) {
-        Frame_focus((*dialog).handler);
+    Frame *handler = (*dialog).handler;
+    if (handler != nullptr) {
+        Dialog_removeHandler(dialog, handler);
+        Frame_focus(handler);
     }
 }
 
@@ -280,23 +282,29 @@ bool Dialog_isClinging(const Dialog *dialog) {
 }
 
 bool Dialog_isOpen(const Dialog *dialog) {
-    if (dialog == nullptr)
+    if (dialog == nullptr || !(*dialog).open)
         return false;
-    return (*dialog).open;
+    if ((*dialog).frame.window != nullptr) {
+        if (Window_shouldClose((*dialog).frame.window))
+            return false;
+        if (!Frame_isVisible(&(*dialog).frame))
+            return false;
+    }
+    return true;
 }
 
 // FOCUS & PRESENTATION
 // ============================================================================
 
 void Dialog_focus(Dialog *dialog) {
-    if (dialog == nullptr)
+    if (dialog == nullptr || !Dialog_isOpen(dialog))
         return;
     if ((*dialog).frame.window != nullptr)
         Window_focus((*dialog).frame.window);
 }
 
 void Dialog_bringToFront(Dialog *dialog) {
-    if (dialog == nullptr)
+    if (dialog == nullptr || !Dialog_isOpen(dialog))
         return;
     if ((*dialog).frame.window != nullptr)
         Window_bringToFront((*dialog).frame.window);

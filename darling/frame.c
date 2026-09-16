@@ -112,6 +112,7 @@ bool Frame_init(Window *win, void *graphics, Frame *frame) {
     (*frame).rootPanel = nullptr;
     (*frame).layerCount = 0;
     (*frame).childDialogCount = 0;
+    (*frame).ownerDialog = nullptr;
     (*frame).onQuitRequested = nullptr;
     (*frame).quitRequestedUserData = nullptr;
     (*frame).hasVisualEffect = false;
@@ -959,6 +960,11 @@ void Frame_close(Frame *frame) {
         return;
     if (!Frame_canClose(frame))
         return;
+
+    if ((*frame).ownerDialog != nullptr) {
+        Dialog_close((*frame).ownerDialog);
+        return;
+    }
 
     Frame_closeChildDialogs(frame);
     Frame_hide(frame);

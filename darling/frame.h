@@ -67,6 +67,7 @@ typedef struct Frame {
 
     Dialog *childDialogs[DARLING_FRAME_MAX_DIALOGS]; // Managed child dialogs
     uint32_t childDialogCount;
+    Dialog *ownerDialog;        // Owning Dialog instance if embedded in a Dialog
 
     bool (*onQuitRequested)(struct Frame *frame, void *userData);
     void *quitRequestedUserData;
