@@ -8,6 +8,9 @@
 #include "window/window.h"
 #include "window/window_event.h"
 
+void Dialog_focus(Dialog *dialog);
+void Dialog_bringToFront(Dialog *dialog);
+
 ;;OVERVIEW
 /**
  * ============================================================================
@@ -84,6 +87,41 @@ static void frameCocoaOnZoom(void *self, Window *window) {
     Frame_present(frame);
 }
 
+static bool frameCocoaOnQuitRequested(void *self, Window *window) {
+    (void) window;
+    Frame *frame = (Frame*) self;
+    if (frame == nullptr)
+        return true;
+    if (!Frame_canClose(frame))
+        return false;
+    Frame_closeChildDialogs(frame);
+    return true;
+}
+
+static void frameCocoaOnFocusGained(void *self, Window *window) {
+    (void) window;
+    Frame *frame = (Frame*) self;
+    if (frame == nullptr)
+        return;
+    Dialog *clinging = Frame_getActiveClingingDialog(frame);
+    if (clinging != nullptr) {
+        Dialog_focus(clinging);
+        Dialog_bringToFront(clinging);
+    }
+}
+
+static void frameCocoaOnPressed(void *self, Window *window) {
+    (void) window;
+    Frame *frame = (Frame*) self;
+    if (frame == nullptr)
+        return;
+    Dialog *clinging = Frame_getActiveClingingDialog(frame);
+    if (clinging != nullptr) {
+        Dialog_focus(clinging);
+        Dialog_bringToFront(clinging);
+    }
+}
+
 void FrameCocoa_attach(Frame *frame) {
     if (frame == nullptr || (*frame).window == nullptr)
         return;
@@ -137,6 +175,9 @@ void FrameCocoa_attach(Frame *frame) {
             WindowEvent_setOnMinimized(ev, frameCocoaOnMinimized);
             WindowEvent_setOnRestored(ev, frameCocoaOnRestored);
             WindowEvent_setOnZoomFilled(ev, frameCocoaOnZoom);
+            WindowEvent_setOnQuitRequested(ev, frameCocoaOnQuitRequested);
+            WindowEvent_setOnFocusGained(ev, frameCocoaOnFocusGained);
+            WindowEvent_setOnPressed(ev, frameCocoaOnPressed);
         }
     }
 }

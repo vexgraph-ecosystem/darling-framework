@@ -86,8 +86,7 @@ int main(void) {
     assert(Frame_isBorderless(&frame) == true);
     Frame_setNaked(&frame, false);
     assert(Frame_isDecorated(&frame) == true);
-    // Test 1-arg macro tolerance (Frame_setDecorated(FRAME_UNECORATED_NAKED))
-    Frame_setDecorated(FRAME_UNECORATED_NAKED);
+    Frame_setDecorated(&frame, FRAME_UNECORATED_NAKED);
     assert(Frame_isNaked(&frame) == true);
     Frame_setDecorated(&frame, FRAME_DECORATED);
     assert(Frame_isDecorated(&frame) == true);

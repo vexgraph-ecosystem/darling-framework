@@ -70,6 +70,9 @@ bool Dialog_init(Dialog *dialog, const char *title, int width, int height) {
     (*dialog).title = title ? strdup(title) : nullptr;
     (*dialog).content = nullptr;
     (*dialog).modal = true;
+    (*dialog).clinging = false;
+    (*dialog).open = false;
+    (*dialog).handler = nullptr;
     (*dialog).onClose = nullptr;
     (*dialog).ctx = nullptr;
     return true;
@@ -102,6 +105,13 @@ Dialog *Dialog_2(const char *title, int width, int height) {
 void Dialog_destroy(Dialog *dialog) {
     if (dialog == nullptr)
         return;
+
+    Dialog_close(dialog);
+
+    if ((*dialog).handler != nullptr) {
+        Frame_removeChildDialog((*dialog).handler, dialog);
+        (*dialog).handler = nullptr;
+    }
 
     if ((*dialog).title != nullptr) {
         free((*dialog).title);
@@ -136,6 +146,8 @@ bool Dialog_open(Dialog *dialog) {
     if (dialog == nullptr)
         return false;
 
+    (*dialog).open = true;
+
     if ((*dialog).frame.window == nullptr) {
         int w = (*dialog).frame.width > 0 ? (*dialog).frame.width : 480;
         int h = (*dialog).frame.height > 0 ? (*dialog).frame.height : 320;
@@ -143,13 +155,19 @@ bool Dialog_open(Dialog *dialog) {
         (*dialog).frame.window = Window_create(t, w, h);
         if ((*dialog).frame.window != nullptr) {
             Frame_platformAttach(&(*dialog).frame);
-            if ((*dialog).frame.application != nullptr) {
+            if ((*dialog).handler != nullptr && (*(*dialog).handler).application != nullptr) {
+                Frame_addFrameHandler(&(*dialog).frame, (*(*dialog).handler).application);
+            } else if ((*dialog).frame.application != nullptr) {
                 Application_addWindow((*dialog).frame.application, (*dialog).frame.window);
             }
         }
     }
 
     Dialog_show(dialog);
+    if ((*dialog).clinging) {
+        Dialog_focus(dialog);
+        Dialog_bringToFront(dialog);
+    }
     return true;
 }
 
@@ -157,11 +175,23 @@ void Dialog_close(Dialog *dialog) {
     if (dialog == nullptr)
         return;
 
+    (*dialog).open = false;
+
+    // Cascade close any child dialogs clinging or attached to this dialog
+    Frame_closeChildDialogs(&(*dialog).frame);
+
     if ((*dialog).onClose != nullptr)
         (*dialog).onClose((*dialog).ctx);
 
-    if ((*dialog).frame.window != nullptr)
+    if ((*dialog).frame.window != nullptr) {
         Window_hide((*dialog).frame.window);
+        Window_setShouldClose((*dialog).frame.window, true);
+    }
+
+    // Return focus to handler frame if available
+    if ((*dialog).handler != nullptr) {
+        Frame_focus((*dialog).handler);
+    }
 }
 
 bool Dialog_addDialogHolder(Dialog *dialog, Application *app) {
@@ -174,6 +204,102 @@ bool Dialog_removeDialogHolder(Dialog *dialog, Application *app) {
     if (dialog == nullptr || app == nullptr)
         return false;
     return Frame_removeFrameHandler(&(*dialog).frame, app);
+}
+
+// FRAME HANDLER & HIERARCHY
+// ============================================================================
+
+bool Dialog_setHandler(Dialog *dialog, Frame *frame) {
+    if (dialog == nullptr)
+        return false;
+
+    if ((*dialog).handler == frame)
+        return true;
+
+    if ((*dialog).handler != nullptr) {
+        Frame_removeChildDialog((*dialog).handler, dialog);
+        (*dialog).handler = nullptr;
+    }
+
+    if (frame != nullptr) {
+        (*dialog).handler = frame;
+        Frame_addChildDialog(frame, dialog);
+
+        if ((*frame).application != nullptr) {
+            Frame_addFrameHandler(&(*dialog).frame, (*frame).application);
+        }
+    }
+
+    return true;
+}
+
+bool Dialog_removeHandler(Dialog *dialog, Frame *frame) {
+    if (dialog == nullptr || (*dialog).handler != frame)
+        return false;
+
+    if (frame != nullptr) {
+        Frame_removeChildDialog(frame, dialog);
+    }
+    (*dialog).handler = nullptr;
+    return true;
+}
+
+Frame *Dialog_getHandler(const Dialog *dialog) {
+    if (dialog == nullptr)
+        return nullptr;
+    return (*dialog).handler;
+}
+
+Frame *Dialog_handler(const Dialog *dialog) {
+    return Dialog_getHandler(dialog);
+}
+
+bool Dialog_setDialogHandler(Dialog *dialog, Dialog *parentDialog) {
+    if (dialog == nullptr)
+        return false;
+    return Dialog_setHandler(dialog, parentDialog ? Dialog_getFrame(parentDialog) : nullptr);
+}
+
+// CLINGING MODE
+// ============================================================================
+
+void Dialog_setClinging(Dialog *dialog, bool clinging) {
+    if (dialog == nullptr)
+        return;
+    (*dialog).clinging = clinging;
+    if (clinging && (*dialog).open) {
+        Dialog_focus(dialog);
+        Dialog_bringToFront(dialog);
+    }
+}
+
+bool Dialog_isClinging(const Dialog *dialog) {
+    if (dialog == nullptr)
+        return false;
+    return (*dialog).clinging;
+}
+
+bool Dialog_isOpen(const Dialog *dialog) {
+    if (dialog == nullptr)
+        return false;
+    return (*dialog).open;
+}
+
+// FOCUS & PRESENTATION
+// ============================================================================
+
+void Dialog_focus(Dialog *dialog) {
+    if (dialog == nullptr)
+        return;
+    if ((*dialog).frame.window != nullptr)
+        Window_focus((*dialog).frame.window);
+}
+
+void Dialog_bringToFront(Dialog *dialog) {
+    if (dialog == nullptr)
+        return;
+    if ((*dialog).frame.window != nullptr)
+        Window_bringToFront((*dialog).frame.window);
 }
 
 // SETTERS

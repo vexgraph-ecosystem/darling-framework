@@ -1,6 +1,7 @@
 #include "darling/frame.h"
 
 #include "annotation/overview.h"
+#include "darling/dialog/dialog.h"
 #include "darling/panel/panel.h"
 #include "kernel/application.h"
 #include "window/window.h"
@@ -101,8 +102,6 @@
 // CONSTRUCTORS
 // ============================================================================
 
-static _Thread_local Frame *darling_lastFrame = nullptr;
-
 bool Frame_init(Window *win, void *graphics, Frame *frame) {
     if (frame == nullptr)
         return false;
@@ -112,6 +111,9 @@ bool Frame_init(Window *win, void *graphics, Frame *frame) {
     (*frame).graphics = graphics;
     (*frame).rootPanel = nullptr;
     (*frame).layerCount = 0;
+    (*frame).childDialogCount = 0;
+    (*frame).onQuitRequested = nullptr;
+    (*frame).quitRequestedUserData = nullptr;
     (*frame).hasVisualEffect = false;
     (*frame).visualEffectMaterial = FRAME_MATERIAL_HUD_WINDOW;
     (*frame).presentsWithTransaction = true;
@@ -124,8 +126,6 @@ bool Frame_init(Window *win, void *graphics, Frame *frame) {
     (*frame).onRender = nullptr;
     (*frame).userData = nullptr;
     (*frame).nativeView = nullptr;
-
-    darling_lastFrame = frame;
 
     Frame_platformAttach(frame);
     return true;
@@ -174,9 +174,14 @@ void Frame_destroy(Frame *frame) {
     if (frame == nullptr)
         return;
 
-    if (darling_lastFrame == frame) {
-        darling_lastFrame = nullptr;
+    Frame_closeChildDialogs(frame);
+    for (uint32_t i = 0; i < (*frame).childDialogCount; i++) {
+        Dialog *d = (*frame).childDialogs[i];
+        if (d != nullptr && (*d).handler == frame) {
+            (*d).handler = nullptr;
+        }
     }
+    (*frame).childDialogCount = 0;
 
     if ((*frame).application != nullptr && (*frame).window != nullptr) {
         Application_removeWindow((*frame).application, (*frame).window);
@@ -543,25 +548,20 @@ void Frame_setUndecorated(Frame *frame, int type) {
         Window_setUndecorated((*frame).window, type);
 }
 
-void (Frame_setDecorated)(Frame *frame, int mode) {
+void Frame_setDecorated(Frame *frame, int flag) {
     if (frame == nullptr)
         return;
-    (*frame).chromeMode = mode;
+    (*frame).chromeMode = flag;
     if ((*frame).window != nullptr)
-        Window_setUndecorated((*frame).window, mode);
-}
-
-void Frame_setDecoratedDefault(int mode) {
-    if (darling_lastFrame != nullptr)
-        (Frame_setDecorated)(darling_lastFrame, mode);
+        Window_setUndecorated((*frame).window, flag);
 }
 
 void Frame_setNaked(Frame *frame, bool naked) {
-    (Frame_setDecorated)(frame, naked ? FRAME_UNDECORATED_NAKED : FRAME_DECORATED);
+    Frame_setDecorated(frame, naked ? FRAME_UNDECORATED_NAKED : FRAME_DECORATED);
 }
 
 void Frame_setBorderless(Frame *frame, bool borderless) {
-    (Frame_setDecorated)(frame, borderless ? FRAME_UNDECORATED_BORDERLESS : FRAME_DECORATED);
+    Frame_setDecorated(frame, borderless ? FRAME_UNDECORATED_BORDERLESS : FRAME_DECORATED);
 }
 
 void Frame_setFloatingTrafficLights(Frame *frame, bool floating) {
@@ -674,9 +674,16 @@ void Frame_setMiniaturizable(Frame *frame, bool miniaturizable) {
 }
 
 void Frame_focus(Frame *frame) {
-    if (frame == nullptr || (*frame).window == nullptr)
+    if (frame == nullptr)
         return;
-    Window_focus((*frame).window);
+    Dialog *clinging = Frame_getActiveClingingDialog(frame);
+    if (clinging != nullptr) {
+        Dialog_focus(clinging);
+        Dialog_bringToFront(clinging);
+        return;
+    }
+    if ((*frame).window != nullptr)
+        Window_focus((*frame).window);
 }
 
 void Frame_setCursorType(Frame *frame, WindowCursorType type) {
@@ -851,4 +858,118 @@ bool Frame_removeTouchAdapter(Frame *frame, const TouchHandler *adapter) {
     if (frame == nullptr || (*frame).window == nullptr)
         return false;
     return Window_removeTouchAdapter((*frame).window, adapter);
+}
+
+// DIALOG HIERARCHY & CLOSING POLICY
+// ============================================================================
+
+bool Frame_addChildDialog(Frame *frame, Dialog *dialog) {
+    if (frame == nullptr || dialog == nullptr)
+        return false;
+
+    for (uint32_t i = 0; i < (*frame).childDialogCount; i++) {
+        if ((*frame).childDialogs[i] == dialog)
+            return true;
+    }
+
+    if ((*frame).childDialogCount >= DARLING_FRAME_MAX_DIALOGS)
+        return false;
+
+    (*frame).childDialogs[(*frame).childDialogCount++] = dialog;
+    return true;
+}
+
+bool Frame_removeChildDialog(Frame *frame, Dialog *dialog) {
+    if (frame == nullptr || dialog == nullptr)
+        return false;
+
+    for (uint32_t i = 0; i < (*frame).childDialogCount; i++) {
+        if ((*frame).childDialogs[i] == dialog) {
+            for (uint32_t j = i; j + 1 < (*frame).childDialogCount; j++) {
+                (*frame).childDialogs[j] = (*frame).childDialogs[j + 1];
+            }
+            (*frame).childDialogs[--(*frame).childDialogCount] = nullptr;
+            return true;
+        }
+    }
+    return false;
+}
+
+uint32_t Frame_getChildDialogCount(const Frame *frame) {
+    if (frame == nullptr)
+        return 0;
+    return (*frame).childDialogCount;
+}
+
+Dialog *Frame_getChildDialog(const Frame *frame, uint32_t index) {
+    if (frame == nullptr || index >= (*frame).childDialogCount)
+        return nullptr;
+    return (*frame).childDialogs[index];
+}
+
+Dialog *Frame_getActiveClingingDialog(const Frame *frame) {
+    if (frame == nullptr)
+        return nullptr;
+    for (uint32_t i = 0; i < (*frame).childDialogCount; i++) {
+        Dialog *d = (*frame).childDialogs[i];
+        if (d != nullptr && Dialog_isClinging(d) && Dialog_isOpen(d)) {
+            Dialog *deeper = Frame_getActiveClingingDialog(&(*d).frame);
+            if (deeper != nullptr)
+                return deeper;
+            return d;
+        }
+    }
+    return nullptr;
+}
+
+bool Frame_canClose(const Frame *frame) {
+    if (frame == nullptr)
+        return true;
+
+    if (Frame_getActiveClingingDialog(frame) != nullptr)
+        return false;
+
+    for (uint32_t i = 0; i < (*frame).childDialogCount; i++) {
+        Dialog *d = (*frame).childDialogs[i];
+        if (d != nullptr && Dialog_isOpen(d)) {
+            if (!Frame_canClose(&(*d).frame))
+                return false;
+        }
+    }
+
+    if ((*frame).onQuitRequested != nullptr) {
+        return (*frame).onQuitRequested((Frame*) frame, (*frame).quitRequestedUserData);
+    }
+    return true;
+}
+
+void Frame_closeChildDialogs(Frame *frame) {
+    if (frame == nullptr)
+        return;
+    for (uint32_t i = 0; i < (*frame).childDialogCount; i++) {
+        Dialog *d = (*frame).childDialogs[i];
+        if (d != nullptr && Dialog_isOpen(d)) {
+            Dialog_close(d);
+        }
+    }
+}
+
+void Frame_close(Frame *frame) {
+    if (frame == nullptr)
+        return;
+    if (!Frame_canClose(frame))
+        return;
+
+    Frame_closeChildDialogs(frame);
+    Frame_hide(frame);
+    if ((*frame).window != nullptr) {
+        Window_setShouldClose((*frame).window, true);
+    }
+}
+
+void Frame_setOnQuitRequested(Frame *frame, bool (*onQuitRequested)(Frame *frame, void *userData), void *userData) {
+    if (frame == nullptr)
+        return;
+    (*frame).onQuitRequested = onQuitRequested;
+    (*frame).quitRequestedUserData = userData;
 }

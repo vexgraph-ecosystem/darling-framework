@@ -13,9 +13,11 @@ extern "C" {
 #endif
 
 #define DARLING_FRAME_MAX_LAYERS 8
+#define DARLING_FRAME_MAX_DIALOGS 16
 
 typedef struct Panel Panel;
 typedef struct Application Application;
+typedef struct Dialog Dialog;
 
 typedef enum FrameChromeMode {
     FRAME_DECORATED = 0,               // Standard opaque title bar, title visible
@@ -62,6 +64,12 @@ typedef struct Frame {
     int chromeMode;             // FrameChromeMode (FRAME_DECORATED / BORDERLESS / NAKED)
     FrameLayer layers[DARLING_FRAME_MAX_LAYERS]; // Stacked FBOs inside CAMetalLayer
     uint32_t layerCount;
+
+    Dialog *childDialogs[DARLING_FRAME_MAX_DIALOGS]; // Managed child dialogs
+    uint32_t childDialogCount;
+
+    bool (*onQuitRequested)(struct Frame *frame, void *userData);
+    void *quitRequestedUserData;
 
     bool hasVisualEffect;       // NSVisualEffectView vibrancy enabled
     int visualEffectMaterial;   // FrameVisualEffectMaterial
@@ -128,8 +136,7 @@ void Frame_hide(Frame *frame);
 void Frame_setVisible(Frame *frame, bool visible);
 void Frame_bringToFront(Frame *frame);
 void Frame_setUndecorated(Frame *frame, int type);
-void (Frame_setDecorated)(Frame *frame, int mode);
-void Frame_setDecoratedDefault(int mode);
+void Frame_setDecorated(Frame *frame, int flag);
 void Frame_setNaked(Frame *frame, bool naked);
 void Frame_setBorderless(Frame *frame, bool borderless);
 void Frame_setFloatingTrafficLights(Frame *frame, bool floating);
@@ -195,10 +202,16 @@ bool Frame_isBorderless(const Frame *frame);
 WindowCursorType Frame_getCursorType(const Frame *frame);
 bool Frame_shouldClose(const Frame *frame);
 
-#define FRAME_SET_DECORATED_1(mode) Frame_setDecoratedDefault((int)(mode))
-#define FRAME_SET_DECORATED_2(f, mode) (Frame_setDecorated)((f), (int)(mode))
-#define FRAME_SET_DECORATED_GET_MACRO(_1, _2, NAME, ...) NAME
-#define Frame_setDecorated(...) FRAME_SET_DECORATED_GET_MACRO(__VA_ARGS__, FRAME_SET_DECORATED_2, FRAME_SET_DECORATED_1)(__VA_ARGS__)
+// Dialog Hierarchy & Closing Policy:
+bool Frame_addChildDialog(Frame *frame, Dialog *dialog);
+bool Frame_removeChildDialog(Frame *frame, Dialog *dialog);
+uint32_t Frame_getChildDialogCount(const Frame *frame);
+Dialog *Frame_getChildDialog(const Frame *frame, uint32_t index);
+Dialog *Frame_getActiveClingingDialog(const Frame *frame);
+bool Frame_canClose(const Frame *frame);
+void Frame_closeChildDialogs(Frame *frame);
+void Frame_close(Frame *frame);
+void Frame_setOnQuitRequested(Frame *frame, bool (*onQuitRequested)(Frame *frame, void *userData), void *userData);
 
 // Event Adapters & Lifecycle:
 WindowEvent *Frame_getLifecycle(Frame *frame);

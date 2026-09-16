@@ -74,7 +74,61 @@ int main(void) {
     assert(Frame_application(frame) == nullptr);
     Application_free(dlgApp);
 
+    // Frame Handler, Clinging & Chaining Hierarchy tests
+    Frame *rootFrame = Frame_0();
+    assert(rootFrame != nullptr);
+    assert(Frame_canClose(rootFrame) == true);
+    assert(Frame_getChildDialogCount(rootFrame) == 0);
+
+    // Attach dlg to rootFrame
+    assert(Dialog_setHandler(dlg, rootFrame) == true);
+    assert(Dialog_getHandler(dlg) == rootFrame);
+    assert(Frame_getChildDialogCount(rootFrame) == 1);
+    assert(Frame_getChildDialog(rootFrame, 0) == dlg);
+
+    // Non-clinging dialog does not block frame close
+    assert(Dialog_isClinging(dlg) == false);
+    assert(Frame_canClose(rootFrame) == true);
+
+    // Set dlg as clinging and open it
+    Dialog_setClinging(dlg, true);
+    assert(Dialog_isClinging(dlg) == true);
+    (*dlg).open = true; // simulate open
+    assert(Frame_canClose(rootFrame) == false); // Clinging dialog prevents frame close!
+    assert(Frame_getActiveClingingDialog(rootFrame) == dlg);
+
+    // Dialog chaining: childDlg handled by parent dlg
+    Dialog *childDlg = Dialog_1("Chained Child Dialog");
+    assert(childDlg != nullptr);
+    assert(Dialog_setDialogHandler(childDlg, dlg) == true);
+    assert(Dialog_getHandler(childDlg) == Dialog_getFrame(dlg));
+    assert(Frame_getChildDialogCount(Dialog_getFrame(dlg)) == 1);
+
+    // Set childDlg clinging and open it
+    Dialog_setClinging(childDlg, true);
+    (*childDlg).open = true; // simulate open
+
+    // Root frame active clinging traverses all the way to childDlg!
+    assert(Frame_getActiveClingingDialog(rootFrame) == childDlg);
+    assert(Frame_canClose(rootFrame) == false);
+    assert(Frame_canClose(Dialog_getFrame(dlg)) == false);
+
+    // Close childDlg -> dlg remains active clinging
+    Dialog_close(childDlg);
+    assert(Dialog_isOpen(childDlg) == false);
+    assert(Frame_canClose(Dialog_getFrame(dlg)) == true); // parent can close if child closed
+    assert(Frame_getActiveClingingDialog(rootFrame) == dlg);
+    assert(Frame_canClose(rootFrame) == false); // root still blocked by dlg
+
+    // Close dlg -> root frame unblocked!
+    Dialog_close(dlg);
+    assert(Dialog_isOpen(dlg) == false);
+    assert(Frame_canClose(rootFrame) == true); // unblocked!
+    assert(Frame_getActiveClingingDialog(rootFrame) == nullptr);
+
+    Dialog_free(childDlg);
     Dialog_free(dlg);
+    Frame_free(rootFrame);
 
     // 2. OptionDialog
     OptionDialog *opt = OptionDialog_3("Save Changes?", "Do you want to save?", OPTION_BUTTON_YES | OPTION_BUTTON_NO | OPTION_BUTTON_CANCEL);
