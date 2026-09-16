@@ -101,6 +101,8 @@
 // CONSTRUCTORS
 // ============================================================================
 
+static _Thread_local Frame *darling_lastFrame = nullptr;
+
 bool Frame_init(Window *win, void *graphics, Frame *frame) {
     if (frame == nullptr)
         return false;
@@ -113,6 +115,7 @@ bool Frame_init(Window *win, void *graphics, Frame *frame) {
     (*frame).hasVisualEffect = false;
     (*frame).visualEffectMaterial = FRAME_MATERIAL_HUD_WINDOW;
     (*frame).presentsWithTransaction = true;
+    (*frame).chromeMode = FRAME_DECORATED;
     (*frame).width = win ? Window_width(win) : 800;
     (*frame).height = win ? Window_height(win) : 600;
     (*frame).inLiveResize = false;
@@ -121,6 +124,8 @@ bool Frame_init(Window *win, void *graphics, Frame *frame) {
     (*frame).onRender = nullptr;
     (*frame).userData = nullptr;
     (*frame).nativeView = nullptr;
+
+    darling_lastFrame = frame;
 
     Frame_platformAttach(frame);
     return true;
@@ -168,6 +173,10 @@ Frame *Frame_3(const char *title, int width, int height) {
 void Frame_destroy(Frame *frame) {
     if (frame == nullptr)
         return;
+
+    if (darling_lastFrame == frame) {
+        darling_lastFrame = nullptr;
+    }
 
     if ((*frame).application != nullptr && (*frame).window != nullptr) {
         Application_removeWindow((*frame).application, (*frame).window);
@@ -527,9 +536,32 @@ void Frame_bringToFront(Frame *frame) {
 }
 
 void Frame_setUndecorated(Frame *frame, int type) {
-    if (frame == nullptr || (*frame).window == nullptr)
+    if (frame == nullptr)
         return;
-    Window_setUndecorated((*frame).window, type);
+    (*frame).chromeMode = type;
+    if ((*frame).window != nullptr)
+        Window_setUndecorated((*frame).window, type);
+}
+
+void (Frame_setDecorated)(Frame *frame, int mode) {
+    if (frame == nullptr)
+        return;
+    (*frame).chromeMode = mode;
+    if ((*frame).window != nullptr)
+        Window_setUndecorated((*frame).window, mode);
+}
+
+void Frame_setDecoratedDefault(int mode) {
+    if (darling_lastFrame != nullptr)
+        (Frame_setDecorated)(darling_lastFrame, mode);
+}
+
+void Frame_setNaked(Frame *frame, bool naked) {
+    (Frame_setDecorated)(frame, naked ? FRAME_UNDECORATED_NAKED : FRAME_DECORATED);
+}
+
+void Frame_setBorderless(Frame *frame, bool borderless) {
+    (Frame_setDecorated)(frame, borderless ? FRAME_UNDECORATED_BORDERLESS : FRAME_DECORATED);
 }
 
 void Frame_setFloatingTrafficLights(Frame *frame, bool floating) {
@@ -548,6 +580,13 @@ void Frame_setOpacity(Frame *frame, float opacity) {
     if (frame == nullptr || (*frame).window == nullptr)
         return;
     Window_setOpacity((*frame).window, opacity);
+}
+
+void Frame_setTransparent(Frame *frame, bool transparent) {
+    if (frame == nullptr || (*frame).window == nullptr)
+        return;
+    Window_setTransparent((*frame).window, transparent);
+    Window_setTransparentBackground((*frame).window, transparent);
 }
 
 void Frame_setTransparentBackground(Frame *frame, bool transparent) {
@@ -725,6 +764,36 @@ bool Frame_isFocused(const Frame *frame) {
     if (frame == nullptr || (*frame).window == nullptr)
         return false;
     return Window_isFocused((Window*) (*frame).window);
+}
+
+bool Frame_isTransparent(const Frame *frame) {
+    if (frame == nullptr || (*frame).window == nullptr)
+        return false;
+    return Window_isTransparent((*frame).window);
+}
+
+int Frame_getDecorated(const Frame *frame) {
+    if (frame == nullptr)
+        return FRAME_DECORATED;
+    return (*frame).chromeMode;
+}
+
+bool Frame_isDecorated(const Frame *frame) {
+    if (frame == nullptr)
+        return true;
+    return (*frame).chromeMode == FRAME_DECORATED;
+}
+
+bool Frame_isNaked(const Frame *frame) {
+    if (frame == nullptr)
+        return false;
+    return (*frame).chromeMode == FRAME_UNDECORATED_NAKED;
+}
+
+bool Frame_isBorderless(const Frame *frame) {
+    if (frame == nullptr)
+        return false;
+    return (*frame).chromeMode == FRAME_UNDECORATED_BORDERLESS;
 }
 
 WindowCursorType Frame_getCursorType(const Frame *frame) {

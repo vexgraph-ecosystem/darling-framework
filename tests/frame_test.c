@@ -74,6 +74,26 @@ int main(void) {
     Frame_setVisible(&frame, false);
     assert(Frame_isVisible(&frame) == false);
 
+    // Test chrome modes & transparency
+    assert(Frame_isDecorated(&frame) == true);
+    assert(Frame_isNaked(&frame) == false);
+    assert(Frame_isBorderless(&frame) == false);
+    Frame_setDecorated(&frame, FRAME_UNDECORATED_NAKED);
+    assert(Frame_getDecorated(&frame) == FRAME_UNDECORATED_NAKED);
+    assert(Frame_isNaked(&frame) == true);
+    assert(Frame_isDecorated(&frame) == false);
+    Frame_setBorderless(&frame, true);
+    assert(Frame_isBorderless(&frame) == true);
+    Frame_setNaked(&frame, false);
+    assert(Frame_isDecorated(&frame) == true);
+    // Test 1-arg macro tolerance (Frame_setDecorated(FRAME_UNECORATED_NAKED))
+    Frame_setDecorated(FRAME_UNECORATED_NAKED);
+    assert(Frame_isNaked(&frame) == true);
+    Frame_setDecorated(&frame, FRAME_DECORATED);
+    assert(Frame_isDecorated(&frame) == true);
+    Frame_setTransparent(&frame, true);
+    Frame_setTransparentBackground(&frame, false);
+
     // Add stacked FBO layers (e.g. Layer 0: Scene, Layer 1: Content/UI, Layer 2: Modal)
     FrameLayer *layer0 = nullptr;
     FrameLayer *layer1 = nullptr;

@@ -17,6 +17,19 @@ extern "C" {
 typedef struct Panel Panel;
 typedef struct Application Application;
 
+typedef enum FrameChromeMode {
+    FRAME_DECORATED = 0,               // Standard opaque title bar, title visible
+    FRAME_UNDECORATED_BORDERLESS = 1,  // No title bar and no traffic lights
+    FRAME_UNDECORATED_NAKED = 2,       // Transparent title bar, hidden title, traffic lights kept
+} FrameChromeMode;
+
+#define FRAME_DECORATED               0
+#define FRAME_UNDECORATED_BORDERLESS  1
+#define FRAME_UNDECORATED_NAKED       2
+#define FRAME_UNECORATED_NAKED        2
+#define FRAME_NAKED                   2
+#define FRAME_BORDERLESS              1
+
 typedef enum FrameVisualEffectMaterial {
     FRAME_MATERIAL_HUD_WINDOW = 0,
     FRAME_MATERIAL_SIDEBAR = 1,
@@ -46,6 +59,7 @@ typedef struct Frame {
     Panel *rootPanel;           // Root UI component tree
     char *title;                // Owned title string (strdup on set)
     bool visible;               // Visibility state flag
+    int chromeMode;             // FrameChromeMode (FRAME_DECORATED / BORDERLESS / NAKED)
     FrameLayer layers[DARLING_FRAME_MAX_LAYERS]; // Stacked FBOs inside CAMetalLayer
     uint32_t layerCount;
 
@@ -114,9 +128,14 @@ void Frame_hide(Frame *frame);
 void Frame_setVisible(Frame *frame, bool visible);
 void Frame_bringToFront(Frame *frame);
 void Frame_setUndecorated(Frame *frame, int type);
+void (Frame_setDecorated)(Frame *frame, int mode);
+void Frame_setDecoratedDefault(int mode);
+void Frame_setNaked(Frame *frame, bool naked);
+void Frame_setBorderless(Frame *frame, bool borderless);
 void Frame_setFloatingTrafficLights(Frame *frame, bool floating);
 void Frame_setBlur(Frame *frame, float blur);
 void Frame_setOpacity(Frame *frame, float opacity);
+void Frame_setTransparent(Frame *frame, bool transparent);
 void Frame_setTransparentBackground(Frame *frame, bool transparent);
 void Frame_setAlwaysOnTop(Frame *frame, bool onTop);
 void Frame_setClickThrough(Frame *frame, bool clickThrough);
@@ -168,8 +187,18 @@ bool Frame_isResizable(const Frame *frame);
 bool Frame_isClosable(const Frame *frame);
 bool Frame_isMiniaturizable(const Frame *frame);
 bool Frame_isFocused(const Frame *frame);
+bool Frame_isTransparent(const Frame *frame);
+int  Frame_getDecorated(const Frame *frame);
+bool Frame_isDecorated(const Frame *frame);
+bool Frame_isNaked(const Frame *frame);
+bool Frame_isBorderless(const Frame *frame);
 WindowCursorType Frame_getCursorType(const Frame *frame);
 bool Frame_shouldClose(const Frame *frame);
+
+#define FRAME_SET_DECORATED_1(mode) Frame_setDecoratedDefault((int)(mode))
+#define FRAME_SET_DECORATED_2(f, mode) (Frame_setDecorated)((f), (int)(mode))
+#define FRAME_SET_DECORATED_GET_MACRO(_1, _2, NAME, ...) NAME
+#define Frame_setDecorated(...) FRAME_SET_DECORATED_GET_MACRO(__VA_ARGS__, FRAME_SET_DECORATED_2, FRAME_SET_DECORATED_1)(__VA_ARGS__)
 
 // Event Adapters & Lifecycle:
 WindowEvent *Frame_getLifecycle(Frame *frame);
