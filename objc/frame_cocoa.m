@@ -10,6 +10,7 @@
 
 void Dialog_focus(Dialog *dialog);
 void Dialog_bringToFront(Dialog *dialog);
+bool Dialog_requestClose(Dialog *dialog);
 
 ;;OVERVIEW
 /**
@@ -92,6 +93,11 @@ static bool frameCocoaOnQuitRequested(void *self, Window *window) {
     Frame *frame = (Frame*) self;
     if (frame == nullptr)
         return true;
+    // A dialog's own window must close through Dialog_close (full cleanup:
+    // open flag, bridge, key gate, pair glue, handler refocus) — never as a
+    // raw AppKit close that would leave a zombie holder behind.
+    if ((*frame).ownerDialog != nullptr)
+        return Dialog_requestClose((*frame).ownerDialog);
     if (!Frame_canClose(frame))
         return false;
     Frame_closeChildDialogs(frame);
@@ -103,6 +109,11 @@ static void frameCocoaOnFocusGained(void *self, Window *window) {
     Frame *frame = (Frame*) self;
     if (frame == nullptr)
         return;
+    // A dialog's own window gaining key (or click) restacks the pair so the
+    // handler sits directly below the dialog — never an app sandwiched
+    // between frame and dialog.
+    if ((*frame).ownerDialog != nullptr)
+        Dialog_bringToFront((*frame).ownerDialog);
     Dialog *clinging = Frame_getActiveClingingDialog(frame);
     if (clinging != nullptr) {
         Dialog_focus(clinging);
@@ -115,6 +126,8 @@ static void frameCocoaOnPressed(void *self, Window *window) {
     Frame *frame = (Frame*) self;
     if (frame == nullptr)
         return;
+    if ((*frame).ownerDialog != nullptr)
+        Dialog_bringToFront((*frame).ownerDialog);
     Dialog *clinging = Frame_getActiveClingingDialog(frame);
     if (clinging != nullptr) {
         Dialog_focus(clinging);

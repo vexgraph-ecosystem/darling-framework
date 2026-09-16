@@ -276,7 +276,7 @@ Do these before any new widget — they make old widgets look new.
 
 | Node / API | What it is | C sketch |
 |------------|-----------|----------|
-| `Theme` | Token table + light/dark ramps + radius/elevation/type/spacing/motion (§1) | `Theme_apply(Theme_dark())` |
+| `Theme` | Token table + light/dark ramps + radius/elevation/type/spacing/motion (#1) | `Theme_apply(Theme_dark())` |
 | `Elevation/Border/Blur` | `Panel_setElevation(p,2)`, `setBorder(p,color,w)`, `setBlur(p,12)` | Frosted card = `SURFACE @ 210 alpha + blur 16 + border OUTLINE_DIM` |
 | `ProgressBar` | Determinate bar + indeterminate sweep | `ProgressBar_setValue(b,0.65)` — uploads, health regen, onboarding |
 | `Spinner` | Infinite arc, theme accent | `Spinner_0()` — loading table, matchmaking |
@@ -339,7 +339,7 @@ SplitPanel_setRatio(split, 0.28f);
 
 ## 12. SaaS Kit (proposed)
 
-Composed from §§9–11. Nothing exotic — just the exact patterns shadcn dashboards repeat in 2026.
+Composed from #9–11. Nothing exotic — just the exact patterns shadcn dashboards repeat in 2026.
 
 | Kit piece | Composition | Notes |
 |-----------|-------------|-------|

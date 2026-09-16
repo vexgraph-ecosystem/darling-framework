@@ -27,6 +27,10 @@
  *   Panel *rootPanel;                             // Root UI component tree
  *   FrameLayer layers[DARLING_FRAME_MAX_LAYERS];  // Stacked FBOs inside CAMetalLayer
  *   uint32_t layerCount;                          // Active layer count
+ *   Dialog *childDialogs[16];                     // Managed child dialogs (max 16)
+ *   uint32_t childDialogCount;                    // Active child dialog count
+ *   Dialog *ownerDialog;                          // Owning Dialog if embedded in a Dialog
+ *   Frame *parentFrame;                           // Parent frame if this is a child dialog
  *   bool hasVisualEffect;                         // NSVisualEffectView vibrancy
  *   int visualEffectMaterial;                     // FrameVisualEffectMaterial
  *   bool presentsWithTransaction;                 // Atomic presentation flag
@@ -113,6 +117,7 @@ bool Frame_init(Window *win, void *graphics, Frame *frame) {
     (*frame).layerCount = 0;
     (*frame).childDialogCount = 0;
     (*frame).ownerDialog = nullptr;
+    (*frame).parentFrame = nullptr;
     (*frame).onQuitRequested = nullptr;
     (*frame).quitRequestedUserData = nullptr;
     (*frame).hasVisualEffect = false;
@@ -178,8 +183,9 @@ void Frame_destroy(Frame *frame) {
     Frame_closeChildDialogs(frame);
     for (uint32_t i = 0; i < (*frame).childDialogCount; i++) {
         Dialog *d = (*frame).childDialogs[i];
-        if (d != nullptr && (*d).handler == frame) {
+        if (d != nullptr) {
             (*d).handler = nullptr;
+            (*d).frame.parentFrame = nullptr;
         }
     }
     (*frame).childDialogCount = 0;
@@ -890,6 +896,8 @@ bool Frame_removeChildDialog(Frame *frame, Dialog *dialog) {
                 (*frame).childDialogs[j] = (*frame).childDialogs[j + 1];
             }
             (*frame).childDialogs[--(*frame).childDialogCount] = nullptr;
+            (*dialog).handler = nullptr;
+            (*dialog).frame.parentFrame = nullptr;
             return true;
         }
     }
@@ -908,18 +916,49 @@ Dialog *Frame_getChildDialog(const Frame *frame, uint32_t index) {
     return (*frame).childDialogs[index];
 }
 
-Dialog *Frame_getActiveClingingDialog(const Frame *frame) {
-    if (frame == nullptr)
+// Deepest open focus-holding dialog below f, skipping the excluded subtree
+// (an ancestor re-search must never re-descend into the frame it came from).
+static Dialog *frameDeepestHolding(const Frame *f, const Frame *exclude) {
+    if (f == nullptr)
         return nullptr;
-    for (uint32_t i = 0; i < (*frame).childDialogCount; i++) {
-        Dialog *d = (*frame).childDialogs[i];
-        if (d != nullptr && Dialog_isClinging(d) && Dialog_isOpen(d)) {
-            Dialog *deeper = Frame_getActiveClingingDialog(&(*d).frame);
+    for (uint32_t i = 0; i < (*f).childDialogCount; i++) {
+        Dialog *d = (*f).childDialogs[i];
+        if (d == nullptr || &(*d).frame == exclude)
+            continue;
+        if ((Dialog_isClinging(d) || Dialog_isModal(d)) && Dialog_isOpen(d)) {
+            Dialog *deeper = frameDeepestHolding(&(*d).frame, nullptr);
             if (deeper != nullptr)
                 return deeper;
             return d;
         }
     }
+    return nullptr;
+}
+
+Dialog *Frame_getActiveClingingDialog(const Frame *frame) {
+    if (frame == nullptr)
+        return nullptr;
+
+    // Search downward: deepest open focus-holding child of this frame.
+    // Modal implies focus capture exactly like clinging: a modal dialog
+    // holds focus until closed even when clinging was never set.
+    Dialog *down = frameDeepestHolding(frame, nullptr);
+    if (down != nullptr)
+        return down;
+
+    // Search upward: if this frame holds nothing and is itself a child
+    // dialog, the holder governing this frame is the holder governing the
+    // parent — excluding each subtree already searched on the way up.
+    const Frame *child = frame;
+    const Frame *parent = (*frame).parentFrame;
+    while (parent != nullptr) {
+        Dialog *up = frameDeepestHolding(parent, child);
+        if (up != nullptr)
+            return up;
+        child = parent;
+        parent = (*parent).parentFrame;
+    }
+
     return nullptr;
 }
 

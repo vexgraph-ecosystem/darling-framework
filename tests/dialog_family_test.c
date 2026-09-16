@@ -126,6 +126,72 @@ int main(void) {
     assert(Frame_canClose(rootFrame) == true); // unblocked!
     assert(Frame_getActiveClingingDialog(rootFrame) == nullptr);
 
+    // Modal implies focus capture exactly like clinging (clinging never set)
+    Dialog *modalDlg = Dialog_1("Modal Without Clinging");
+    assert(modalDlg != nullptr);
+    assert(Dialog_isModal(modalDlg) == true); // modal by default
+    assert(Dialog_isClinging(modalDlg) == false);
+    assert(Dialog_setHandler(modalDlg, rootFrame) == true);
+    Frame *modalFrame = Dialog_getFrame(modalDlg);
+    assert(modalFrame != nullptr);
+    assert((*modalFrame).parentFrame == rootFrame); // bidirectional link set
+    (*modalDlg).open = true; // simulate open
+    assert(Frame_getActiveClingingDialog(rootFrame) == modalDlg);
+    assert(Frame_canClose(rootFrame) == false); // modal blocks parent close
+    Dialog_close(modalDlg);
+    assert(Frame_getActiveClingingDialog(rootFrame) == nullptr);
+    assert(Frame_canClose(rootFrame) == true);
+    assert(Dialog_getHandler(modalDlg) == nullptr);
+    assert((*modalFrame).parentFrame == nullptr); // bidirectional link cleared
+    Dialog_free(modalDlg);
+
+    // Event capture pairing: a held bridge releases cleanly on close
+    Dialog *evDlg = Dialog_1("Event Hold");
+    assert(evDlg != nullptr);
+    assert(Dialog_setHandler(evDlg, rootFrame) == true);
+    (*evDlg).open = true; // simulate open
+    (*evDlg).eventsHeld = true; // simulate the hold Dialog_show leaves
+    (*evDlg).savedRoot = nullptr;
+    (*evDlg).savedFocused = nullptr;
+    (*evDlg).savedWindow = nullptr;
+    Dialog_close(evDlg);
+    assert((*evDlg).eventsHeld == false);
+    assert(Frame_canClose(rootFrame) == true);
+    Dialog_free(evDlg);
+
+    // Red-close routing: requestClose runs full cleanup, and its false means
+    // "AppKit close cancelled, already handled" — not failure
+    Dialog *reqDlg = Dialog_1("Red Close");
+    assert(reqDlg != nullptr);
+    assert(Dialog_setHandler(reqDlg, rootFrame) == true);
+    (*reqDlg).open = true; // simulate open
+    (*Dialog_getFrame(reqDlg)).visible = true; // simulate shown
+    assert(Frame_canClose(rootFrame) == false); // modal default holds parent
+    assert(Dialog_requestClose(reqDlg) == false); // cleaned up, cancel AppKit
+    assert(Dialog_isOpen(reqDlg) == false);
+    assert(Frame_isVisible(Dialog_getFrame(reqDlg)) == false); // close clears visible
+    assert(Dialog_getHandler(reqDlg) == nullptr);
+    assert(Frame_canClose(rootFrame) == true); // parent unblocked
+    Dialog_free(reqDlg);
+
+    // Blocked case: a dialog governing an open holder refuses, staying open
+    Dialog *outerDlg = Dialog_1("Outer");
+    Dialog *innerDlg = Dialog_1("Inner");
+    assert(outerDlg != nullptr && innerDlg != nullptr);
+    assert(Dialog_setHandler(outerDlg, rootFrame) == true);
+    assert(Dialog_setDialogHandler(innerDlg, outerDlg) == true);
+    (*outerDlg).open = true; // simulate open
+    (*innerDlg).open = true; // simulate open
+    assert(Dialog_requestClose(outerDlg) == false); // held child blocks
+    assert(Dialog_isOpen(outerDlg) == true); // stays fully open
+    assert(Dialog_requestClose(innerDlg) == false); // cleans inner up
+    assert(Dialog_isOpen(innerDlg) == false);
+    assert(Dialog_requestClose(outerDlg) == false); // cleans outer up
+    assert(Dialog_isOpen(outerDlg) == false);
+    assert(Frame_canClose(rootFrame) == true);
+    Dialog_free(innerDlg);
+    Dialog_free(outerDlg);
+
     Dialog_free(childDlg);
     Dialog_free(dlg);
     Frame_free(rootFrame);

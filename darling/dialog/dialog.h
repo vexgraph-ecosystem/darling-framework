@@ -24,6 +24,10 @@ typedef struct Dialog {
     bool modal;           // True blocks input to background windows while open
     bool clinging;        // Clinging: locks focus to dialog and prevents handler frame from closing
     bool open;            // True while dialog is open/visible
+    Panel *savedRoot;     // Bridge tree held before modal capture (restored on close)
+    Panel *savedFocused;  // Bridge key target held before modal capture
+    void *savedWindow;    // Bridge OS window held before modal capture
+    bool eventsHeld;      // True while the bridge is retargeted to this dialog
     void (*onClose)(void *ctx);
     void *ctx;
 } Dialog;
@@ -43,8 +47,17 @@ void Dialog_destroy(Dialog *dialog);
 void Dialog_free(Dialog *dialog);
 
 // Core Functions:
-void Dialog_show(Dialog *dialog);
+//   Dialog_show(dialog, frame): present bound to a parent frame (nullable);
+//     attaches the handler, ensures the window, and captures focus + stacks
+//     the pair (handler below, dialog on top) while modal or clinging.
+//   Dialog_open(dialog): present with no parent (show with nullptr frame).
+void Dialog_show(Dialog *dialog, Frame *frame);
 bool Dialog_open(Dialog *dialog);
+// AppKit red-close routing: a dialog whose own window is being closed must
+// run the full Dialog_close cleanup (not just the raw window close).
+// Returns true when AppKit may proceed; false when the close is blocked
+// (held children) or was already performed by Dialog_close.
+bool Dialog_requestClose(Dialog *dialog);
 void Dialog_close(Dialog *dialog);
 bool Dialog_addDialogHolder(Dialog *dialog, Application *app);
 bool Dialog_removeDialogHolder(Dialog *dialog, Application *app);
