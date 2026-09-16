@@ -5,6 +5,7 @@
 #include <stdio.h>
 
 #include "darling/frame.h"
+#include "kernel/application.h"
 
 ;;OVERVIEW
 /**
@@ -98,7 +99,21 @@ int main(void) {
     assert((*layer2).width == 1024);
     assert(renderCount == 2); // Frame_resize triggers render
 
-    // 5. Heap constructor & teardown
+    // 5. Application Frame Handler Bridge
+    Application *testApp = Application_1("FrameBridgeApp");
+    assert(testApp != nullptr);
+    assert(Frame_application(&frame) == nullptr);
+    assert(Frame_window(&frame) == nullptr);
+
+    assert(Frame_addFrameHandler(&frame, testApp) == true);
+    assert(Frame_application(&frame) == testApp);
+
+    assert(Frame_removeFrameHandler(&frame, testApp) == true);
+    assert(Frame_application(&frame) == nullptr);
+
+    Application_free(testApp);
+
+    // 6. Heap constructor & teardown
     Frame *heapFrame = Frame_0();
     assert(heapFrame != nullptr);
     assert(Frame_isPresentsWithTransaction(heapFrame) == true);

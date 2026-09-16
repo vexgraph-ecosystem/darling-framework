@@ -2,6 +2,7 @@
 
 #include "annotation/overview.h"
 #include "darling/panel/panel.h"
+#include "kernel/application.h"
 #include "window/window.h"
 
 #include <stdlib.h>
@@ -165,6 +166,11 @@ void Frame_destroy(Frame *frame) {
     if (frame == nullptr)
         return;
 
+    if ((*frame).application != nullptr && (*frame).window != nullptr) {
+        Application_removeWindow((*frame).application, (*frame).window);
+        (*frame).application = nullptr;
+    }
+
     Frame_platformDetach(frame);
 
     if ((*frame).rootPanel != nullptr) {
@@ -188,6 +194,25 @@ void Frame_free(Frame *frame) {
 
 // CORE FUNCTIONS
 // ============================================================================
+
+bool Frame_addFrameHandler(Frame *frame, Application *app) {
+    if (frame == nullptr || app == nullptr)
+        return false;
+
+    Frame_setApplication(frame, app);
+    return true;
+}
+
+bool Frame_removeFrameHandler(Frame *frame, Application *app) {
+    if (frame == nullptr || app == nullptr)
+        return false;
+
+    if ((*frame).application == app) {
+        Frame_setApplication(frame, nullptr);
+        return true;
+    }
+    return false;
+}
 
 bool Frame_addLayer(Frame *frame, uint32_t width, uint32_t height, FrameLayer **outLayer) {
     if (frame == nullptr || (*frame).layerCount >= DARLING_FRAME_MAX_LAYERS)
@@ -257,7 +282,25 @@ void Frame_resize(Frame *frame, int width, int height) {
 void Frame_setWindow(Frame *frame, Window *window) {
     if (frame == nullptr)
         return;
+    if ((*frame).application != nullptr && (*frame).window != nullptr) {
+        Application_removeWindow((*frame).application, (*frame).window);
+    }
     (*frame).window = window;
+    if ((*frame).application != nullptr && (*frame).window != nullptr) {
+        Application_addWindow((*frame).application, (*frame).window);
+    }
+}
+
+void Frame_setApplication(Frame *frame, Application *app) {
+    if (frame == nullptr)
+        return;
+    if ((*frame).application != nullptr && (*frame).window != nullptr) {
+        Application_removeWindow((*frame).application, (*frame).window);
+    }
+    (*frame).application = app;
+    if ((*frame).application != nullptr && (*frame).window != nullptr) {
+        Application_addWindow((*frame).application, (*frame).window);
+    }
 }
 
 void Frame_setGraphics(Frame *frame, void *graphics) {
@@ -305,6 +348,20 @@ Window *Frame_getWindow(const Frame *frame) {
     if (frame == nullptr)
         return nullptr;
     return (*frame).window;
+}
+
+Window *Frame_window(const Frame *frame) {
+    return Frame_getWindow(frame);
+}
+
+Application *Frame_getApplication(const Frame *frame) {
+    if (frame == nullptr)
+        return nullptr;
+    return (*frame).application;
+}
+
+Application *Frame_application(const Frame *frame) {
+    return Frame_getApplication(frame);
 }
 
 void *Frame_getGraphics(const Frame *frame) {

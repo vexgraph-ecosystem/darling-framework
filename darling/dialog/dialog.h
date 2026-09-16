@@ -41,7 +41,10 @@ void Dialog_free(Dialog *dialog);
 
 // Core Functions:
 void Dialog_show(Dialog *dialog);
+bool Dialog_open(Dialog *dialog);
 void Dialog_close(Dialog *dialog);
+bool Dialog_addDialogHolder(Dialog *dialog, Application *app);
+bool Dialog_removeDialogHolder(Dialog *dialog, Application *app);
 
 // Setters:
 void Dialog_setTitle(Dialog *dialog, const char *title);
@@ -51,6 +54,8 @@ void Dialog_setOnClose(Dialog *dialog, void (*onClose)(void *ctx), void *ctx);
 
 // Getters:
 Frame *Dialog_getFrame(Dialog *dialog);
+Frame *Dialog_frame(Dialog *dialog);
+Window *Dialog_window(const Dialog *dialog);
 const char *Dialog_getTitle(const Dialog *dialog);
 Panel *Dialog_getContent(const Dialog *dialog);
 bool Dialog_isModal(const Dialog *dialog);

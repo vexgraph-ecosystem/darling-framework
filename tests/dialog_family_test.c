@@ -10,6 +10,7 @@
 #include "darling/dialog/inputdialog.h"
 #include "darling/overlay/filedialog.h"
 #include "darling/color/colordialog.h"
+#include "kernel/application.h"
 #include "nio/mem.h"
 
 ;;OVERVIEW
@@ -62,6 +63,17 @@ int main(void) {
 
     Dialog_setTitle(dlg, "Updated Title");
     assert(strcmp(Dialog_getTitle(dlg), "Updated Title") == 0);
+    assert(Dialog_frame(dlg) == frame);
+    assert(Dialog_window(dlg) == nullptr);
+
+    Application *dlgApp = Application_1("DialogHolderApp");
+    assert(dlgApp != nullptr);
+    assert(Dialog_addDialogHolder(dlg, dlgApp) == true);
+    assert(Frame_application(frame) == dlgApp);
+    assert(Dialog_removeDialogHolder(dlg, dlgApp) == true);
+    assert(Frame_application(frame) == nullptr);
+    Application_free(dlgApp);
+
     Dialog_free(dlg);
 
     // 2. OptionDialog

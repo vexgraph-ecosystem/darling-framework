@@ -3,6 +3,7 @@
 #include "annotation/overview.h"
 #include "darling/frame.h"
 #include "darling/panel/panel.h"
+#include "kernel/application.h"
 #include "window/window.h"
 
 #include <stdlib.h>
@@ -131,6 +132,27 @@ void Dialog_show(Dialog *dialog) {
     Frame_present(&(*dialog).frame);
 }
 
+bool Dialog_open(Dialog *dialog) {
+    if (dialog == nullptr)
+        return false;
+
+    if ((*dialog).frame.window == nullptr) {
+        int w = (*dialog).frame.width > 0 ? (*dialog).frame.width : 480;
+        int h = (*dialog).frame.height > 0 ? (*dialog).frame.height : 320;
+        const char *t = (*dialog).title ? (*dialog).title : "Dialog";
+        (*dialog).frame.window = Window_create(t, w, h);
+        if ((*dialog).frame.window != nullptr) {
+            Frame_platformAttach(&(*dialog).frame);
+            if ((*dialog).frame.application != nullptr) {
+                Application_addWindow((*dialog).frame.application, (*dialog).frame.window);
+            }
+        }
+    }
+
+    Dialog_show(dialog);
+    return true;
+}
+
 void Dialog_close(Dialog *dialog) {
     if (dialog == nullptr)
         return;
@@ -140,6 +162,18 @@ void Dialog_close(Dialog *dialog) {
 
     if ((*dialog).frame.window != nullptr)
         Window_hide((*dialog).frame.window);
+}
+
+bool Dialog_addDialogHolder(Dialog *dialog, Application *app) {
+    if (dialog == nullptr || app == nullptr)
+        return false;
+    return Frame_addFrameHandler(&(*dialog).frame, app);
+}
+
+bool Dialog_removeDialogHolder(Dialog *dialog, Application *app) {
+    if (dialog == nullptr || app == nullptr)
+        return false;
+    return Frame_removeFrameHandler(&(*dialog).frame, app);
 }
 
 // SETTERS
@@ -183,6 +217,16 @@ Frame *Dialog_getFrame(Dialog *dialog) {
     if (dialog == nullptr)
         return nullptr;
     return &(*dialog).frame;
+}
+
+Frame *Dialog_frame(Dialog *dialog) {
+    return Dialog_getFrame(dialog);
+}
+
+Window *Dialog_window(const Dialog *dialog) {
+    if (dialog == nullptr)
+        return nullptr;
+    return (*dialog).frame.window;
 }
 
 const char *Dialog_getTitle(const Dialog *dialog) {

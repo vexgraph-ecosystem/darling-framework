@@ -15,6 +15,7 @@ extern "C" {
 
 typedef struct Window Window;
 typedef struct Panel Panel;
+typedef struct Application Application;
 
 typedef enum FrameVisualEffectMaterial {
     FRAME_MATERIAL_HUD_WINDOW = 0,
@@ -40,6 +41,7 @@ typedef struct FrameLayer {
 
 typedef struct Frame {
     Window *window;             // R1 host window pointer
+    Application *application;   // R1 host application manifest pointer (nullable)
     void *graphics;             // R3 GPU graphics context (VkHotContext / Device)
     Panel *rootPanel;           // Root UI component tree
     FrameLayer layers[DARLING_FRAME_MAX_LAYERS]; // Stacked FBOs inside CAMetalLayer
@@ -82,6 +84,8 @@ void Frame_render(Frame *frame);
 void Frame_present(Frame *frame);
 void Frame_resize(Frame *frame, int width, int height);
 bool Frame_addLayer(Frame *frame, uint32_t width, uint32_t height, FrameLayer **outLayer);
+bool Frame_addFrameHandler(Frame *frame, Application *app);
+bool Frame_removeFrameHandler(Frame *frame, Application *app);
 
 // Platform hooks for AppKit / window_cocoa.m integration
 void Frame_platformAttach(Frame *frame);
@@ -90,6 +94,7 @@ void Frame_platformSyncTransaction(Frame *frame);
 
 // Setters:
 void Frame_setWindow(Frame *frame, Window *window);
+void Frame_setApplication(Frame *frame, Application *app);
 void Frame_setGraphics(Frame *frame, void *graphics);
 void Frame_setRootPanel(Frame *frame, Panel *panel);
 void Frame_setVisualEffect(Frame *frame, bool enable, int material);
@@ -99,6 +104,9 @@ void Frame_setNativeView(Frame *frame, void *nativeView);
 
 // Getters:
 Window *Frame_getWindow(const Frame *frame);
+Window *Frame_window(const Frame *frame);
+Application *Frame_getApplication(const Frame *frame);
+Application *Frame_application(const Frame *frame);
 void *Frame_getGraphics(const Frame *frame);
 Panel *Frame_getRootPanel(const Frame *frame);
 uint32_t Frame_getLayerCount(const Frame *frame);
