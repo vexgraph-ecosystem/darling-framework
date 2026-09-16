@@ -1,5 +1,6 @@
 #include "annotation/overview.h"
 #include "darling/compositor.h"
+#include "darling/frame.h"
 #include "darling/container.h"
 #include "darling/panel/panel.h"
 #include "darling/scene/scene.h"
@@ -11,15 +12,12 @@
 #include "vulkan/vk_iosurface.h"
 #include "vulkan/vk_layer.h"
 #include "vulkan/vk_pane.h"
-#include "vulkan/vk_guard.h"
 #include "vulkan/vk_scene.h"
 #include "vulkan/vk_view.h"
 #include "window/window.h"
 
 #include <vulkan/vulkan_core.h>
-#include <stdio.h>
 #include <stdlib.h>
-#include <string.h>
 
 ;;OVERVIEW
 /**
@@ -41,10 +39,10 @@
  * FUNCTION REGISTRY:
  * ----------------------------------------------------------------------------
  * Core Functions:
- *   - Darling_initCompositor(window)
+ *   - Darling_initCompositor(frame)
  *   - Darling_shutdownCompositor(void)
- *   - Darling_renderFrame(cmdBuffer, drawW, drawH, userdata)
- *   - Darling_preFrame(window, drawW, drawH, userdata)
+ *   - Darling_renderFrame(cmdBuffer, drawW, drawH, userdata=Frame*)
+ *   - Darling_preFrame(window, drawW, drawH, userdata=Frame*)
  *     (full layout every tick: live gate was removed; setFrameSize drives
  *     layout directly per drag step; Darling_layerRender runs inside
  *     VkPane_presentAll and VkLayer_visit always)
@@ -345,15 +343,19 @@ void Darling_preFrame(Window *window, int drawW, int drawH, void *userdata) {
     (void)drawW;
     (void)drawH;
 
-    Panel *root = Window_getContainer(window);
-    Panel *contentPanel = Window_getContentPanel(window);
-    Panel *scenePanel = Window_getScenePanel(window);
+    // Panes resolve from the borrowing Frame (userdata) — never the Window.
+    Frame *frame = (Frame*) userdata;
+    if (frame == nullptr)
+        return;
+    Panel *root = Frame_getRootPanel(frame);
+    Panel *contentPanel = Frame_getContentPane(frame);
+    Panel *scenePanel = Frame_getScenePane(frame);
     (void)live;
     // Boards first: scene + content panels attach their full-window Metal
     // boards here so the pane attach below sees board backing (its
     // metal-parent gate) and the subtree painters see board sizes.
-    extern int Darling_attachPanelBoards(Window *window, int width, int height);
-    Darling_attachPanelBoards(window, winW, winH);
+    extern int Darling_attachPanelBoards(Window *window, Panel *scenePane, Panel *contentPane, int width, int height);
+    Darling_attachPanelBoards(window, scenePanel, contentPanel, winW, winH);
 
     if (contentPanel) {
         static int s_lastCompW = 0, s_lastCompH = 0;
@@ -384,8 +386,8 @@ void Darling_preFrame(Window *window, int drawW, int drawH, void *userdata) {
         Darling_attachLayers(window, contentPanel, winW, winH);
 
         // Propagate repaint demand into pane chains before clearing tree dirty
-        extern void Darling_propagatePaneDirty(Window *window, Panel *contentPanel);
-        Darling_propagatePaneDirty(window, contentPanel);
+        extern void Darling_propagatePaneDirty(Window *window, Panel *scenePane, Panel *contentPane);
+        Darling_propagatePaneDirty(window, scenePanel, contentPanel);
 
         if (needsComposite) {
             Window_compositePanes(window, contentPanel);
@@ -427,7 +429,8 @@ void Darling_preFrame(Window *window, int drawW, int drawH, void *userdata) {
 }
 
 void Darling_renderFrame(void *cmdBuffer, int drawW, int drawH, void *userdata) {
-    Window *window = (Window*) userdata;
+    Frame *rframe = (Frame*) userdata;
+    Window *window = rframe ? Frame_getWindow(rframe) : nullptr;
     if (!window || !cmdBuffer) return;
 
     int winW = Window_width(window);
@@ -437,12 +440,12 @@ void Darling_renderFrame(void *cmdBuffer, int drawW, int drawH, void *userdata) 
     float kx = (float)drawW / (float)winW;
     float ky = (float)drawH / (float)winH;
 
-    Panel *root = Window_getContainer(window);
+    Panel *root = Frame_getRootPanel(rframe);
 
     // Board-owned scenes (the Present-On-Demand Law): a metal-backed scenePanel paints its
     // whole subtree into its own board chain — the legacy board stamps
     // nothing and degrades to its clear pass.
-    Panel *boardScene = Window_getScenePanel(window);
+    Panel *boardScene = Frame_getScenePane(rframe);
     if (boardScene) {
         extern void *PanelCocoa_fromPanel(void *panel);
         extern bool PanelCocoa_isBoard(const void *pc);
@@ -480,7 +483,8 @@ void Darling_renderFrame(void *cmdBuffer, int drawW, int drawH, void *userdata) 
 // transaction instead of stalling for an implicit runloop commit that
 // never arrives on thread 0 during the AppKit modal tracking loop.
 static void Darling_resizeRenderHook(void *userdata) {
-    Window *w = (Window*) userdata;
+    Frame *hframe = (Frame*) userdata;
+    Window *w = hframe ? Frame_getWindow(hframe) : nullptr;
     if (!w || !Vk_ready())
         return;
     // Genie gate (defense in depth — the pump already skips the hook while
@@ -494,7 +498,7 @@ static void Darling_resizeRenderHook(void *userdata) {
     int winH = Window_height(w);
     if (winW <= 0 || winH <= 0)
         return;
-    Darling_preFrame(w, winW, winH, nullptr);
+    Darling_preFrame(w, winW, winH, userdata);
     // Synchronous present: wraps in an explicit CATransaction so
     // presentsWithTransaction=YES board drawables are released here.
     Window_workerPresentBegin();
@@ -506,7 +510,8 @@ static void Darling_resizeRenderHook(void *userdata) {
     Window_workerPresentEnd();
 }
 
-void Darling_initCompositor(Window *window) {
+void Darling_initCompositor(Frame *frame) {
+    Window *window = frame ? Frame_getWindow(frame) : nullptr;
     if (!window) return;
 
     if (!Vk_ready()) {
@@ -542,8 +547,8 @@ void Darling_initCompositor(Window *window) {
     // page-fault the GPU (the Ecosystem Vulkan Safety Nets Law net).
     Texture_setRetireGuard(darlingRetireGuard);
 
-    Vk_setPreFrameRenderer((VkPreFrameFn)Darling_preFrame, window);
-    Vk_setFrameRenderer(Darling_renderFrame, window);
+    Vk_setPreFrameRenderer((VkPreFrameFn)Darling_preFrame, frame);
+    Vk_setFrameRenderer(Darling_renderFrame, frame);
 
     // Pane hook: per-CAMetalLayer swapchain children render through here.
     VkPane_setRenderer(Darling_layerRender);
@@ -556,7 +561,7 @@ void Darling_initCompositor(Window *window) {
     // once per drag step. Drives one synchronous VkPane_presentAll so content
     // tracks the window border in real time. Must be registered AFTER Vk_init
     // so the pane/layer hooks are installed and the first present is valid.
-    Window_setResizeRenderHook(window, Darling_resizeRenderHook, window);
+    Window_setResizeRenderHook(window, Darling_resizeRenderHook, frame);
 }
 
 void Darling_shutdownCompositor(void) {

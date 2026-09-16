@@ -31,9 +31,9 @@
  *
  * Core Functions:
  *   - Darling_attachPanes(window, contentPanel, width, height)
- *   - Darling_attachPanelBoards(window, width, height)
+ *   - Darling_attachPanelBoards(window, scenePane, contentPane, width, height)
  *   - Darling_attachLayers(window, contentPanel, width, height)
- *   - Darling_propagatePaneDirty(window, contentPanel)
+ *   - Darling_propagatePaneDirty(window, scenePane, contentPanel)
  *     (Panel_isTreeDirty -> VkPane_markDirty per DIRECT chain; COMPOSITED
  *     scenes re-arm their VkLayer from owner-subtree dirt (demand signal;
  *     wall-clock handlers advance on re-render, registration demands the
@@ -100,7 +100,7 @@
 // Live-gated: mid-drag sizes freeze and the WindowServer stretches board
 // drawables; the final size lands at settle. Returns the number of boards
 // attached or resized.
-int Darling_attachPanelBoards(Window *window, int width, int height) {
+int Darling_attachPanelBoards(Window *window, Panel *scenePane, Panel *contentPane, int width, int height) {
     if (!window || width <= 0 || height <= 0)
         return 0;
     extern float TextCore_backingScale(void);
@@ -111,7 +111,7 @@ int Darling_attachPanelBoards(Window *window, int width, int height) {
     int pxH = (int) (height * scale + 0.5f);
     if (pxW <= 0 || pxH <= 0 || pxW > 16384 || pxH > 16384)
         return 0;
-    Panel *boards[2] = { Window_getScenePanel(window), Window_getContentPanel(window) };
+    Panel *boards[2] = { scenePane, contentPane };
     extern void *PanelCocoa_fromPanel(void *panel);
     extern void *PanelCocoa_newBoard(void *panel, int w, int h);
     extern bool PanelCocoa_setSize(void *pc, int w, int h);
@@ -272,7 +272,7 @@ void Darling_markLiveDirty(Panel *contentPanel) {
     }
 }
 
-void Darling_propagatePaneDirty(Window *window, Panel *contentPanel) {
+void Darling_propagatePaneDirty(Window *window, Panel *scenePane, Panel *contentPanel) {
     if (!window || !contentPanel)
         return;
     extern void *PanelCocoa_fromPanel(void *panel);
@@ -315,7 +315,7 @@ void Darling_propagatePaneDirty(Window *window, Panel *contentPanel) {
         }
     }
 
-    Panel *boards[2] = { Window_getScenePanel(window), Window_getContentPanel(window) };
+    Panel *boards[2] = { scenePane, contentPanel };
     for (int i = 0; i < 2; i++) {
         Panel *board = boards[i];
         if (!board)

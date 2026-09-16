@@ -6,6 +6,7 @@
 #include <stdint.h>
 
 #include "c23/constructor.h"
+#include "input/key_map.h"
 #include "window/window.h"
 
 #ifdef __cplusplus
@@ -15,6 +16,7 @@ extern "C" {
 #define DARLING_FRAME_MAX_LAYERS 8
 #define DARLING_FRAME_MAX_DIALOGS 16
 
+typedef struct Frame Frame;
 typedef struct Panel Panel;
 typedef struct Application Application;
 typedef struct Dialog Dialog;
@@ -54,11 +56,22 @@ typedef struct FrameLayer {
     bool visible;
 } FrameLayer;
 
+// SLOT RECORD: FrameFunction (owned by Frame) — one composable present
+// callback in the frame's grown slot table (replaces the single onRender
+// hook). Slots fire in registration order on every Frame_render; dt is
+// seconds since the previous render, 0.0 on the first render.
+typedef struct FrameFunction {
+    void (*fn)(struct Frame *frame, double dt, void *userData);
+    void *userData;
+} FrameFunction;
+
 typedef struct Frame {
     Window *window;             // R1 host window pointer
     Application *application;   // R1 host application manifest pointer (nullable)
     void *graphics;             // R3 GPU graphics context (VkHotContext / Device)
     Panel *rootPanel;           // Root UI component tree
+    Panel *contentPane;         // Upper board root: UI canvas (borrowed, nullable)
+    Panel *scenePane;           // Bottom board root: scene/backdrop (borrowed, nullable)
     char *title;                // Owned title string (strdup on set)
     bool visible;               // Visibility state flag
     int chromeMode;             // FrameChromeMode (FRAME_DECORATED / BORDERLESS / NAKED)
@@ -83,8 +96,12 @@ typedef struct Frame {
     bool isMinimized;
     bool isZoomed;
 
-    void (*onRender)(struct Frame *frame, void *userData);
-    void *userData;
+    // --- Frame Function Slots (composable present callbacks, replaces onRender) ---
+    FrameFunction *functions;        // Master-arena grown slot table (doubling)
+    uint32_t functionCount;
+    uint32_t functionCapacity;
+    KeyMap *keyMap;                  // Master-arena KeyMap; lazily created on first bind
+    uint64_t lastRenderNanos;        // Monotonic clock at last Frame_render (dt source)
 
     void *nativeView;          // Pointer to platform NSView / CAMetalLayer container
 } Frame;
@@ -123,10 +140,34 @@ void Frame_setWindow(Frame *frame, Window *window);
 void Frame_setApplication(Frame *frame, Application *app);
 void Frame_setGraphics(Frame *frame, void *graphics);
 void Frame_setRootPanel(Frame *frame, Panel *panel);
+// Board roots (non-strict: any Panel subtree in either; borrowed, nullable).
+// Content = upper board (UI canvas); scene = bottom board (backdrop/world).
+// A null scene pane clears the bottom layer transparent. The Window holds
+// zero Panels (the Window Decoupling Law) — the compositor resolves both
+// roots from the Frame alone.
+void Frame_setContentPane(Frame *frame, Panel *panel);
+void Frame_setScenePane(Frame *frame, Panel *panel);
 void Frame_setVisualEffect(Frame *frame, bool enable, int material);
 void Frame_setPresentsWithTransaction(Frame *frame, bool presentsWithTransaction);
-void Frame_setOnRender(Frame *frame, void (*onRender)(Frame *frame, void *userData), void *userData);
 void Frame_setNativeView(Frame *frame, void *nativeView);
+
+// Frame Function slots (composable present callbacks — replaces the single
+// onRender hook). Frame_addFrameFunction returns the slot index, or
+// UINT32_MAX on failure (null fn / master arena unavailable);
+// Frame_removeFrameFunction swap-removes (the last slot takes the hole).
+uint32_t Frame_addFrameFunction(Frame *frame, void (*fn)(Frame *frame, double dt, void *userData), void *userData);
+bool Frame_removeFrameFunction(Frame *frame, uint32_t index);
+uint32_t Frame_getFrameFunctionCount(const Frame *frame);
+
+// Input bindings (KeyMap-backed). Combos are int64 compositions of
+// KMOD_*/KMODE_*/KEY_* (or MOUSE_*) constants — see input/key_map.h for
+// the KeyMap_buildCombo* builders. The frame resolves its KeyMap once per
+// Frame_render and fires at most one binding per present (the
+// Present-On-Demand Law), consuming the source tap before the callback.
+bool Frame_addKeyFunction(Frame *frame, int64_t combo, KeyBindingFn fn, void *userData);
+bool Frame_addMouseFunction(Frame *frame, int64_t combo, KeyBindingFn fn, void *userData);
+bool Frame_removeFunction(Frame *frame, int64_t combo, KeyBindingFn fn);
+KeyMap *Frame_getKeyMap(const Frame *frame);
 
 // Window Forwarding Setters:
 void Frame_setTitle(Frame *frame, const char *title);
@@ -142,6 +183,9 @@ void Frame_setDecorated(Frame *frame, int flag);
 void Frame_setNaked(Frame *frame, bool naked);
 void Frame_setBorderless(Frame *frame, bool borderless);
 void Frame_setFloatingTrafficLights(Frame *frame, bool floating);
+// macOS-only convenience: show/hide all three traffic lights (close, minimize,
+// zoom) at once — forwards to Window_macOS_setTrafficLightButtonVisible.
+void Frame_macos_setTrafficLightVisible(Frame *frame, bool visible);
 void Frame_setBlur(Frame *frame, float blur);
 void Frame_setOpacity(Frame *frame, float opacity);
 void Frame_setTransparent(Frame *frame, bool transparent);
@@ -170,6 +214,8 @@ Application *Frame_getApplication(const Frame *frame);
 Application *Frame_application(const Frame *frame);
 void *Frame_getGraphics(const Frame *frame);
 Panel *Frame_getRootPanel(const Frame *frame);
+Panel *Frame_getContentPane(const Frame *frame);
+Panel *Frame_getScenePane(const Frame *frame);
 uint32_t Frame_getLayerCount(const Frame *frame);
 FrameLayer *Frame_getLayer(Frame *frame, uint32_t index);
 bool Frame_hasVisualEffect(const Frame *frame);

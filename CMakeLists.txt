@@ -191,7 +191,7 @@ endif()
 # Widget gallery + test suite: umbrella probe — target lives in
 # vexgraph/CMakeLists.txt (main/darling_gallery.c).
 
-set(DARLING_TEST_DIR "${CMAKE_CURRENT_SOURCE_DIR}/../../_tests/darling")
+set(DARLING_TEST_DIR "${CMAKE_CURRENT_SOURCE_DIR}/../../tests/darling")
 if(NOT EXISTS "${DARLING_TEST_DIR}")
     set(DARLING_TEST_DIR "${CMAKE_CURRENT_SOURCE_DIR}/tests")
 endif()

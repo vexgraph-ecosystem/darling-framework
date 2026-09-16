@@ -5,9 +5,9 @@
 This document elaborates **every widget darling has today + every widget proposed** for everyday / SaaS / game use, plus the **theme system** that makes them all look polished.
 
 Related sources:
-- `projects/darling/darling/` — nodes (`button/`, `field/`, `label/`, `panel/`, `dialog/`, `overlay/`, `picture/`, `plot/`, `scene/`)
-- `projects/darling/darling/container.h` — anchors, percent, margin, radius, z, clip
-- `projects/darling/darling/panel/panel.h` — bg color, render-handler slot, tree
+- `../../projects/darling/darling/` — nodes (`button/`, `field/`, `label/`, `panel/`, `dialog/`, `overlay/`, `picture/`, `plot/`, `scene/`)
+- `../../projects/darling/darling/container.h` — anchors, percent, margin, radius, z, clip
+- `../../projects/darling/darling/panel/panel.h` — bg color, render-handler slot, tree
 - `../../trash/darling_gallery.c` — widget gallery + suite (S1–S7)
 - `main/darlingtest.c` — two-thread decoupled compositor demo
 

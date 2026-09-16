@@ -2,10 +2,14 @@
 
 #include <assert.h>
 #include <stdbool.h>
+#include <stdint.h>
 #include <stdio.h>
 #include <string.h>
+#include <unistd.h>
 
 #include "darling/frame.h"
+#include "input/key.h"
+#include "input/mouse.h"
 #include "kernel/application.h"
 
 ;;OVERVIEW
@@ -15,7 +19,8 @@
  * LEVEL: L3 — Module Code (headless verification harness)
  * ============================================================================
  * Verification suite for Frame: layer stacking, presentsWithTransaction,
- * visual effect configuration, layer dimensions, render callbacks, and teardown.
+ * visual effect configuration, layer dimensions, composable frame-function
+ * slots (replacing onRender), KeyMap-backed input bindings, and teardown.
  *
  * STRUCT FIELDS: none — procedural test harness.
  *
@@ -26,9 +31,35 @@
  * ============================================================================
  */
 
-static void onFrameRender(Frame *frame, void *userData) {
+static double g_lastDt = -1.0;
+
+static void onFrameRender(Frame *frame, double dt, void *userData) {
     (void) frame;
+    (void) dt;
     (*(int*) userData) += 1;
+}
+
+static void onFrameDt(Frame *frame, double dt, void *userData) {
+    (void) frame;
+    g_lastDt = dt;
+    (*(int*) userData) += 1;
+}
+
+static void onInputFire(void *userData, int64_t combo) {
+    (void) combo;
+    (*(int*) userData) += 1;
+}
+
+static void tapKey(int key) {
+    Key_pushEvent(0, key, KEY_ACTION_DOWN, 250000000ULL);
+    Key_dispatchEvents();
+    Key_pushEvent(0, key, KEY_ACTION_UP, 0);
+    Key_dispatchEvents();
+}
+
+static void holdSuper(bool down) {
+    Key_pushEvent(0, KEY_LEFT_SUPER, down ? KEY_ACTION_DOWN : KEY_ACTION_UP, 250000000ULL);
+    Key_dispatchEvents();
 }
 
 int main(void) {
@@ -44,6 +75,13 @@ int main(void) {
     assert(Frame_isPresentsWithTransaction(nullptr) == false);
     assert(Frame_getWidth(nullptr) == 0);
     assert(Frame_getHeight(nullptr) == 0);
+    assert(Frame_getFrameFunctionCount(nullptr) == 0);
+    assert(Frame_getKeyMap(nullptr) == nullptr);
+    assert(Frame_addFrameFunction(nullptr, onFrameRender, nullptr) == UINT32_MAX);
+    assert(Frame_removeFrameFunction(nullptr, 0) == false);
+    assert(Frame_addKeyFunction(nullptr, 0, onInputFire, nullptr) == false);
+    assert(Frame_addMouseFunction(nullptr, 0, onInputFire, nullptr) == false);
+    assert(Frame_removeFunction(nullptr, 0, onInputFire) == false);
     Frame_render(nullptr);
     Frame_present(nullptr);
     Frame_resize(nullptr, 100, 100);
@@ -118,9 +156,11 @@ int main(void) {
     assert(Frame_getLayer(&frame, 2) == layer2);
     assert(Frame_getLayer(&frame, 3) == nullptr);
 
-    // 3. Render callback & continuous presentation
+    // 3. Composable frame functions (replaces the single onRender hook)
     int renderCount = 0;
-    Frame_setOnRender(&frame, onFrameRender, &renderCount);
+    uint32_t f0 = Frame_addFrameFunction(&frame, onFrameRender, &renderCount);
+    assert(f0 == 0);
+    assert(Frame_getFrameFunctionCount(&frame) == 1);
     Frame_render(&frame);
     assert(renderCount == 1);
 
@@ -136,7 +176,81 @@ int main(void) {
     assert((*layer2).width == 1024);
     assert(renderCount == 2); // Frame_resize triggers render
 
-    // 5. Application Frame Handler Bridge
+    // 4b. Multiple slots, swap-remove semantics
+    int dtCount = 0;
+    g_lastDt = -1.0;
+    uint32_t f1 = Frame_addFrameFunction(&frame, onFrameDt, &dtCount);
+    assert(f1 == 1);
+    assert(Frame_getFrameFunctionCount(&frame) == 2);
+
+    Frame_render(&frame);
+    assert(dtCount == 1);
+    assert(renderCount == 3);
+
+    Frame_render(&frame);
+    assert(dtCount == 2);
+    assert(renderCount == 4);
+
+    assert(Frame_removeFrameFunction(&frame, 0) == true); // swap-remove
+    assert(Frame_getFrameFunctionCount(&frame) == 1);
+    int dtBefore = dtCount;
+    Frame_render(&frame);
+    assert(dtCount == dtBefore + 1); // dt slot swapped into hole 0, still fires
+    assert(renderCount == 4);        // onFrameRender slot gone — no longer fires
+
+    // 5. KeyMap-backed input bindings (resolved once per Frame_render)
+    Key_init();
+    Mouse_init();
+
+    int inputFires = 0;
+    int mouseFires = 0;
+    int64_t cmdQ = KMOD_CMD | KMODE_TAP | KEY_Q;
+    int64_t dblRight = KMODE_DOUBLE_TAP | MOUSE_RIGHT;
+
+    assert(Frame_addKeyFunction(&frame, cmdQ, onInputFire, &inputFires) == true);
+    assert(Frame_getKeyMap(&frame) != nullptr);
+    assert(KeyMap_count(Frame_getKeyMap(&frame)) == 1);
+
+    // exact modifier gate: plain A and modifier-less Q must not fire Cmd+Q
+    tapKey(KEY_A);
+    Frame_render(&frame);
+    assert(inputFires == 0);
+    tapKey(KEY_Q);
+    Frame_render(&frame);
+    assert(inputFires == 0);
+    holdSuper(true);
+    tapKey(KEY_A); // A under Cmd — code mismatch
+    Frame_render(&frame);
+    assert(inputFires == 0);
+    tapKey(KEY_Q); // Cmd+Q — fires
+    Frame_render(&frame);
+    assert(inputFires == 1);
+    Frame_render(&frame);
+    assert(inputFires == 1); // consumed — no re-fire
+
+    // mouse double-click binding (must not be shadowed by live Cmd)
+    assert(Frame_addMouseFunction(&frame, dblRight, onInputFire, &mouseFires) == true);
+    assert(KeyMap_count(Frame_getKeyMap(&frame)) == 2);
+    holdSuper(false);
+    Mouse_pushButtonEvent(0, MOUSE_RIGHT, KEY_ACTION_DOWN, 250000000ULL);
+    Mouse_pushButtonEvent(0, MOUSE_RIGHT, KEY_ACTION_UP, 0);
+    Mouse_pushButtonEvent(0, MOUSE_RIGHT, KEY_ACTION_DOWN, 250000000ULL);
+    Mouse_pushButtonEvent(0, MOUSE_RIGHT, KEY_ACTION_UP, 0);
+    Frame_render(&frame);
+    assert(mouseFires == 1);
+    assert(inputFires == 1); // at most one binding fires per present
+    Frame_render(&frame);
+    assert(mouseFires == 1); // consumed
+
+    // removal
+    assert(Frame_removeFunction(&frame, cmdQ, onInputFire) == true);
+    assert(Frame_removeFunction(&frame, dblRight, onInputFire) == true);
+    assert(KeyMap_count(Frame_getKeyMap(&frame)) == 0);
+
+    Key_shutdown();
+    Mouse_shutdown();
+
+    // 6. Application Frame Handler Bridge
     Application *testApp = Application_1("FrameBridgeApp");
     assert(testApp != nullptr);
     assert(Frame_application(&frame) == nullptr);
@@ -150,11 +264,42 @@ int main(void) {
 
     Application_free(testApp);
 
-    // 6. Heap constructor & teardown
+    // 7. Heap constructor & teardown; fresh-frame dt semantics
     Frame *heapFrame = Frame_0();
     assert(heapFrame != nullptr);
     assert(Frame_isPresentsWithTransaction(heapFrame) == true);
+
+    // A fresh frame's first render delivers dt == 0.0 by construction;
+    // the second carries real elapsed time (> 0).
+    int heapDtCount = 0;
+    g_lastDt = -1.0;
+    uint32_t h0 = Frame_addFrameFunction(heapFrame, onFrameDt, &heapDtCount);
+    assert(h0 == 0);
+    Frame_render(heapFrame);
+    assert(heapDtCount == 1);
+    assert(g_lastDt == 0.0);
+    usleep(2000); // let the monotonic clock advance so dt > 0.0 is real, not a flake
+    Frame_render(heapFrame);
+    assert(heapDtCount == 2);
+    assert(g_lastDt > 0.0);
+
     Frame_free(heapFrame);
+
+    // 8. Board panes: content upper + scene bottom, borrowed and nullable
+    assert(Frame_getContentPane(nullptr) == nullptr);
+    assert(Frame_getScenePane(nullptr) == nullptr);
+    assert(Frame_getContentPane(&frame) == nullptr);
+    assert(Frame_getScenePane(&frame) == nullptr);
+    Frame_setContentPane(nullptr, nullptr);
+    Frame_setScenePane(nullptr, nullptr);
+    Frame_setContentPane(&frame, nullptr);
+    assert(Frame_getContentPane(&frame) == nullptr);
+    Frame_setScenePane(&frame, nullptr);
+    assert(Frame_getScenePane(&frame) == nullptr);
+
+    // 9. Traffic-light cluster toggle: null-safe no-op without a window
+    Frame_macos_setTrafficLightVisible(nullptr, false);
+    Frame_macos_setTrafficLightVisible(&frame, true);
 
     Frame_destroy(&frame);
     printf("=== Frame Test Suite Passed! ===\n");

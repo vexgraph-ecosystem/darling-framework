@@ -3,11 +3,14 @@
 #include "annotation/overview.h"
 #include "darling/dialog/dialog.h"
 #include "darling/panel/panel.h"
+#include "input/key_map.h"
 #include "kernel/application.h"
+#include "nio/mem.h"
 #include "window/window.h"
 
 #include <stdlib.h>
 #include <string.h>
+#include <time.h>
 
 ;;OVERVIEW
 /**
@@ -25,6 +28,8 @@
  *   Window *window;                               // R1 host window pointer
  *   void *graphics;                               // R3 GPU graphics context
  *   Panel *rootPanel;                             // Root UI component tree
+ *   Panel *contentPane;                           // Upper board root (borrowed, nullable)
+ *   Panel *scenePane;                             // Bottom board root (borrowed, nullable)
  *   FrameLayer layers[DARLING_FRAME_MAX_LAYERS];  // Stacked FBOs inside CAMetalLayer
  *   uint32_t layerCount;                          // Active layer count
  *   Dialog *childDialogs[16];                     // Managed child dialogs (max 16)
@@ -39,8 +44,11 @@
  *   bool inLiveResize;                            // Drag-resize active
  *   bool isMinimized;                             // Window miniaturized
  *   bool isZoomed;                                // Window zoomed
- *   void (*onRender)(Frame *frame, void *userData); // Custom render hook
- *   void *userData;                               // Callback context
+ *   FrameFunction *functions;                     // Master-arena grown slot table
+ *   uint32_t functionCount;                       // Live present callbacks
+ *   uint32_t functionCapacity;                    // Doubling capacity
+ *   KeyMap *keyMap;                               // Master-arena KeyMap (lazy)
+ *   uint64_t lastRenderNanos;                     // Monotonic dt source
  *   void *nativeView;                             // Native platform view handle
  *
  * SLOT RECORD: FrameLayer (owned by Frame):
@@ -54,6 +62,11 @@
  *   uint32_t height;                              // Layer height in pixels
  *   float opacity;                                // Composition alpha [0.0, 1.0]
  *   bool visible;                                 // Visibility flag
+ *
+ * SLOT RECORD: FrameFunction (owned by Frame):
+ * ----------------------------------------------------------------------------
+ *   void (*fn)(Frame *frame, double dt, void *userData); // Present callback
+ *   void *userData;                                       // Callback context
  *
  * FUNCTION REGISTRY:
  * ----------------------------------------------------------------------------
@@ -71,35 +84,123 @@
  *   - Frame_present(frame)
  *   - Frame_resize(frame, width, height)
  *   - Frame_addLayer(frame, width, height, outLayer)
+ *   - Frame_addFrameHandler(frame, app)
+ *   - Frame_removeFrameHandler(frame, app)
+ *   - Frame_addFrameFunction(frame, fn, userData)   : slot index
+ *   - Frame_removeFrameFunction(frame, index)       : swap-remove
+ *   - Frame_getFrameFunctionCount(frame)
+ *   - Frame_addKeyFunction(frame, combo, fn, userData)
+ *   - Frame_addMouseFunction(frame, combo, fn, userData)
+ *   - Frame_removeFunction(frame, combo, fn)
+ *   - Frame_getKeyMap(frame)
  *   - Frame_platformAttach(frame)
  *   - Frame_platformDetach(frame)
  *   - Frame_platformSyncTransaction(frame)
  *
  * Setters:
  *   - Frame_setWindow(frame, window)
+ *   - Frame_setApplication(frame, app)
  *   - Frame_setGraphics(frame, graphics)
  *   - Frame_setRootPanel(frame, panel)
+ *   - Frame_setContentPane(frame, panel)
+ *   - Frame_setScenePane(frame, panel)
  *   - Frame_setVisualEffect(frame, enable, material)
  *   - Frame_setPresentsWithTransaction(frame, presentsWithTransaction)
- *   - Frame_setOnRender(frame, onRender, userData)
  *   - Frame_setNativeView(frame, nativeView)
+ *   - Frame_setOnQuitRequested(frame, onQuitRequested, userData)
+ *
+ * Window Forwarding Setters (thin pass-through to the R1 host window):
+ *   - Frame_setTitle(frame, title)
+ *   - Frame_setSize(frame, width, height)
+ *   - Frame_setLocation(frame, x, y)
+ *   - Frame_center(frame)
+ *   - Frame_show(frame)
+ *   - Frame_hide(frame)
+ *   - Frame_setVisible(frame, visible)
+ *   - Frame_bringToFront(frame)
+ *   - Frame_setUndecorated(frame, type)
+ *   - Frame_setDecorated(frame, flag)
+ *   - Frame_setNaked(frame, naked)
+ *   - Frame_setBorderless(frame, borderless)
+ *   - Frame_setFloatingTrafficLights(frame, floating)
+ *   - Frame_macos_setTrafficLightVisible(frame, visible)  : macOS cluster toggle
+ *   - Frame_setBlur(frame, blur)
+ *   - Frame_setOpacity(frame, opacity)
+ *   - Frame_setTransparent(frame, transparent)
+ *   - Frame_setTransparentBackground(frame, transparent)
+ *   - Frame_setAlwaysOnTop(frame, onTop)
+ *   - Frame_setClickThrough(frame, clickThrough)
+ *   - Frame_setShadow(frame, shadow)
+ *   - Frame_setMovableByBackground(frame, movable)
+ *   - Frame_minimize(frame)
+ *   - Frame_restore(frame)
+ *   - Frame_setFullscreen(frame, fullscreen)
+ *   - Frame_toggleFullscreen(frame)
+ *   - Frame_setMinSize(frame, width, height)
+ *   - Frame_setMaxSize(frame, width, height)
+ *   - Frame_setResizable(frame, resizable)
+ *   - Frame_setClosable(frame, closable)
+ *   - Frame_setMiniaturizable(frame, miniaturizable)
+ *   - Frame_focus(frame)
+ *   - Frame_setCursorType(frame, type)
+ *   - Frame_setCursorLocked(frame, locked)
  *
  * Getters:
- *   - Frame_getWindow(const frame)
+ *   - Frame_getWindow(const frame) / Frame_window(const frame)
+ *   - Frame_getApplication(const frame) / Frame_application(const frame)
  *   - Frame_getGraphics(const frame)
  *   - Frame_getRootPanel(const frame)
+ *   - Frame_getContentPane(const frame)
+ *   - Frame_getScenePane(const frame)
+ *   - Frame_getTitle(const frame) / Frame_title(const frame)
  *   - Frame_getLayerCount(const frame)
  *   - Frame_getLayer(frame, index)
  *   - Frame_hasVisualEffect(const frame)
  *   - Frame_getVisualEffectMaterial(const frame)
  *   - Frame_isPresentsWithTransaction(const frame)
  *   - Frame_getSize(const frame, outWidth, outHeight)
- *   - Frame_getWidth(const frame)
- *   - Frame_getHeight(const frame)
+ *   - Frame_getWidth(const frame) / Frame_width(const frame)
+ *   - Frame_getHeight(const frame) / Frame_height(const frame)
  *   - Frame_isInLiveResize(const frame)
  *   - Frame_isMinimized(const frame)
  *   - Frame_isZoomed(const frame)
  *   - Frame_getNativeView(const frame)
+ *
+ * Window Forwarding Getters (thin pass-through to the R1 host window):
+ *   - Frame_getLocation(const frame, outX, outY)
+ *   - Frame_getContentOrigin(const frame, outX, outY)
+ *   - Frame_isVisible(const frame)
+ *   - Frame_isFullscreen(const frame)
+ *   - Frame_isResizable(const frame)
+ *   - Frame_isClosable(const frame)
+ *   - Frame_isMiniaturizable(const frame)
+ *   - Frame_isFocused(const frame)
+ *   - Frame_isTransparent(const frame)
+ *   - Frame_getDecorated(const frame)
+ *   - Frame_isDecorated(const frame)
+ *   - Frame_isNaked(const frame)
+ *   - Frame_isBorderless(const frame)
+ *   - Frame_getCursorType(const frame)
+ *   - Frame_shouldClose(const frame)
+ *
+ * Dialog Hierarchy & Closing Policy:
+ *   - Frame_addChildDialog(frame, dialog)
+ *   - Frame_removeChildDialog(frame, dialog)
+ *   - Frame_getChildDialogCount(const frame)
+ *   - Frame_getChildDialog(const frame, index)
+ *   - Frame_getActiveClingingDialog(const frame)
+ *   - Frame_canClose(const frame)
+ *   - Frame_closeChildDialogs(frame)
+ *   - Frame_close(frame)
+ *
+ * Event Adapters & Lifecycle:
+ *   - Frame_getLifecycle(frame)
+ *   - Frame_addKeyAdapter(frame, adapter)
+ *   - Frame_removeKeyAdapter(frame, adapter)
+ *   - Frame_addMouseAdapter(frame, adapter)
+ *   - Frame_removeMouseAdapter(frame, adapter)
+ *   - Frame_addTouchAdapter(frame, adapter)
+ *   - Frame_removeTouchAdapter(frame, adapter)
  * ============================================================================
  */
 
@@ -118,6 +219,8 @@ bool Frame_init(Window *win, void *graphics, Frame *frame) {
     (*frame).childDialogCount = 0;
     (*frame).ownerDialog = nullptr;
     (*frame).parentFrame = nullptr;
+    (*frame).contentPane = nullptr;
+    (*frame).scenePane = nullptr;
     (*frame).onQuitRequested = nullptr;
     (*frame).quitRequestedUserData = nullptr;
     (*frame).hasVisualEffect = false;
@@ -129,8 +232,11 @@ bool Frame_init(Window *win, void *graphics, Frame *frame) {
     (*frame).inLiveResize = false;
     (*frame).isMinimized = false;
     (*frame).isZoomed = false;
-    (*frame).onRender = nullptr;
-    (*frame).userData = nullptr;
+    (*frame).functions = nullptr;
+    (*frame).functionCount = 0;
+    (*frame).functionCapacity = 0;
+    (*frame).keyMap = nullptr;
+    (*frame).lastRenderNanos = 0;
     (*frame).nativeView = nullptr;
 
     Frame_platformAttach(frame);
@@ -196,6 +302,16 @@ void Frame_destroy(Frame *frame) {
     }
 
     Frame_platformDetach(frame);
+
+    // Release arena-backed composables before the window resources die.
+    // The master arena owns their slabs — reclaimed at Memory_freeAll (the
+    // Teardown Order Law); we drop references for lifetime clarity.
+    if ((*frame).keyMap != nullptr)
+        KeyMap_destroy((*frame).keyMap);
+    (*frame).keyMap = nullptr;
+    (*frame).functions = nullptr;
+    (*frame).functionCount = 0;
+    (*frame).functionCapacity = 0;
 
     if ((*frame).title != nullptr) {
         free((*frame).title);
@@ -270,14 +386,108 @@ void Frame_render(Frame *frame) {
     if (frame == nullptr)
         return;
 
-    if ((*frame).onRender != nullptr)
-        (*frame).onRender(frame, (*frame).userData);
+    // Input first: fold live gesture state into the KeyMap once per present.
+    // At most one binding fires; the source tap is consumed before the
+    // callback so a re-entrant render can never re-fire (the Present-On-
+    // Demand Law).
+    if ((*frame).keyMap != nullptr) {
+        int64_t firedCombo = 0;
+        KeyMap_resolve((*frame).keyMap, &firedCombo);
+    }
+
+    // Frame functions receive dt: seconds since the previous render,
+    // measured on the CLOCK_MONOTONIC clock (0.0 on the first render).
+    double dt = 0.0;
+    struct timespec ts;
+    if (clock_gettime(CLOCK_MONOTONIC, &ts) == 0) {
+        uint64_t nowNanos = (uint64_t) ts.tv_sec * 1000000000ull + (uint64_t) ts.tv_nsec;
+        if ((*frame).lastRenderNanos != 0 && nowNanos >= (*frame).lastRenderNanos)
+            dt = (double) (nowNanos - (*frame).lastRenderNanos) / 1000000000.0;
+        (*frame).lastRenderNanos = nowNanos;
+    }
+
+    for (uint32_t i = 0; i < (*frame).functionCount; i++) {
+        FrameFunction *fn = &(*frame).functions[i];
+        if ((*fn).fn != nullptr)
+            (*fn).fn(frame, dt, (*fn).userData);
+    }
 
     for (uint32_t i = 0; i < (*frame).layerCount; ++i) {
         FrameLayer *layer = &(*frame).layers[i];
         if (!(*layer).visible)
             continue;
     }
+}
+
+uint32_t Frame_addFrameFunction(Frame *frame, void (*fn)(Frame *frame, double dt, void *userData), void *userData) {
+    if (frame == nullptr || fn == nullptr)
+        return UINT32_MAX;
+
+    if ((*frame).functionCount >= (*frame).functionCapacity) {
+        uint32_t newCap = (*frame).functionCapacity == 0 ? 4 : (*frame).functionCapacity * 2;
+        FrameFunction *grown = (FrameFunction*) MemoryArena_alloc(
+            Memory_defaultArena(), TYPE_FRAME_FUNCTION_ARRAY, sizeof(FrameFunction) * newCap
+        );
+        if (grown == nullptr)
+            return UINT32_MAX;
+        if ((*frame).functions != nullptr)
+            memcpy(grown, (*frame).functions, sizeof(FrameFunction) * (*frame).functionCount);
+        (*frame).functions = grown;
+        (*frame).functionCapacity = newCap;
+    }
+
+    uint32_t slot = (*frame).functionCount;
+    (*frame).functions[slot].fn = fn;
+    (*frame).functions[slot].userData = userData;
+    (*frame).functionCount = slot + 1;
+    return slot;
+}
+
+bool Frame_removeFrameFunction(Frame *frame, uint32_t index) {
+    if (frame == nullptr || index >= (*frame).functionCount)
+        return false;
+    uint32_t last = (*frame).functionCount - 1;
+    if (index != last)
+        (*frame).functions[index] = (*frame).functions[last];
+    (*frame).functionCount = last;
+    return true;
+}
+
+uint32_t Frame_getFrameFunctionCount(const Frame *frame) {
+    if (frame == nullptr)
+        return 0;
+    return (*frame).functionCount;
+}
+
+bool Frame_addKeyFunction(Frame *frame, int64_t combo, KeyBindingFn fn, void *userData) {
+    if (frame == nullptr)
+        return false;
+    if ((*frame).keyMap == nullptr)
+        (*frame).keyMap = KeyMap_create(Memory_defaultArena());
+    if ((*frame).keyMap == nullptr)
+        return false;
+    return KeyMap_bind((*frame).keyMap, combo, fn, userData);
+}
+
+bool Frame_addMouseFunction(Frame *frame, int64_t combo, KeyBindingFn fn, void *userData) {
+    // KeyMap is gesture-generic and does not distinguish bind time — the
+    // split API exists so intent reads at the call site. Mouse combos use
+    // MOUSE_* button ids (0..31) as the key-code half of the combo.
+    return Frame_addKeyFunction(frame, combo, fn, userData);
+}
+
+bool Frame_removeFunction(Frame *frame, int64_t combo, KeyBindingFn fn) {
+    if (frame == nullptr)
+        return false;
+    if ((*frame).keyMap == nullptr)
+        return false;
+    return KeyMap_unbind((*frame).keyMap, combo, fn);
+}
+
+KeyMap *Frame_getKeyMap(const Frame *frame) {
+    if (frame == nullptr)
+        return nullptr;
+    return (*frame).keyMap;
 }
 
 void Frame_present(Frame *frame) {
@@ -344,6 +554,18 @@ void Frame_setRootPanel(Frame *frame, Panel *panel) {
     (*frame).rootPanel = panel;
 }
 
+void Frame_setContentPane(Frame *frame, Panel *panel) {
+    if (frame == nullptr)
+        return;
+    (*frame).contentPane = panel;
+}
+
+void Frame_setScenePane(Frame *frame, Panel *panel) {
+    if (frame == nullptr)
+        return;
+    (*frame).scenePane = panel;
+}
+
 void Frame_setVisualEffect(Frame *frame, bool enable, int material) {
     if (frame == nullptr)
         return;
@@ -355,13 +577,6 @@ void Frame_setPresentsWithTransaction(Frame *frame, bool presentsWithTransaction
     if (frame == nullptr)
         return;
     (*frame).presentsWithTransaction = presentsWithTransaction;
-}
-
-void Frame_setOnRender(Frame *frame, void (*onRender)(Frame *frame, void *userData), void *userData) {
-    if (frame == nullptr)
-        return;
-    (*frame).onRender = onRender;
-    (*frame).userData = userData;
 }
 
 void Frame_setNativeView(Frame *frame, void *nativeView) {
@@ -403,6 +618,18 @@ Panel *Frame_getRootPanel(const Frame *frame) {
     if (frame == nullptr)
         return nullptr;
     return (*frame).rootPanel;
+}
+
+Panel *Frame_getContentPane(const Frame *frame) {
+    if (frame == nullptr)
+        return nullptr;
+    return (*frame).contentPane;
+}
+
+Panel *Frame_getScenePane(const Frame *frame) {
+    if (frame == nullptr)
+        return nullptr;
+    return (*frame).scenePane;
 }
 
 uint32_t Frame_getLayerCount(const Frame *frame) {
@@ -575,6 +802,14 @@ void Frame_setFloatingTrafficLights(Frame *frame, bool floating) {
     if (frame == nullptr || (*frame).window == nullptr)
         return;
     Window_setFloatingTrafficLights((*frame).window, floating);
+}
+
+void Frame_macos_setTrafficLightVisible(Frame *frame, bool visible) {
+    if (frame == nullptr || (*frame).window == nullptr)
+        return;
+    Window_macOS_setTrafficLightButtonVisible((*frame).window, WINDOW_TRAFFIC_LIGHT_CLOSE, visible);
+    Window_macOS_setTrafficLightButtonVisible((*frame).window, WINDOW_TRAFFIC_LIGHT_MINIMIZE, visible);
+    Window_macOS_setTrafficLightButtonVisible((*frame).window, WINDOW_TRAFFIC_LIGHT_ZOOM, visible);
 }
 
 void Frame_setBlur(Frame *frame, float blur) {
