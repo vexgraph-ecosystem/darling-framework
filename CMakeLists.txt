@@ -87,6 +87,12 @@ add_library(darling STATIC
     darling/field/datepicker.c
     darling/field/colorpicker.c
     darling/field/colorswatch.c
+    darling/frame.c
+    darling/dialog/dialog.c
+    darling/dialog/optiondialog.c
+    darling/dialog/inputdialog.c
+    darling/color/color.c
+    darling/color/colordialog.c
     darling/overlay/filedialog.c
     darling/label/typography.c
     darling/label/kbd.c
@@ -137,10 +143,12 @@ if(APPLE)
     target_sources(darling PRIVATE
         objc/panel_cocoa.m
         objc/text_core.m
+        objc/frame_cocoa.m
     )
     set_source_files_properties(
         objc/panel_cocoa.m
         objc/text_core.m
+        objc/frame_cocoa.m
         PROPERTIES COMPILE_OPTIONS "-fobjc-arc"
     )
     target_link_libraries(darling PUBLIC
@@ -153,7 +161,10 @@ if(APPLE)
         "-framework MetalKit"
     )
 else()
-    target_sources(darling PRIVATE text/text_core_stub.c)
+    target_sources(darling PRIVATE
+        text/text_core_stub.c
+        darling/frame_stub.c
+    )
 endif() # APPLE
 endif() # NOT TARGET darling
 
@@ -371,6 +382,30 @@ if(NOT TARGET emit_darling_manifest)
     )
     target_include_directories(emit_darling_manifest PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
     target_compile_options(emit_darling_manifest PRIVATE -Wall -Wextra -Werror)
+endif()
+
+# Frame artifact: headless layer stacking, presentsWithTransaction, resize suite.
+if(NOT TARGET frame_test AND EXISTS "${DARLING_TEST_DIR}/frame_test.c")
+    add_executable(frame_test
+        ${DARLING_TEST_DIR}/frame_test.c
+    )
+    target_link_libraries(frame_test PRIVATE darling)
+endif()
+
+# Dialog family artifact: headless Dialog, OptionDialog, InputDialog, FileDialog, ColorDialog suite.
+if(NOT TARGET dialog_family_test AND EXISTS "${DARLING_TEST_DIR}/dialog_family_test.c")
+    add_executable(dialog_family_test
+        ${DARLING_TEST_DIR}/dialog_family_test.c
+    )
+    target_link_libraries(dialog_family_test PRIVATE darling)
+endif()
+
+# Color artifact: headless format-independent Color class suite (RGBA, ARGB, HSV, HSL, Hex).
+if(NOT TARGET color_test AND EXISTS "${DARLING_TEST_DIR}/color_test.c")
+    add_executable(color_test
+        ${DARLING_TEST_DIR}/color_test.c
+    )
+    target_link_libraries(color_test PRIVATE darling)
 endif()
 
 
