@@ -106,16 +106,20 @@ static inline Panel *Darling_asPanel_FileDialog(FileDialog *p) { return (Panel*)
 static inline Panel *Darling_asPanel_Typography(Typography *p) { return (Panel*) (void*) p; }
 static inline Panel *Darling_asPanel_Kbd(Kbd *p) { return (Panel*) (void*) p; }
 static inline Panel *Darling_asPanel_Plot(Plot *p) { return (Panel*) (void*) p; }
-static inline Panel *Darling_asPanel_Dialog(Dialog *p) { return &(*p).base; }
+static inline Panel *Darling_asPanel_Dialog(Dialog *p) {
+    if (p == nullptr)
+        return nullptr;
+    if ((*p).frame.rootPanel == nullptr)
+        (*p).frame.rootPanel = Panel_0();
+    return (*p).frame.rootPanel;
+}
 
 static inline Panel *Darling_asPanel_AlertDialog(AlertDialog *a) {
-    Dialog *d = &(*a).base;
-    return &(*d).base;
+    return a ? Darling_asPanel_Dialog(&(*a).base) : nullptr;
 }
 
 static inline Panel *Darling_asPanel_ColorDialog(ColorDialog *c) {
-    Dialog *d = &(*c).base;
-    return &(*d).base;
+    return c ? Darling_asPanel_Dialog(&(*c).base) : nullptr;
 }
 
 #define Darling_asPanel(p) _Generic((p), \

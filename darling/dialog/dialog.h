@@ -5,27 +5,59 @@
 #include <stdint.h>
 
 #include "c23/constructor.h"
+#include "darling/frame.h"
 #include "darling/panel/panel.h"
 
-// darling/dialog/dialog.h — modal dialog shell (struct only; behavior lands
-// with the overlay phase). Family root for AlertDialog and ColorDialog:
-// they embed Dialog the way Dialog embeds Panel.
+#ifdef __cplusplus
+extern "C" {
+#endif
+
+// darling/dialog/dialog.h — modal dialog frame shell inheriting Frame.
+// Glues R1 (window) and R3 (graphics) via embedded Frame.
+// Base class for OptionDialog, InputDialog, FileDialog, ColorDialog.
 
 typedef struct Dialog {
-    Panel base;
-    char *title;          // owned dialog title (strdup on set)
-    Panel *content;       // body node attached on open (borrowed)
-    bool modal;           // true blocks input to siblings while open
+    Frame frame;          // Inherited Frame: { *window, *graphics, *layers, ... }
+    char *title;          // Owned dialog title (strdup on set)
+    Panel *content;       // Body node attached on open (borrowed)
+    bool modal;           // True blocks input to background windows while open
     void (*onClose)(void *ctx);
     void *ctx;
 } Dialog;
 
-// Constructors (implemented with the overlay phase):
-//   Dialog()          — bare shell, no content
-//   Dialog(parent)    — created and attached
+// Constructors:
+//   Dialog()
+//   Dialog(title)
+//   Dialog(title, width, height)
 Dialog *Dialog_0(void);
-Dialog *Dialog_1(Panel *parent);
+Dialog *Dialog_1(const char *title);
+Dialog *Dialog_2(const char *title, int width, int height);
 
 #define Dialog(...) CONSTRUCTOR_DISPATCH(Dialog, __VA_ARGS__)
 
+bool Dialog_init(Dialog *dialog, const char *title, int width, int height);
+void Dialog_destroy(Dialog *dialog);
+void Dialog_free(Dialog *dialog);
+
+// Core Functions:
+void Dialog_show(Dialog *dialog);
+void Dialog_close(Dialog *dialog);
+
+// Setters:
+void Dialog_setTitle(Dialog *dialog, const char *title);
+void Dialog_setContent(Dialog *dialog, Panel *content);
+void Dialog_setModal(Dialog *dialog, bool modal);
+void Dialog_setOnClose(Dialog *dialog, void (*onClose)(void *ctx), void *ctx);
+
+// Getters:
+Frame *Dialog_getFrame(Dialog *dialog);
+const char *Dialog_getTitle(const Dialog *dialog);
+Panel *Dialog_getContent(const Dialog *dialog);
+bool Dialog_isModal(const Dialog *dialog);
+void *Dialog_getCtx(const Dialog *dialog);
+
+#ifdef __cplusplus
+}
 #endif
+
+#endif // DARLING_DIALOG_DIALOG_H

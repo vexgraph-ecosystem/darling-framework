@@ -10,14 +10,14 @@
 ;;OVERVIEW
 /**
  * ============================================================================
- * CLASS: FileDialog (embeds Panel)
+ * CLASS: FileDialog (inherits Dialog -> Frame)
  * LEVEL: L2 — Behavior (modal file browser behavior API)
  * ============================================================================
  * Modal file browser holding a path, a filter, entry names, and open hooks.
  *
  * STRUCT FIELDS (Mirroring darling/overlay/filedialog.h):
  * ----------------------------------------------------------------------------
- *   Panel base;                  // Inherited layout, bounds, hierarchy state
+ *   Dialog base;                 // Inherited Dialog (which inherits Frame)
  *   char path[512];              // Current directory path, NUL-terminated
  *   char filter[64];             // Extension filter, NUL-terminated
  *   bool showHidden;             // Hidden-file visibility flag
@@ -56,6 +56,7 @@
  *   - FileDialog_getOnOpen(d)
  *   - FileDialog_getOnCancel(d)
  *   - FileDialog_getCtx(d)
+ *   - FileDialog_getDialog(d)
  * ============================================================================
  */
 
@@ -65,13 +66,7 @@ FileDialog *FileDialog_0(void) {
     FileDialog *d = (FileDialog*) Memory_alloc(TYPE_FILEDIALOG_SINGLETON, sizeof(FileDialog));
     if (!d)
         return nullptr;
-    Panel *base = Panel_0();
-    if (!base) {
-        Memory_free(d);
-        return nullptr;
-    }
-    (*d).base = (*base);
-    Memory_free(base);
+    Dialog_init(&(*d).base, "Open File", 560, 380);
     (*d).path[0] = '\0';
     (*d).filter[0] = '\0';
     (*d).showHidden = false;
@@ -85,8 +80,7 @@ FileDialog *FileDialog_0(void) {
 
 FileDialog *FileDialog_1(Panel *parent) {
     FileDialog *d = FileDialog_0();
-    if (d && parent)
-        Panel_addContainer(parent, &(*d).base);
+    (void) parent;
     return d;
 }
 
@@ -109,8 +103,9 @@ bool FileDialog_choose(FileDialog *d, int32_t index) {
 static void markDirty(FileDialog *d) {
     if (!d)
         return;
-    Panel *b = &(*d).base;
-    Container_markDirty(&(*b).base);
+    Panel *b = (*d).base.frame.rootPanel;
+    if (b != nullptr)
+        Container_markDirty(&(*b).base);
 }
 
 void FileDialog_setPath(FileDialog *d, const char *path) {
@@ -215,4 +210,10 @@ FileDialogCancelFn FileDialog_getOnCancel(const FileDialog *d) {
 
 void *FileDialog_getCtx(const FileDialog *d) {
     return d ? (*d).ctx : nullptr;
+}
+
+Dialog *FileDialog_getDialog(FileDialog *d) {
+    if (d == nullptr)
+        return nullptr;
+    return &(*d).base;
 }

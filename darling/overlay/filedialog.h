@@ -6,6 +6,7 @@
 #include <stdint.h>
 
 #include "c23/constructor.h"
+#include "darling/dialog/dialog.h"
 #include "darling/panel/panel.h"
 #include "oop/type.h"
 #include "struct/list.h"
@@ -14,13 +15,13 @@
 #define FILEDIALOG_PATH_MAX    512
 #define FILEDIALOG_FILTER_MAX  64
 
-// darling/overlay/filedialog.h — modal file browser with open/cancel hooks.
+// darling/overlay/filedialog.h — modal file browser inheriting Dialog.
 
 typedef void (*FileDialogOpenFn)(void *ctx);
 typedef void (*FileDialogCancelFn)(void *ctx);
 
 typedef struct FileDialog {
-    Panel base;
+    Dialog base;
     char path[512];
     char filter[64];
     bool showHidden;
@@ -62,5 +63,6 @@ const char *FileDialog_getEntryAt(const FileDialog *d, int32_t index);
 FileDialogOpenFn FileDialog_getOnOpen(const FileDialog *d);
 FileDialogCancelFn FileDialog_getOnCancel(const FileDialog *d);
 void *FileDialog_getCtx(const FileDialog *d);
+Dialog *FileDialog_getDialog(FileDialog *d);
 
 #endif
