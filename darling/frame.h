@@ -6,6 +6,7 @@
 #include <stdint.h>
 
 #include "c23/constructor.h"
+#include "window/window.h"
 
 #ifdef __cplusplus
 extern "C" {
@@ -13,7 +14,6 @@ extern "C" {
 
 #define DARLING_FRAME_MAX_LAYERS 8
 
-typedef struct Window Window;
 typedef struct Panel Panel;
 typedef struct Application Application;
 
@@ -44,6 +44,8 @@ typedef struct Frame {
     Application *application;   // R1 host application manifest pointer (nullable)
     void *graphics;             // R3 GPU graphics context (VkHotContext / Device)
     Panel *rootPanel;           // Root UI component tree
+    char *title;                // Owned title string (strdup on set)
+    bool visible;               // Visibility state flag
     FrameLayer layers[DARLING_FRAME_MAX_LAYERS]; // Stacked FBOs inside CAMetalLayer
     uint32_t layerCount;
 
@@ -102,6 +104,37 @@ void Frame_setPresentsWithTransaction(Frame *frame, bool presentsWithTransaction
 void Frame_setOnRender(Frame *frame, void (*onRender)(Frame *frame, void *userData), void *userData);
 void Frame_setNativeView(Frame *frame, void *nativeView);
 
+// Window Forwarding Setters:
+void Frame_setTitle(Frame *frame, const char *title);
+void Frame_setSize(Frame *frame, int width, int height);
+void Frame_setLocation(Frame *frame, int x, int y);
+void Frame_center(Frame *frame);
+void Frame_show(Frame *frame);
+void Frame_hide(Frame *frame);
+void Frame_setVisible(Frame *frame, bool visible);
+void Frame_bringToFront(Frame *frame);
+void Frame_setUndecorated(Frame *frame, int type);
+void Frame_setFloatingTrafficLights(Frame *frame, bool floating);
+void Frame_setBlur(Frame *frame, float blur);
+void Frame_setOpacity(Frame *frame, float opacity);
+void Frame_setTransparentBackground(Frame *frame, bool transparent);
+void Frame_setAlwaysOnTop(Frame *frame, bool onTop);
+void Frame_setClickThrough(Frame *frame, bool clickThrough);
+void Frame_setShadow(Frame *frame, bool shadow);
+void Frame_setMovableByBackground(Frame *frame, bool movable);
+void Frame_minimize(Frame *frame);
+void Frame_restore(Frame *frame);
+void Frame_setFullscreen(Frame *frame, bool fullscreen);
+void Frame_toggleFullscreen(Frame *frame);
+void Frame_setMinSize(Frame *frame, int width, int height);
+void Frame_setMaxSize(Frame *frame, int width, int height);
+void Frame_setResizable(Frame *frame, bool resizable);
+void Frame_setClosable(Frame *frame, bool closable);
+void Frame_setMiniaturizable(Frame *frame, bool miniaturizable);
+void Frame_focus(Frame *frame);
+void Frame_setCursorType(Frame *frame, WindowCursorType type);
+void Frame_setCursorLocked(Frame *frame, bool locked);
+
 // Getters:
 Window *Frame_getWindow(const Frame *frame);
 Window *Frame_window(const Frame *frame);
@@ -117,10 +150,35 @@ bool Frame_isPresentsWithTransaction(const Frame *frame);
 void Frame_getSize(const Frame *frame, int *outWidth, int *outHeight);
 int Frame_getWidth(const Frame *frame);
 int Frame_getHeight(const Frame *frame);
+int Frame_width(const Frame *frame);
+int Frame_height(const Frame *frame);
 bool Frame_isInLiveResize(const Frame *frame);
 bool Frame_isMinimized(const Frame *frame);
 bool Frame_isZoomed(const Frame *frame);
 void *Frame_getNativeView(const Frame *frame);
+
+// Window Forwarding Getters:
+const char *Frame_getTitle(const Frame *frame);
+const char *Frame_title(const Frame *frame);
+void Frame_getLocation(const Frame *frame, int *outX, int *outY);
+void Frame_getContentOrigin(const Frame *frame, int *outX, int *outY);
+bool Frame_isVisible(const Frame *frame);
+bool Frame_isFullscreen(const Frame *frame);
+bool Frame_isResizable(const Frame *frame);
+bool Frame_isClosable(const Frame *frame);
+bool Frame_isMiniaturizable(const Frame *frame);
+bool Frame_isFocused(const Frame *frame);
+WindowCursorType Frame_getCursorType(const Frame *frame);
+bool Frame_shouldClose(const Frame *frame);
+
+// Event Adapters & Lifecycle:
+WindowEvent *Frame_getLifecycle(Frame *frame);
+void Frame_addKeyAdapter(Frame *frame, const KeyHandler *adapter);
+bool Frame_removeKeyAdapter(Frame *frame, const KeyHandler *adapter);
+void Frame_addMouseAdapter(Frame *frame, const MouseHandler *adapter);
+bool Frame_removeMouseAdapter(Frame *frame, const MouseHandler *adapter);
+void Frame_addTouchAdapter(Frame *frame, const TouchHandler *adapter);
+bool Frame_removeTouchAdapter(Frame *frame, const TouchHandler *adapter);
 
 #ifdef __cplusplus
 }

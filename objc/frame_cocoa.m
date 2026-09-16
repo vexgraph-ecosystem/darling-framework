@@ -99,12 +99,6 @@ void FrameCocoa_attach(Frame *frame) {
             return;
 
         NSRect bounds = [contentView bounds];
-        NSVisualEffectView *vfx = [[NSVisualEffectView alloc] initWithFrame:bounds];
-        [vfx setAutoresizingMask:NSViewWidthSizable | NSViewHeightSizable];
-        [vfx setBlendingMode:NSVisualEffectBlendingModeBehindWindow];
-        [vfx setMaterial:NSVisualEffectMaterialHUDWindow];
-        [vfx setState:NSVisualEffectStateActive];
-
         CAMetalLayer *metalLayer = [CAMetalLayer layer];
         metalLayer.presentsWithTransaction = YES;
         metalLayer.contentsGravity = kCAGravityTopLeft;
@@ -112,11 +106,26 @@ void FrameCocoa_attach(Frame *frame) {
         metalLayer.frame = bounds;
         metalLayer.autoresizingMask = kCALayerWidthSizable | kCALayerHeightSizable;
 
-        [vfx setWantsLayer:YES];
-        [vfx setLayer:metalLayer];
-        [contentView addSubview:vfx positioned:NSWindowBelow relativeTo:nil];
+        if ((*frame).hasVisualEffect) {
+            NSVisualEffectView *vfx = [[NSVisualEffectView alloc] initWithFrame:bounds];
+            [vfx setAutoresizingMask:NSViewWidthSizable | NSViewHeightSizable];
+            [vfx setBlendingMode:NSVisualEffectBlendingModeBehindWindow];
+            [vfx setMaterial:(NSVisualEffectMaterial) (*frame).visualEffectMaterial];
+            [vfx setState:NSVisualEffectStateActive];
 
-        (*frame).nativeView = (__bridge_retained void*) vfx;
+            [vfx setWantsLayer:YES];
+            [vfx setLayer:metalLayer];
+            [contentView addSubview:vfx positioned:NSWindowBelow relativeTo:nil];
+            (*frame).nativeView = (__bridge_retained void*) vfx;
+        } else {
+            [contentView setWantsLayer:YES];
+            if (contentView.layer != nil) {
+                [contentView.layer insertSublayer:metalLayer atIndex:0];
+            } else {
+                [contentView setLayer:metalLayer];
+            }
+            (*frame).nativeView = (__bridge_retained void*) metalLayer;
+        }
 
         // Bridge resize hook and WindowServer cadence
         Window_setResizeRenderHook((*frame).window, frameCocoaResizeHook, frame);
@@ -138,8 +147,12 @@ void FrameCocoa_detach(Frame *frame) {
 
     @autoreleasepool {
         if ((*frame).nativeView != nullptr) {
-            NSVisualEffectView *vfx = (__bridge_transfer NSVisualEffectView*) (*frame).nativeView;
-            [vfx removeFromSuperview];
+            id obj = (__bridge_transfer id) (*frame).nativeView;
+            if ([obj isKindOfClass:[NSView class]]) {
+                [(NSView*) obj removeFromSuperview];
+            } else if ([obj isKindOfClass:[CALayer class]]) {
+                [(CALayer*) obj removeFromSuperlayer];
+            }
             (*frame).nativeView = nullptr;
         }
 

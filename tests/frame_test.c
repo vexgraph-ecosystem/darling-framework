@@ -3,6 +3,7 @@
 #include <assert.h>
 #include <stdbool.h>
 #include <stdio.h>
+#include <string.h>
 
 #include "darling/frame.h"
 #include "kernel/application.h"
@@ -54,7 +55,24 @@ int main(void) {
     bool ok = Frame_init(nullptr, nullptr, &frame);
     assert(ok == true);
     assert(Frame_isPresentsWithTransaction(&frame) == true);
+    assert(Frame_hasVisualEffect(&frame) == false);
+    Frame_setVisualEffect(&frame, true, FRAME_MATERIAL_HUD_WINDOW);
     assert(Frame_hasVisualEffect(&frame) == true);
+    Frame_setVisualEffect(&frame, false, FRAME_MATERIAL_HUD_WINDOW);
+    assert(Frame_hasVisualEffect(&frame) == false);
+
+    // Test window forwarding methods
+    Frame_setTitle(&frame, "TestTitle");
+    assert(strcmp(Frame_getTitle(&frame), "TestTitle") == 0);
+    assert(strcmp(Frame_title(&frame), "TestTitle") == 0);
+    Frame_setSize(&frame, 640, 480);
+    assert(Frame_width(&frame) == 640);
+    assert(Frame_height(&frame) == 480);
+    assert(Frame_isVisible(&frame) == false);
+    Frame_setVisible(&frame, true);
+    assert(Frame_isVisible(&frame) == true);
+    Frame_setVisible(&frame, false);
+    assert(Frame_isVisible(&frame) == false);
 
     // Add stacked FBO layers (e.g. Layer 0: Scene, Layer 1: Content/UI, Layer 2: Modal)
     FrameLayer *layer0 = nullptr;

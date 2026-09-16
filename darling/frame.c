@@ -110,7 +110,7 @@ bool Frame_init(Window *win, void *graphics, Frame *frame) {
     (*frame).graphics = graphics;
     (*frame).rootPanel = nullptr;
     (*frame).layerCount = 0;
-    (*frame).hasVisualEffect = true;
+    (*frame).hasVisualEffect = false;
     (*frame).visualEffectMaterial = FRAME_MATERIAL_HUD_WINDOW;
     (*frame).presentsWithTransaction = true;
     (*frame).width = win ? Window_width(win) : 800;
@@ -159,6 +159,9 @@ Frame *Frame_3(const char *title, int width, int height) {
         Window_destroy(win);
         return nullptr;
     }
+    if (title != nullptr) {
+        (*frame).title = strdup(title);
+    }
     return frame;
 }
 
@@ -172,6 +175,11 @@ void Frame_destroy(Frame *frame) {
     }
 
     Frame_platformDetach(frame);
+
+    if ((*frame).title != nullptr) {
+        free((*frame).title);
+        (*frame).title = nullptr;
+    }
 
     if ((*frame).rootPanel != nullptr) {
         (*frame).rootPanel = nullptr;
@@ -447,4 +455,331 @@ void *Frame_getNativeView(const Frame *frame) {
     if (frame == nullptr)
         return nullptr;
     return (*frame).nativeView;
+}
+
+// WINDOW FORWARDING SETTERS
+// ============================================================================
+
+void Frame_setTitle(Frame *frame, const char *title) {
+    if (frame == nullptr)
+        return;
+    if ((*frame).title != nullptr) {
+        free((*frame).title);
+        (*frame).title = nullptr;
+    }
+    if (title != nullptr) {
+        (*frame).title = strdup(title);
+    }
+    if ((*frame).window != nullptr && title != nullptr) {
+        Window_setTitle((*frame).window, title);
+    }
+}
+
+void Frame_setSize(Frame *frame, int width, int height) {
+    if (frame == nullptr)
+        return;
+    Frame_resize(frame, width, height);
+    if ((*frame).window != nullptr)
+        Window_setSize((*frame).window, width, height);
+}
+
+void Frame_setLocation(Frame *frame, int x, int y) {
+    if (frame == nullptr || (*frame).window == nullptr)
+        return;
+    Window_setLocation((*frame).window, x, y);
+}
+
+void Frame_center(Frame *frame) {
+    if (frame == nullptr || (*frame).window == nullptr)
+        return;
+    Window_center((*frame).window);
+}
+
+void Frame_show(Frame *frame) {
+    if (frame == nullptr)
+        return;
+    (*frame).visible = true;
+    if ((*frame).window != nullptr)
+        Window_show((*frame).window);
+    Frame_render(frame);
+    Frame_present(frame);
+}
+
+void Frame_hide(Frame *frame) {
+    if (frame == nullptr)
+        return;
+    (*frame).visible = false;
+    if ((*frame).window != nullptr)
+        Window_hide((*frame).window);
+}
+
+void Frame_setVisible(Frame *frame, bool visible) {
+    if (visible)
+        Frame_show(frame);
+    else
+        Frame_hide(frame);
+}
+
+void Frame_bringToFront(Frame *frame) {
+    if (frame == nullptr || (*frame).window == nullptr)
+        return;
+    Window_bringToFront((*frame).window);
+}
+
+void Frame_setUndecorated(Frame *frame, int type) {
+    if (frame == nullptr || (*frame).window == nullptr)
+        return;
+    Window_setUndecorated((*frame).window, type);
+}
+
+void Frame_setFloatingTrafficLights(Frame *frame, bool floating) {
+    if (frame == nullptr || (*frame).window == nullptr)
+        return;
+    Window_setFloatingTrafficLights((*frame).window, floating);
+}
+
+void Frame_setBlur(Frame *frame, float blur) {
+    if (frame == nullptr || (*frame).window == nullptr)
+        return;
+    Window_setBlur((*frame).window, blur);
+}
+
+void Frame_setOpacity(Frame *frame, float opacity) {
+    if (frame == nullptr || (*frame).window == nullptr)
+        return;
+    Window_setOpacity((*frame).window, opacity);
+}
+
+void Frame_setTransparentBackground(Frame *frame, bool transparent) {
+    if (frame == nullptr || (*frame).window == nullptr)
+        return;
+    Window_setTransparentBackground((*frame).window, transparent);
+}
+
+void Frame_setAlwaysOnTop(Frame *frame, bool onTop) {
+    if (frame == nullptr || (*frame).window == nullptr)
+        return;
+    Window_setAlwaysOnTop((*frame).window, onTop);
+}
+
+void Frame_setClickThrough(Frame *frame, bool clickThrough) {
+    if (frame == nullptr || (*frame).window == nullptr)
+        return;
+    Window_setClickThrough((*frame).window, clickThrough);
+}
+
+void Frame_setShadow(Frame *frame, bool shadow) {
+    if (frame == nullptr || (*frame).window == nullptr)
+        return;
+    Window_setShadow((*frame).window, shadow);
+}
+
+void Frame_setMovableByBackground(Frame *frame, bool movable) {
+    if (frame == nullptr || (*frame).window == nullptr)
+        return;
+    Window_setMovableByBackground((*frame).window, movable);
+}
+
+void Frame_minimize(Frame *frame) {
+    if (frame == nullptr || (*frame).window == nullptr)
+        return;
+    Window_minimize((*frame).window);
+}
+
+void Frame_restore(Frame *frame) {
+    if (frame == nullptr || (*frame).window == nullptr)
+        return;
+    Window_restore((*frame).window);
+}
+
+void Frame_setFullscreen(Frame *frame, bool fullscreen) {
+    if (frame == nullptr || (*frame).window == nullptr)
+        return;
+    Window_setFullscreen((*frame).window, fullscreen);
+}
+
+void Frame_toggleFullscreen(Frame *frame) {
+    if (frame == nullptr || (*frame).window == nullptr)
+        return;
+    Window_toggleFullscreen((*frame).window);
+}
+
+void Frame_setMinSize(Frame *frame, int width, int height) {
+    if (frame == nullptr || (*frame).window == nullptr)
+        return;
+    Window_setMinSize((*frame).window, width, height);
+}
+
+void Frame_setMaxSize(Frame *frame, int width, int height) {
+    if (frame == nullptr || (*frame).window == nullptr)
+        return;
+    Window_setMaxSize((*frame).window, width, height);
+}
+
+void Frame_setResizable(Frame *frame, bool resizable) {
+    if (frame == nullptr || (*frame).window == nullptr)
+        return;
+    Window_setResizable((*frame).window, resizable);
+}
+
+void Frame_setClosable(Frame *frame, bool closable) {
+    if (frame == nullptr || (*frame).window == nullptr)
+        return;
+    Window_setClosable((*frame).window, closable);
+}
+
+void Frame_setMiniaturizable(Frame *frame, bool miniaturizable) {
+    if (frame == nullptr || (*frame).window == nullptr)
+        return;
+    Window_setMiniaturizable((*frame).window, miniaturizable);
+}
+
+void Frame_focus(Frame *frame) {
+    if (frame == nullptr || (*frame).window == nullptr)
+        return;
+    Window_focus((*frame).window);
+}
+
+void Frame_setCursorType(Frame *frame, WindowCursorType type) {
+    if (frame == nullptr || (*frame).window == nullptr)
+        return;
+    Window_setCursorType((*frame).window, type);
+}
+
+void Frame_setCursorLocked(Frame *frame, bool locked) {
+    if (frame == nullptr || (*frame).window == nullptr)
+        return;
+    Window_setCursorLocked((*frame).window, locked);
+}
+
+// WINDOW FORWARDING GETTERS
+// ============================================================================
+
+const char *Frame_getTitle(const Frame *frame) {
+    if (frame == nullptr || (*frame).title == nullptr)
+        return "";
+    return (*frame).title;
+}
+
+const char *Frame_title(const Frame *frame) {
+    return Frame_getTitle(frame);
+}
+
+int Frame_width(const Frame *frame) {
+    return Frame_getWidth(frame);
+}
+
+int Frame_height(const Frame *frame) {
+    return Frame_getHeight(frame);
+}
+
+void Frame_getLocation(const Frame *frame, int *outX, int *outY) {
+    if (frame == nullptr || (*frame).window == nullptr) {
+        if (outX != nullptr) *outX = 0;
+        if (outY != nullptr) *outY = 0;
+        return;
+    }
+    Window_getLocation((*frame).window, outX, outY);
+}
+
+void Frame_getContentOrigin(const Frame *frame, int *outX, int *outY) {
+    if (frame == nullptr || (*frame).window == nullptr) {
+        if (outX != nullptr) *outX = 0;
+        if (outY != nullptr) *outY = 0;
+        return;
+    }
+    Window_getContentOrigin((*frame).window, outX, outY);
+}
+
+bool Frame_isVisible(const Frame *frame) {
+    if (frame == nullptr)
+        return false;
+    return (*frame).visible;
+}
+
+bool Frame_isFullscreen(const Frame *frame) {
+    if (frame == nullptr || (*frame).window == nullptr)
+        return false;
+    return Window_isFullscreen((Window*) (*frame).window);
+}
+
+bool Frame_isResizable(const Frame *frame) {
+    if (frame == nullptr || (*frame).window == nullptr)
+        return false;
+    return Window_isResizable((Window*) (*frame).window);
+}
+
+bool Frame_isClosable(const Frame *frame) {
+    if (frame == nullptr || (*frame).window == nullptr)
+        return false;
+    return Window_isClosable((Window*) (*frame).window);
+}
+
+bool Frame_isMiniaturizable(const Frame *frame) {
+    if (frame == nullptr || (*frame).window == nullptr)
+        return false;
+    return Window_isMiniaturizable((Window*) (*frame).window);
+}
+
+bool Frame_isFocused(const Frame *frame) {
+    if (frame == nullptr || (*frame).window == nullptr)
+        return false;
+    return Window_isFocused((Window*) (*frame).window);
+}
+
+WindowCursorType Frame_getCursorType(const Frame *frame) {
+    if (frame == nullptr || (*frame).window == nullptr)
+        return WINDOW_CURSOR_DEFAULT;
+    return Window_getCursorType((*frame).window);
+}
+
+bool Frame_shouldClose(const Frame *frame) {
+    if (frame == nullptr || (*frame).window == nullptr)
+        return true;
+    return Window_shouldClose((Window*) (*frame).window);
+}
+
+// EVENT ADAPTERS & LIFECYCLE
+// ============================================================================
+
+WindowEvent *Frame_getLifecycle(Frame *frame) {
+    if (frame == nullptr || (*frame).window == nullptr)
+        return nullptr;
+    return Window_getLifecycle((*frame).window);
+}
+
+void Frame_addKeyAdapter(Frame *frame, const KeyHandler *adapter) {
+    if (frame == nullptr || (*frame).window == nullptr)
+        return;
+    Window_addKeyAdapter((*frame).window, adapter);
+}
+
+bool Frame_removeKeyAdapter(Frame *frame, const KeyHandler *adapter) {
+    if (frame == nullptr || (*frame).window == nullptr)
+        return false;
+    return Window_removeKeyAdapter((*frame).window, adapter);
+}
+
+void Frame_addMouseAdapter(Frame *frame, const MouseHandler *adapter) {
+    if (frame == nullptr || (*frame).window == nullptr)
+        return;
+    Window_addMouseAdapter((*frame).window, adapter);
+}
+
+bool Frame_removeMouseAdapter(Frame *frame, const MouseHandler *adapter) {
+    if (frame == nullptr || (*frame).window == nullptr)
+        return false;
+    return Window_removeMouseAdapter((*frame).window, adapter);
+}
+
+void Frame_addTouchAdapter(Frame *frame, const TouchHandler *adapter) {
+    if (frame == nullptr || (*frame).window == nullptr)
+        return;
+    Window_addTouchAdapter((*frame).window, adapter);
+}
+
+bool Frame_removeTouchAdapter(Frame *frame, const TouchHandler *adapter) {
+    if (frame == nullptr || (*frame).window == nullptr)
+        return false;
+    return Window_removeTouchAdapter((*frame).window, adapter);
 }
