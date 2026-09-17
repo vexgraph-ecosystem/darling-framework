@@ -130,6 +130,24 @@ int Darling_attachPanelBoards(Window *window, Panel *scenePane, Panel *contentPa
         } else if (PanelCocoa_newBoard(board, pxW, pxH)) {
             done++;
         }
+
+        // Parent the board's CAMetalLayer into the window layer tree (the
+        // Window Compositing Layer Order Law: blur behind, scene board bottom,
+        // content board top). Window_setBottomLayer/TopLayer store the slot
+        // and run Window_orderLayers, which parents + frames the layer to the
+        // content view (guarded by a superlayer check — cheap no-op after the
+        // first attach). The slot compare makes this fire exactly once per
+        // board and again only when a new board replaces the old layer.
+        extern void *PanelCocoa_layer(void *pc);
+        void *layer = PanelCocoa_layer(pc);
+        if (layer) {
+            if (i == 0) {
+                if (Window_getBottomLayer(window) != layer)
+                    Window_setBottomLayer(window, layer);
+            } else if (Window_getTopLayer(window) != layer) {
+                Window_setTopLayer(window, layer);
+            }
+        }
     }
     return done;
 }
