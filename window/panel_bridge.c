@@ -32,13 +32,17 @@
  * Core Functions:
  *   - Darling_attachPanes(window, contentPanel, width, height)
  *   - Darling_attachPanelBoards(window, scenePane, contentPane, width, height)
+ *     (boards are RETAINED OFFSCREEN VkLayer targets — fixed pixel size,
+ *     never a CALayer, never in the window tree; the Frame seam canvas is
+ *     the window's single on-screen layer per the Window Compositing
+ *     Layer Order Law)
  *   - Darling_attachLayers(window, contentPanel, width, height)
  *   - Darling_propagatePaneDirty(window, scenePane, contentPanel)
  *     (Panel_isTreeDirty -> VkPane_markDirty per DIRECT chain; COMPOSITED
  *     scenes re-arm their VkLayer from owner-subtree dirt (demand signal;
  *     wall-clock handlers advance on re-render, registration demands the
- *     first render); boards re-arm on tree dirt; bool stores only, safe on
- *     the worker mid-drag)
+ *     first render); boards re-arm their VkLayer on tree dirt; bool
+ *     stores only, safe on the worker mid-drag)
  *   - TextCore_backingScale(void)
  *   - for(i++)
  *   - PanelCocoa_fromPanel(panel)
@@ -62,17 +66,22 @@
 // src/window/panel_bridge.c — pure-C bridge for Metal pane operations.
 //
 // LAYER MODEL (the stack, front to back):
-//   content board ..... full-window CAMetalLayer + VkPane chain (UI subtree;
-//                       samples every COMPOSITED scene layer)
-//   scene board ....... full-window CAMetalLayer + VkPane chain (scene subtree)
-//   child panes ....... one CAMetalLayer + VkPane chain EACH (DIRECT scenes)
-//   COMPOSITED layers . retained offscreen VkLayer targets (Rule 14) —
-//                       NO CAMetalLayer; the canvas samples them as quads
-//   window ............ CAMetalLayer, clear-transparent glass bottom
+//   seam canvas ........ the Frame's CAMetalLayer — the window's SINGLE
+//                        on-screen layer; the seam pass composites the two
+//                        retained board images in z-order (content top,
+//                        scene bottom) and presents on demand
+//   content board ...... retained offscreen VkLayer target (UI subtree;
+//                        samples every COMPOSITED scene layer)
+//   scene board ........ retained offscreen VkLayer target (scene subtree)
+//   child panes ........ one CAMetalLayer + VkPane chain EACH (DIRECT scenes)
+//   COMPOSITED layers .. retained offscreen VkLayer targets — NO
+//                        CAMetalLayer; the canvas samples them as quads
+//   window ............ blur view only (clear-transparent glass bottom)
 //
 // Darling numbering:
-//   layer 1 = window (CAMetalLayer, the glass bottom)
-//   layer 2 = contentPanel board + scenePanel board (full-window Metal)
+//   layer 1 = seam canvas (CAMetalLayer, the glass bottom)
+//   layer 2 = contentPanel board + scenePanel board (retained offscreen
+//             VkLayer targets — RENDERED, never presented)
 //   layer 3 = DIRECT scene panes (own chain each; deeper nesting —
 //             a1/a2/a3 inside a — paints inside the parent pass via
 //             Vulkan render handlers, NOT as nested layers).
@@ -84,22 +93,22 @@
 //
 // TRAFFIC LAW: DIRECT scenes render into their own VkPane chains and
 // COMPOSITED scenes into retained VkLayer flight targets (boards paint whole
-// subtrees); WindowServer composites the layer stack onto the glass. Resize
-// = layer moves via anchors (DIRECT) or the composite rect tracks the anchor
-// (COMPOSITED), zero rebuild.
+// subtrees); the seam pass composites the published board images and
+// WindowServer composites the single canvas layer onto the glass. Resize
+// = the seam canvas frame tracks the window natively (autoresizingMask);
+// boards keep their fixed pixel extent (the Pane-of-Glass Law).
 //
 // Each DIRECT scene child gets its own Metal pane; each COMPOSITED scene
 // child gets a retained offscreen target. Plain UI paints into the board
 // pass. This file iterates children and calls into ObjC PanelCocoa for the
 // Metal/CALayer plumbing.
 
-// Attach full-window Metal board backing (PanelCocoa_newBoard, one VkPane
-// chain each) to the scene + content panels — the two named boards of the
-// NSWindow -> Metal -> Vulkan-rect-children stack. Boards track the window
-// size (VkPane_resize at settle); their subtrees paint into the board chain.
-// Live-gated: mid-drag sizes freeze and the WindowServer stretches board
-// drawables; the final size lands at settle. Returns the number of boards
-// attached or resized.
+// Attach board backing to the scene + content panels: retained OFFSCREEN
+// VkLayer targets (PanelCocoa_newBoard) at fixed pixel size — never a
+// CALayer, never in the window tree (the seam canvas is the window's single
+// on-screen layer). The seam pass composites the published board images in
+// z-order (scene bottom, content top). Returns the number of boards attached
+// or resized.
 int Darling_attachPanelBoards(Window *window, Panel *scenePane, Panel *contentPane, int width, int height) {
     if (!window || width <= 0 || height <= 0)
         return 0;
@@ -129,24 +138,6 @@ int Darling_attachPanelBoards(Window *window, Panel *scenePane, Panel *contentPa
                 done++;
         } else if (PanelCocoa_newBoard(board, pxW, pxH)) {
             done++;
-        }
-
-        // Parent the board's CAMetalLayer into the window layer tree (the
-        // Window Compositing Layer Order Law: blur behind, scene board bottom,
-        // content board top). Window_setBottomLayer/TopLayer store the slot
-        // and run Window_orderLayers, which parents + frames the layer to the
-        // content view (guarded by a superlayer check — cheap no-op after the
-        // first attach). The slot compare makes this fire exactly once per
-        // board and again only when a new board replaces the old layer.
-        extern void *PanelCocoa_layer(void *pc);
-        void *layer = PanelCocoa_layer(pc);
-        if (layer) {
-            if (i == 0) {
-                if (Window_getBottomLayer(window) != layer)
-                    Window_setBottomLayer(window, layer);
-            } else if (Window_getTopLayer(window) != layer) {
-                Window_setTopLayer(window, layer);
-            }
         }
     }
     return done;
@@ -346,7 +337,7 @@ void Darling_propagatePaneDirty(Window *window, Panel *scenePane, Panel *content
             continue;
         bool boardDirty = Panel_isTreeDirty(board) || Window_isLiveResizing(window) || anySceneDirty;
         if (boardDirty)
-            VkPane_markDirty(chain, true);
+            VkLayer_markDirty(chain, true);
     }
 }
 
