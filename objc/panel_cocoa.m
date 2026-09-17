@@ -11,16 +11,26 @@
 ;;OVERVIEW
 /**
  * ============================================================================
- * CLASS: PanelCocoa (Metal pane shim)
- * LEVEL: L4 — Self-Management (OS CAMetalLayer panel shim)
+ * CLASS: PanelCocoa (Metal pane shim + retained board targets)
+ * LEVEL: L4 — Self-Management (OS CAMetalLayer pane shim)
  * ============================================================================
- * Metal pane compositor: each Metal-backed panel owns a CAMetalLayer plus
- * a VkPane swapchain, with the panel subtree painted into the chain and
- * composited by AppKit. Fixed panes (PanelCocoa_newMetal) keep their size;
- * boards (PanelCocoa_newBoard) track the window — stack: NSWindow ->
- * CAMetalLayer -> Vulkan rect children, recursively.
+ * Metal pane compositor. Two backing kinds:
+ *   - PANE (PanelCocoa_newMetal): a CAMetalLayer plus a VkPane swapchain —
+ *     the "pane of glass" for DIRECT scenes, own chain, own presents,
+ *     layer parented into AppKit (fixed pixel size, never rebuilt on
+ *     window resize; the Pane-of-Glass Law managed exception).
+ *   - BOARD (PanelCocoa_newBoard): the two named full-window layers —
+ *     scene (bottom) / content (top) — as RETAINED OFFSCREEN targets: a
+ *     fixed-pixel-size VkLayer dual-flight chain, NEVER a CALayer, NEVER
+ *     parented into the window tree. The window's single on-screen
+ *     CAMetalLayer is the Frame's seam canvas; the seam pass composites
+ *     the two published board images in z-order (scene below, content
+ *     above) per the Window Compositing Layer Order Law. Boards never
+ *     present — Darling_layerRender paints each board's subtree into its
+ *     offscreen target on VkLayer_visit; the canvas samples the published
+ *     flight image.
  *
- * STRUCT FIELDS (local to this file):
+ * STRUCT FIELDS (local to this file — mirror of panel_cocoa.h):
  * ----------------------------------------------------------------------------
  *   PanelEntry {           // Panel * -> PanelCocoa * registry row
  *     void *panel;         // Panel * key (opaque to the ObjC side)
@@ -28,43 +38,38 @@
  *   }
  *   PanelCocoa {           // Opaque Metal backing (see panel_cocoa.h)
  *     void *panel;         // Panel * (opaque to ObjC side)
- *     CALayer *layer;      // AppKit composite target (always CAMetalLayer)
- *     int width, height;   // Current display size shown in the window
- *     bool isMetal;        // CAMetalLayer pane (own VkPane swapchain)
- *     bool isBoard;        // Full-window board (scene/content), resizes w/ window
- *     int chain;           // VkPane chain index (-1 when not metal)
+ *     CALayer *layer;      // AppKit composite target (PANE only; board = nullptr)
+ *     int width, height;   // Current display size in native pixels
+ *     bool isMetal;        // Vulkan-backed (pane: VkPane chain; board: VkLayer target)
+ *     bool isBoard;        // Full-window retained board (scene/content)
+ *     int chain;           // VkPane chain index (pane) / VkLayer index (board)
  *   }
  *
  * FUNCTION REGISTRY:
  * ----------------------------------------------------------------------------
  * Constructors:
- *   - PanelCocoa_newMetal(panel, width, height)
- *   - PanelCocoa_newBoard(panel, width, height)
+ *   - PanelCocoa_newMetal(panel, width, height) : DIRECT pane (CAMetalLayer + VkPane)
+ *   - PanelCocoa_newBoard(panel, width, height) : retained offscreen VkLayer target
  *
  * Core Functions:
- *   - PanelCocoa_free(pc)
- *   - PanelCocoa_layer(pc)
- *   - PanelCocoa_width(pc)
- *   - PanelCocoa_height(pc)
+ *   - PanelCocoa_free(pc)                  : unregister pane chain / layer target
+ *   - PanelCocoa_layer(pc)                 : CALayer (pane) / nullptr (board)
+ *   - PanelCocoa_width(pc) / height(pc)
  *   - PanelCocoa_fromPanel(panel)
- *   - PanelCocoa_isMetal(pc)
- *   - PanelCocoa_isBoard(pc)
- *   - PanelCocoa_chain(pc)
+ *   - PanelCocoa_isMetal(pc) / isBoard(pc)
+ *   - PanelCocoa_chain(pc)                 : VkPane or VkLayer index
  *
  * Setters:
- *   - PanelCocoa_setSize(pc, width, height)
+ *   - PanelCocoa_setSize(pc, width, height) : pane -> VkPane_resize;
+ *                                             board -> VkLayer_resize (no-op unchanged)
  *   - PanelCocoa_setAnchors(pc, parentAnchor, selfAnchor)
- *   - PanelCocoa_setLiveResizingAll(live)
- *       : freeze-exact — boards stay TopLeft-pinned at their exact frozen
- *       extent through the drag (gravity never flips to Resize, so the
- *       frozen frame is never stretched; the seam past the extent is the
- *       layer's transparent remainder); all layers stay
- *       presentsWithTransaction=YES throughout (worker explicit
- *       transaction is the sole committer)
+ *   - PanelCocoa_setLiveResizingAll(live)   : inert (boards own no CALayer;
+ *                                             the Frame seam layer is the
+ *                                             window's only on-screen layer)
  * ============================================================================
  */
 
-;;INTENTION("board panels always presentsWithTransaction=YES; worker explicit CATransaction (Window_workerPresentBegin/End) is the sole committer on the present-worker thread")
+;;INTENTION("boards are retained offscreen VkLayer targets — no CALayer, no presentsWithTransaction (the retained-board overhaul, the Conflict Triage Law managed exception to the two-CAMetalLayer stack: the Frame seam layer is the window's single on-screen CAMetalLayer; the seam pass composites the published board images in z-order)")
 
 
 // Forward declare to avoid any ObjC umbrella header pulling in a Collection
@@ -91,11 +96,11 @@ static size_t s_registryCapacity = 0;
 
 struct PanelCocoa {
     void *panel;            // Panel * (opaque to ObjC side)
-    CALayer *layer;         // AppKit composite target (always CAMetalLayer)
-    int width, height;      // current display size (what's shown in window)
-    bool isMetal;           // CAMetalLayer pane of glass (own VkPane chain)
-    bool isBoard;           // full-window board (scene/content), resizes w/ window
-    int chain;              // VkPane chain index (-1 when not metal)
+    CALayer *layer;         // AppKit composite target (PANE only; board = nullptr)
+    int width, height;      // current display size in native pixels
+    bool isMetal;           // Vulkan-backed (pane: VkPane chain; board: VkLayer target)
+    bool isBoard;           // full-window retained board (scene/content)
+    int chain;              // VkPane chain index (pane) / VkLayer index (board)
 };
 
 // Register (or reuse) the Panel -> PanelCocoa lookup row.
@@ -189,12 +194,20 @@ PanelCocoa *PanelCocoa_newMetal(void *panel, int width, int height) {
 
 void PanelCocoa_free(PanelCocoa *pc) {
     if (!pc) return;
-    // Metal pane: detach its swapchain registry entry. Unregistering runs
-    // thread-0 teardown; the engine owns the layer's Vulkan surface.
     if ((*pc).isMetal) {
-        extern int VkPane_unregister(int index);
-        if ((*pc).chain >= 0)
-            VkPane_unregister((*pc).chain);
+        if ((*pc).isBoard) {
+            // Retained offscreen board: unregister its flight target. Runs
+            // thread-0 teardown; the chain owns no CALayer.
+            extern bool VkLayer_unregister(int index);
+            if ((*pc).chain >= 0)
+                VkLayer_unregister((*pc).chain);
+        } else {
+            // Metal pane: detach its swapchain registry entry. Unregistering runs
+            // thread-0 teardown; the engine owns the layer's Vulkan surface.
+            extern int VkPane_unregister(int index);
+            if ((*pc).chain >= 0)
+                VkPane_unregister((*pc).chain);
+        }
     }
     // Unregister from dynamic lookup table
     if (s_registry) {
@@ -216,6 +229,18 @@ bool PanelCocoa_setSize(PanelCocoa *pc, int width, int height) {
 
     if (!(*pc).isMetal)
         return false;
+    if ((*pc).isBoard) {
+        // Retained offscreen board: rebuild the flight targets only on true
+        // pixel drift (the Pane-of-Glass Law — no-op when unchanged). The
+        // board owns no CALayer, so there is no drawableSize to touch.
+        extern bool VkLayer_resize(int index, int width, int height);
+        bool ok = VkLayer_resize((*pc).chain, width, height);
+        if (ok) {
+            (*pc).width = width;
+            (*pc).height = height;
+        }
+        return ok;
+    }
     // Pane of glass: the swapchain extent follows the pane's OWN size.
     // Fixed panes never reach here with a changed size (anchored panes keep
     // their rect while the window moves); boards rebuild at settle. Either
@@ -242,51 +267,46 @@ bool PanelCocoa_isMetal(const PanelCocoa *pc) { return pc ? (*pc).isMetal : fals
 int PanelCocoa_chain(const PanelCocoa *pc) { return pc ? (*pc).chain : -1; }
 bool PanelCocoa_isBoard(const PanelCocoa *pc) { return pc ? (*pc).isBoard : false; }
 
-// Board backing: a full-window pane with the board flag set. Same layer
-// contract as PanelCocoa_newMetal (TopLeft pin, transaction-synced
-// presents); the flag only changes resize behavior — boards follow the
-// window (VkPane_resize at settle, freeze-exact TopLeft pin mid-drag),
-// fixed panes never move their swapchain.
-//
-// presentsWithTransaction=YES: board presents are synchronized with the
-// CoreAnimation compositor — the Vulkan drawable swap lands inside the same
-// display-sync window as the window-frame CA transaction, so content tracks
-// the border in real time. The worker wraps every present walk in an explicit
-// CATransaction (Window_workerPresentBegin/End) so YES-presents release on
-// worker cadence even though the worker owns no runloop.
+// Board backing: a RETAINED OFFSCREEN target for the two named full-window
+// layers — scene (bottom) / content (top). NOT a CALayer: the board owns a
+// fixed-pixel-size VkLayer dual-flight chain that Darling_layerRender paints
+// on VkLayer_visit; the single on-screen CAMetalLayer (the Frame seam
+// canvas) composites the published board images in z-order (scene below,
+// content above) per the Window Compositing Layer Order Law. Nothing here
+// touches AppKit — the board lives entirely inside Vulkan.
 PanelCocoa *PanelCocoa_newBoard(void *panel, int width, int height) {
-    PanelCocoa *pc = PanelCocoa_newMetal(panel, width, height);
-    if (pc) {
-        (*pc).isBoard = true;
-        [(CAMetalLayer*) (*pc).layer setPresentsWithTransaction:YES];
+    if (!panel || width <= 0 || height <= 0)
+        return nullptr;
+    extern int VkLayer_register(int width, int height, void *owner);
+    int index = VkLayer_register(width, height, panel);
+    if (index < 0)
+        return nullptr;
+
+    PanelCocoa *pc = (PanelCocoa*) calloc(1, sizeof(PanelCocoa));
+    if (!pc) {
+        extern bool VkLayer_unregister(int index);
+        VkLayer_unregister(index);
+        return nullptr;
     }
+    (*pc).panel = panel;
+    (*pc).width = width;
+    (*pc).height = height;
+    (*pc).isMetal = true;
+    (*pc).isBoard = true;
+    (*pc).chain = index;
+    (*pc).layer = nullptr;
+
+    registerPanelEntry(panel, pc);
     return pc;
 }
 
-// Board live-resize pin (thread 0 only — touches CoreAnimation state).
-// live=true  (drag begin): keep YES so the worker's per-walk explicit
-//            CATransaction (Window_workerPresentBegin/End) is the sole
-//            committer — presents release on worker cadence, not thread-0
-//            runloop cadence, and freeze-exact TopLeft is maintained.
-// live=false (settle / normal): restore YES for steady-state CA-sync
-//            presents (content tracks window resize in real time).
-// Boards are always YES; this call is kept for gravity reassertion.
+// Board live-resize pin: INERT — boards own no CALayer (retained offscreen
+// VkLayer targets); the Frame seam layer is the window's only on-screen
+// layer and its frame tracks the window natively (autoresizingMask + the
+// Native Pixel Law drawableSize contract). Kept as a documented no-op for
+// bridge compatibility.
 void PanelCocoa_setLiveResizingAll(bool live) {
     (void) live;
-    if (!s_registry)
-        return;
-    [CATransaction begin];
-    [CATransaction setDisableActions:YES];
-    for (size_t i = 0; i < s_registryCount; i++) {
-        PanelCocoa *pc = s_registry[i].pc;
-        if (!pc || !(*pc).isMetal || !(*pc).isBoard || !(*pc).layer)
-            continue;
-        if (![(*pc).layer isKindOfClass:[CAMetalLayer class]])
-            continue;
-        (*pc).layer.contentsGravity = kCAGravityTopLeft;
-        [(CAMetalLayer*) (*pc).layer setPresentsWithTransaction:YES];
-    }
-    [CATransaction commit];
 }
 
 // Lookup: retrieve the PanelCocoa backing for a Panel. Returns nullptr if the
