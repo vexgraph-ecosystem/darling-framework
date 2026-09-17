@@ -4,6 +4,9 @@
 #include "darling/container.h"
 #include "darling/panel/panel.h"
 #include "darling/scene/scene.h"
+#include "darling/field/input.h"
+#include "event/dispatch.h"
+#include "graphvex/gfx_loop.h"
 #include "nio/mem.h"
 #include "oop/type.h"
 #include "time/nanotime.h"
@@ -41,6 +44,12 @@
  * Core Functions:
  *   - Darling_initCompositor(frame)
  *   - Darling_shutdownCompositor(void)
+ *   - darlingGfxFrameFn(window, dt, userdata) (private) : GfxFrameFn demand
+ *     probe registered into graphvex's GfxLoop (the Conflict Triage Law
+ *     downward seam — the loop lives in R3, darling registers into it).
+ *     Probed every resting pass (the Present-On-Demand Law): ticks the
+ *     focused Input's caret blink and re-arms present demand on
+ *     tree/pane/live-resize dirt — probe free, present gated on demand.
  *   - Darling_renderFrame(cmdBuffer, drawW, drawH, userdata=Frame*)
  *   - Darling_preFrame(window, drawW, drawH, userdata=Frame*)
  *     (full layout every tick: live gate was removed; setFrameSize drives
@@ -310,6 +319,21 @@ static void Darling_layerRender(void *cmdBuffer, int w, int h, void *owner) {
         return;
     float kx = (float) w / (float) panelW;
     float ky = (float) h / (float) panelH;
+
+    // Board's own backdrop: the board panel IS the window surface (the
+    // Window Board Root Lock Law) — paint its background as the full-pane
+    // first op so a styled root (dark app backdrop) shows through between
+    // children, instead of the pane chain's transparent-black clear.
+    uint32_t bgColor = Panel_getBackgroundColor(panel);
+    if (bgColor != 0) {
+        float r = ((bgColor >> 16) & 0xFF) / 255.0f;
+        float g = ((bgColor >> 8) & 0xFF) / 255.0f;
+        float b = (bgColor & 0xFF) / 255.0f;
+        float a = ((bgColor >> 24) & 0xFF) / 255.0f;
+        if (a > 0.0f)
+            Vk_fillRect(cmdBuffer, (float) w, (float) h, 0.0f, 0.0f, (float) w, (float) h, r, g, b, a);
+    }
+
     for (size_t i = 0; i < childCount; i++) {
         Panel *child = Panel_getChild(panel, i);
         if (!child)
@@ -510,13 +534,62 @@ static void Darling_resizeRenderHook(void *userdata) {
     Window_workerPresentEnd();
 }
 
+// The CAMetalLayer is created by the FRAME (FrameCocoa_attach) and stored in
+// frame->nativeView; R1's window deliberately holds zero Metal, so its
+// Window_metalLayer stub returns nullptr by design (the Window Decoupling
+// Law). Advertising that stub to graphvex is why the VK_EXT_metal_surface
+// path failed. The compositor therefore advertises the FRAME's layer: R3
+// still receives one opaque void* and stays OS-free.
+static Frame *s_seamFrame = nullptr;
+
+static void *darlingSeamMetalLayer(void *window) {
+    (void) window;
+    return s_seamFrame ? Frame_getNativeView(s_seamFrame) : nullptr;
+}
+
+// GfxLoop demand probe (the Present-On-Demand Law) — the Conflict Triage Law
+// downward seam (the frame loop lives in graphvex R3; darling registers into
+// it, never the reverse). GfxLoop_step probes this EVERY pass, so it is the
+// loop's only window onto demand while resting:
+//   - caret blink: phase flips are the one demand the setters never see —
+//     tick the focused Input so its dirt lands through the Input markDirty
+//     path exactly on phase change;
+//   - present demand: a live resize, any DIRTY pane chain (the boards
+//     themselves, DIRECT scenes, or COMPOSITED layer re-arms propagated by
+//     Darling_propagatePaneDirty), or a dirty panel tree re-arms the client.
+// Deliberately tiny: thread 0, struct reads + one markDirty only — no
+// layout, no driver calls, no allocation (the Cold-Strict, Hot-Minimal
+// Validation Law hot path). The probe is free; the present gate stays strict.
+static void darlingGfxFrameFn(void *window, double dt, void *userdata) {
+    Frame *hframe = (Frame*) userdata;
+    if (!hframe || !window)
+        return;
+
+    Panel *focus = Darling_getFocusedPanel();
+    if (focus && Memory_type(focus) == TYPE_INPUT_SINGLETON)
+        Input_caret_tick((Input*) focus, dt);
+
+    bool demand = false;
+    if (Window_isLiveResizing((Window*) window))
+        demand = true;
+    if (VkPane_hasDemand())
+        demand = true;
+    if (Panel_isTreeDirty(Frame_getContentPane(hframe)))
+        demand = true;
+    if (Panel_isTreeDirty(Frame_getScenePane(hframe)))
+        demand = true;
+    if (demand)
+        GfxLoop_markDirty(GfxLoop_default(), window);
+}
+
 void Darling_initCompositor(Frame *frame) {
     Window *window = frame ? Frame_getWindow(frame) : nullptr;
     if (!window) return;
 
     if (!Vk_ready()) {
+        s_seamFrame = frame;
         Vk_setWindowSeam(window,
-                         (void *(*)(void *))Window_metalLayer,
+                         darlingSeamMetalLayer,
                          (bool (*)(void *))Window_isTransparent,
                          (VkWindowPresentMode (*)(void *))Window_getPresentMode,
                          (uint64_t (*)(void *))Window_renderGeneration,
@@ -524,7 +597,13 @@ void Darling_initCompositor(Frame *frame) {
                          (void (*)(void *, void *, void *))Window_setResizeRenderHook,
                          (void (*)(void *))Window_setGravityTopLeft,
                          (bool (*)(void *))Window_isMinimized);
-        Vk_init();
+        // Fail closed: a failed init leaves null instance/device handles, and
+        // every module-init call below dereferences them (the Cold-Strict,
+        // Hot-Minimal Validation Law: never crash). Report and stay dark.
+        if (!Vk_init() || !Vk_ready()) {
+            fprintf(stderr, "darling: Vulkan init failed (%s) — the frame stays dark\n", Vk_status());
+            return;
+        }
     }
 
     VkInstance inst = Vk_getInstance();
@@ -562,9 +641,23 @@ void Darling_initCompositor(Frame *frame) {
     // tracks the window border in real time. Must be registered AFTER Vk_init
     // so the pane/layer hooks are installed and the first present is valid.
     Window_setResizeRenderHook(window, Darling_resizeRenderHook, frame);
+
+    // Register into graphvex's GfxLoop: the frame loop runs our probe every
+    // pass (demand re-arm + caret blink) and presents through the board
+    // panes. Registered dirty on arrival -> the first loop step presents the
+    // initial composite. Unregistered in Darling_shutdownCompositor.
+    GfxLoop_registerClient(GfxLoop_default(), window, nullptr, nullptr, nullptr,
+                           darlingGfxFrameFn, frame);
 }
 
 void Darling_shutdownCompositor(void) {
+    // Deregister the GfxLoop client first so the frame loop stops probing
+    // and presenting a window that is tearing down (the Teardown Order Law:
+    // detach before free).
+    Window *w = s_seamFrame ? Frame_getWindow(s_seamFrame) : nullptr;
+    if (w)
+        GfxLoop_unregisterClient(GfxLoop_default(), w);
+
     Vk_setPreFrameRenderer(nullptr, nullptr);
     Vk_setFrameRenderer(nullptr, nullptr);
 
