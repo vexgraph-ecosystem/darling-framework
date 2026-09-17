@@ -50,11 +50,22 @@ static void onInputFire(void *userData, int64_t combo) {
     (*(int*) userData) += 1;
 }
 
-static void tapKey(int key) {
-    Key_pushEvent(0, key, KEY_ACTION_DOWN, 250000000ULL);
+// Taps settle when the per-key pending window closes. The platform drivers
+// use 250ms windows; tests drive a 30ms window and wait 40ms so settlement
+// lands with ~250ms-of-test-latency saved. Settlement is what fires
+// KeyMap bindings, so every tap below must wait it out.
+#define TAP_WIN_NS 30000000ULL  // 30 ms tap window
+#define SETTLE_SLEEP_US 40000   // 40 ms > window, so settlement always lands
+
+static void tapKeyWin(int key, uint64_t winNanos) {
+    Key_pushEvent(0, key, KEY_ACTION_DOWN, winNanos);
     Key_dispatchEvents();
-    Key_pushEvent(0, key, KEY_ACTION_UP, 0);
+    Key_pushEvent(0, key, KEY_ACTION_UP, winNanos);
     Key_dispatchEvents();
+}
+
+static void settle(void) {
+    usleep(SETTLE_SLEEP_US);
 }
 
 static void holdSuper(bool down) {
@@ -198,7 +209,8 @@ int main(void) {
     assert(dtCount == dtBefore + 1); // dt slot swapped into hole 0, still fires
     assert(renderCount == 4);        // onFrameRender slot gone — no longer fires
 
-    // 5. KeyMap-backed input bindings (resolved once per Frame_render)
+    // 5. KeyMap-backed input bindings (resolved once per Frame_render; taps
+    // settle when the per-key pending window closes — short test window)
     Key_init();
     Mouse_init();
 
@@ -212,17 +224,21 @@ int main(void) {
     assert(KeyMap_count(Frame_getKeyMap(&frame)) == 1);
 
     // exact modifier gate: plain A and modifier-less Q must not fire Cmd+Q
-    tapKey(KEY_A);
+    tapKeyWin(KEY_A, TAP_WIN_NS);
+    settle();
     Frame_render(&frame);
     assert(inputFires == 0);
-    tapKey(KEY_Q);
+    tapKeyWin(KEY_Q, TAP_WIN_NS);
+    settle();
     Frame_render(&frame);
     assert(inputFires == 0);
     holdSuper(true);
-    tapKey(KEY_A); // A under Cmd — code mismatch
+    tapKeyWin(KEY_A, TAP_WIN_NS); // A under Cmd — code mismatch
+    settle();
     Frame_render(&frame);
     assert(inputFires == 0);
-    tapKey(KEY_Q); // Cmd+Q — fires
+    tapKeyWin(KEY_Q, TAP_WIN_NS); // Cmd+Q — fires at settlement
+    settle();
     Frame_render(&frame);
     assert(inputFires == 1);
     Frame_render(&frame);
@@ -232,10 +248,11 @@ int main(void) {
     assert(Frame_addMouseFunction(&frame, dblRight, onInputFire, &mouseFires) == true);
     assert(KeyMap_count(Frame_getKeyMap(&frame)) == 2);
     holdSuper(false);
-    Mouse_pushButtonEvent(0, MOUSE_RIGHT, KEY_ACTION_DOWN, 250000000ULL);
-    Mouse_pushButtonEvent(0, MOUSE_RIGHT, KEY_ACTION_UP, 0);
-    Mouse_pushButtonEvent(0, MOUSE_RIGHT, KEY_ACTION_DOWN, 250000000ULL);
-    Mouse_pushButtonEvent(0, MOUSE_RIGHT, KEY_ACTION_UP, 0);
+    Mouse_pushButtonEvent(0, MOUSE_RIGHT, KEY_ACTION_DOWN, TAP_WIN_NS);
+    Mouse_pushButtonEvent(0, MOUSE_RIGHT, KEY_ACTION_UP, TAP_WIN_NS);
+    Mouse_pushButtonEvent(0, MOUSE_RIGHT, KEY_ACTION_DOWN, TAP_WIN_NS);
+    Mouse_pushButtonEvent(0, MOUSE_RIGHT, KEY_ACTION_UP, TAP_WIN_NS);
+    settle();
     Frame_render(&frame);
     assert(mouseFires == 1);
     assert(inputFires == 1); // at most one binding fires per present
