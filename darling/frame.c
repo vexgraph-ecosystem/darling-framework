@@ -511,6 +511,13 @@ void Frame_resize(Frame *frame, int width, int height) {
         (*layer).height = (uint32_t) height;
     }
 
+    // Window Board Root Lock Law (law 49): force-update locked board roots to track
+    // the new window dimensions. Container_forceSize bypasses the lockedRoot guard.
+    if ((*frame).contentPane != nullptr)
+        Container_forceSize(&(*(*frame).contentPane).base, (float)width, (float)height);
+    if ((*frame).scenePane != nullptr)
+        Container_forceSize(&(*(*frame).scenePane).base, (float)width, (float)height);
+
     Frame_render(frame);
     Frame_present(frame);
 }
@@ -558,12 +565,36 @@ void Frame_setContentPane(Frame *frame, Panel *panel) {
     if (frame == nullptr)
         return;
     (*frame).contentPane = panel;
+    if (panel != nullptr) {
+        // Window Board Root Lock Law (law 49): lock the board root to the window dimensions.
+        Container *base = &(*panel).base;
+        (*base).lockedRoot = 1;
+        (*base).anchor = CONTAINER_ANCHOR_TOP_LEFT;
+        (*base).pivot = CONTAINER_PIVOT_TOP_LEFT;
+        (*base).x = 0.0f;
+        (*base).y = 0.0f;
+        (*base).w = (float)(*frame).width;
+        (*base).h = (float)(*frame).height;
+        (*base).dirty = 1;
+    }
 }
 
 void Frame_setScenePane(Frame *frame, Panel *panel) {
     if (frame == nullptr)
         return;
     (*frame).scenePane = panel;
+    if (panel != nullptr) {
+        // Window Board Root Lock Law (law 49): lock the board root to the window dimensions.
+        Container *base = &(*panel).base;
+        (*base).lockedRoot = 1;
+        (*base).anchor = CONTAINER_ANCHOR_TOP_LEFT;
+        (*base).pivot = CONTAINER_PIVOT_TOP_LEFT;
+        (*base).x = 0.0f;
+        (*base).y = 0.0f;
+        (*base).w = (float)(*frame).width;
+        (*base).h = (float)(*frame).height;
+        (*base).dirty = 1;
+    }
 }
 
 void Frame_setVisualEffect(Frame *frame, bool enable, int material) {

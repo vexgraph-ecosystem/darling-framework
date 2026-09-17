@@ -36,6 +36,7 @@ typedef struct Container {
     uint8_t enabled;
     uint8_t dirty;
     uint8_t clipping;
+    uint8_t lockedRoot;     // 1 = board-root pane (Window Board Root Lock Law): setSize/setLocation are no-ops
     float opacity;        // 0..1 alpha multiplier over every paint of this node (default 1 = opaque)
     float baseW, baseH;     // parent size at last layout (resize-delta reference)
     float minW, minH;       // size constraints (default 0,0)
@@ -120,6 +121,17 @@ float Container_getOpacity(const Container *c);
 bool Container_isDirty(const Container *c);
 void Container_markDirty(Container *c);
 void Container_clearDirty(Container *c);
+
+// Root lock (the Window Board Root Lock Law): setSize/setLocation are silent
+// no-ops when lockedRoot is set. Frame_resize uses Container_forceSize /
+// Container_forceLocation (internal bypass — NOT public API) to update
+// locked root geometry without triggering the guard.
+bool Container_isLockedRoot(const Container *c);
+void Container_setLockedRoot(Container *c, bool locked);
+// Internal force-setters: bypass lockedRoot guard. Used ONLY by Frame_resize.
+// Not public API — do not call from outside darling-framework.
+void Container_forceSize(Container *c, float w, float h);
+void Container_forceLocation(Container *c, float x, float y);
 
 // Margin (additive: final = location + margin, dest-last outs) + corner radius.
 void Container_setMargin(Container *c, float l, float t, float r, float b);

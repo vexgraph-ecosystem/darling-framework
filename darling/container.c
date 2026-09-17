@@ -26,6 +26,7 @@
  *   uint8_t enabled;       // Enabled flag
  *   uint8_t dirty;         // Layout-dirty flag
   *   uint8_t clipping;      // Clip-children flag
+  *   uint8_t lockedRoot;    // 1 = board-root pane: setSize/setLocation are no-ops (Window Board Root Lock Law)
   *   float opacity;         // 0..1 alpha multiplier over every paint (default 1)
  *   float baseW, baseH;    // Parent size at last layout (resize-delta reference)
  *   float minW, minH;      // Size constraints (default 0,0)
@@ -92,6 +93,12 @@
  *   - Container_getMargin(c, l, t, r, b)
  *   - Container_getRadius(c)
  *   - Container_getRadiusMode(c)
+ *
+ * Root lock (Window Board Root Lock Law):
+ *   - Container_isLockedRoot(c)
+ *   - Container_setLockedRoot(c, locked)
+ *   - Container_forceSize(c, w, h)      // internal: Frame_resize bypass only
+ *   - Container_forceLocation(c, x, y)  // internal: Frame_resize bypass only
  * ============================================================================
  */
 
@@ -117,6 +124,7 @@ Container *Container_0(void) {
     (*c).enabled = 1;
     (*c).dirty = 0;
     (*c).clipping = 0;
+    (*c).lockedRoot = 0;
     (*c).opacity = 1.0f;
     (*c).baseW = 0.0f; // unset -> first resolve captures the reference
     (*c).baseH = 0.0f;
@@ -148,12 +156,17 @@ void Container_setWidth(Container *c, float w) { if (c) { (*c).w = w; layoutEdit
 void Container_setHeight(Container *c, float h) { if (c) { (*c).h = h; layoutEdited(c); } }
 
 void Container_setLocation(Container *c, float x, float y) {
+    // Window Board Root Lock Law: silently no-op when this node is a locked board root.
+    if (!c || (*c).lockedRoot)
+        return;
     Container_setX(c, x);
     Container_setY(c, y);
 }
 
 void Container_setSize(Container *c, float w, float h) {
     if (!c) return;
+    // Window Board Root Lock Law: silently no-op when this node is a locked board root.
+    if ((*c).lockedRoot) return;
     // Clamp to [min, max] if constraints are configured
     if (w < (*c).minW) w = (*c).minW;
     if (h < (*c).minH) h = (*c).minH;
@@ -273,6 +286,33 @@ void Container_markDirty(Container *c) {
 void Container_clearDirty(Container *c) {
     if (c)
         (*c).dirty = 0;
+}
+
+// --- Root lock (Window Board Root Lock Law) ---
+
+bool Container_isLockedRoot(const Container *c) {
+    return c && (*c).lockedRoot != 0;
+}
+
+void Container_setLockedRoot(Container *c, bool locked) {
+    if (c)
+        (*c).lockedRoot = locked ? 1 : 0;
+}
+
+// Internal force-setters: bypass lockedRoot guard.
+// Used ONLY by Frame_resize — NOT public API.
+void Container_forceSize(Container *c, float w, float h) {
+    if (!c) return;
+    (*c).w = w;
+    (*c).h = h;
+    layoutEdited(c);
+}
+
+void Container_forceLocation(Container *c, float x, float y) {
+    if (!c) return;
+    (*c).x = x;
+    (*c).y = y;
+    layoutEdited(c);
 }
 
 void Container_setMargin(Container *c, float l, float t, float r, float b) {

@@ -147,6 +147,14 @@ void Frame_setRootPanel(Frame *frame, Panel *panel);
 // roots from the Frame alone.
 void Frame_setContentPane(Frame *frame, Panel *panel);
 void Frame_setScenePane(Frame *frame, Panel *panel);
+// Polymorphic arity: accept any panel-derived type (Panel, Scene2D, Scene3D,
+// ListPanel, ScrollPanel, GridPanel, FlexPanel, SectionContainer, SplitPanel,
+// LayeredContainer, ExpandableListContainer, or any future subclass embedding
+// Panel as first member). The pointer is cast to Panel* — the Window Board
+// Root Lock Law (law 49) then enforces lockedRoot + top-left geometry on set.
+// Caller must ensure the pointer is a live panel-derived type.
+#define Frame_setContentPanel(frame, p) Frame_setContentPane((frame), (Panel*)(p))
+#define Frame_setScenePanel(frame, p)   Frame_setScenePane((frame), (Panel*)(p))
 void Frame_setVisualEffect(Frame *frame, bool enable, int material);
 void Frame_setPresentsWithTransaction(Frame *frame, bool presentsWithTransaction);
 void Frame_setNativeView(Frame *frame, void *nativeView);

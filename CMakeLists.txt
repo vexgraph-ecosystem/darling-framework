@@ -408,5 +408,13 @@ if(NOT TARGET color_test AND EXISTS "${DARLING_TEST_DIR}/color_test.c")
     target_link_libraries(color_test PRIVATE darling)
 endif()
 
-
-
+# Frame root panel artifact: headless Window Board Root Lock Law (law 49) suite.
+# Tests Frame_setContentPane / Frame_setScenePane dimension lock, lockedRoot flag,
+# anchor/pivot override, Container_setSize no-op on locked roots, Frame_resize
+# propagation, unlock/relock, Container_forceSize bypass, and polymorphic macros.
+if(NOT TARGET frame_root_panel_test AND EXISTS "${DARLING_TEST_DIR}/frame_root_panel_test.c")
+    add_executable(frame_root_panel_test
+        ${DARLING_TEST_DIR}/frame_root_panel_test.c
+    )
+    target_link_libraries(frame_root_panel_test PRIVATE darling)
+endif()
