@@ -34,6 +34,15 @@ typedef struct Button {
     bool pressed;
     void (*onPress)(void *ctx);
     void *ctx;
+
+    // --- Label raster cache (label part: cached native text quad; owned by
+    // the button, retired via Texture_replaceRaw when the label/font/size
+    // changes — views never, cache always owned) ---
+    int32_t rasterTex;       // GPU texture id of the cached label raster; -1 = none
+    int rasterW;             // raster pixel width
+    int rasterH;             // raster pixel height
+    float rasterBacking;     // backing scale at raster time
+    bool rasterDirty;        // label/font/size/color changed -> re-raster on paint
 } Button;
 
 // Constructors:
@@ -80,5 +89,10 @@ void Button_setPressed(Button *b, bool pressed);
 void Button_setOnPress(Button *b, void (*fn)(void *ctx), void *ctx);
 void (*Button_getOnPress(const Button *b))(void *ctx);
 void *Button_getPressContext(const Button *b);
+
+// Label raster cache getters (the Symmetric Getter/Setter Completeness Law
+// symmetric probes for the Label part's GPU cache; -1/0 answered when null).
+int32_t Button_getRasterTexture(const Button *b);
+void Button_getRasterSize(const Button *b, int *outW, int *outH);
 
 #endif
