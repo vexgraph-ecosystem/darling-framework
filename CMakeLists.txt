@@ -196,7 +196,7 @@ if(NOT EXISTS "${DARLING_TEST_DIR}")
     set(DARLING_TEST_DIR "${CMAKE_CURRENT_SOURCE_DIR}/tests")
 endif()
 
-# Phase 1 substrate artifact (layout-panels §8): headless rounded-rect diff.
+# Phase 1 substrate artifact (layout-panels section8): headless rounded-rect diff.
 if(NOT TARGET corner_test AND EXISTS "${DARLING_TEST_DIR}/corner_test.c")
     add_executable(corner_test
         ${DARLING_TEST_DIR}/corner_test.c
@@ -204,7 +204,7 @@ if(NOT TARGET corner_test AND EXISTS "${DARLING_TEST_DIR}/corner_test.c")
     target_link_libraries(corner_test PRIVATE darling)
 endif()
 
-# Anim artifact (anim §1): headless easing + keyframe player suite.
+# Anim artifact (anim section1): headless easing + keyframe player suite.
 if(NOT TARGET anim_test AND EXISTS "${DARLING_TEST_DIR}/anim_test.c")
     add_executable(anim_test
         ${DARLING_TEST_DIR}/anim_test.c
@@ -260,7 +260,7 @@ if(NOT TARGET dispatcher_test AND EXISTS "${DARLING_TEST_DIR}/dispatcher_test.c"
     target_link_libraries(dispatcher_test PRIVATE darling)
 endif()
 
-# Button artifact (click §1): headless click, hover, down/up bounds suite.
+# Button artifact (click section1): headless click, hover, down/up bounds suite.
 if(NOT TARGET button_test AND EXISTS "${DARLING_TEST_DIR}/button_test.c")
     add_executable(button_test
         ${DARLING_TEST_DIR}/button_test.c
@@ -268,7 +268,7 @@ if(NOT TARGET button_test AND EXISTS "${DARLING_TEST_DIR}/button_test.c")
     target_link_libraries(button_test PRIVATE darling)
 endif()
 
-# Checkbox artifact (click §2): headless toggle, indeterminate, inside/outside bounds suite.
+# Checkbox artifact (click section2): headless toggle, indeterminate, inside/outside bounds suite.
 if(NOT TARGET checkbox_test AND EXISTS "${DARLING_TEST_DIR}/checkbox_test.c")
     add_executable(checkbox_test
         ${DARLING_TEST_DIR}/checkbox_test.c
@@ -276,7 +276,7 @@ if(NOT TARGET checkbox_test AND EXISTS "${DARLING_TEST_DIR}/checkbox_test.c")
     target_link_libraries(checkbox_test PRIVATE darling)
 endif()
 
-# Switch artifact (click §3): headless toggle, state flip, inside/outside bounds suite.
+# Switch artifact (click section3): headless toggle, state flip, inside/outside bounds suite.
 if(NOT TARGET switch_test AND EXISTS "${DARLING_TEST_DIR}/switch_test.c")
     add_executable(switch_test
         ${DARLING_TEST_DIR}/switch_test.c
@@ -284,7 +284,7 @@ if(NOT TARGET switch_test AND EXISTS "${DARLING_TEST_DIR}/switch_test.c")
     target_link_libraries(switch_test PRIVATE darling)
 endif()
 
-# Slider artifact (drag §1): headless drag, step snap, range clamping suite.
+# Slider artifact (drag section1): headless drag, step snap, range clamping suite.
 if(NOT TARGET slider_test AND EXISTS "${DARLING_TEST_DIR}/slider_test.c")
     add_executable(slider_test
         ${DARLING_TEST_DIR}/slider_test.c
@@ -292,7 +292,7 @@ if(NOT TARGET slider_test AND EXISTS "${DARLING_TEST_DIR}/slider_test.c")
     target_link_libraries(slider_test PRIVATE darling)
 endif()
 
-# Knob artifact (drag §2): headless rotary scrub, normalized mapping, callback suite.
+# Knob artifact (drag section2): headless rotary scrub, normalized mapping, callback suite.
 if(NOT TARGET knob_test AND EXISTS "${DARLING_TEST_DIR}/knob_test.c")
     add_executable(knob_test
         ${DARLING_TEST_DIR}/knob_test.c
@@ -300,7 +300,7 @@ if(NOT TARGET knob_test AND EXISTS "${DARLING_TEST_DIR}/knob_test.c")
     target_link_libraries(knob_test PRIVATE darling)
 endif()
 
-# ScrollBar artifact (drag §3): headless drag, clickAt fraction mapping suite.
+# ScrollBar artifact (drag section3): headless drag, clickAt fraction mapping suite.
 if(NOT TARGET scrollbar_test AND EXISTS "${DARLING_TEST_DIR}/scrollbar_test.c")
     add_executable(scrollbar_test
         ${DARLING_TEST_DIR}/scrollbar_test.c
@@ -308,7 +308,7 @@ if(NOT TARGET scrollbar_test AND EXISTS "${DARLING_TEST_DIR}/scrollbar_test.c")
     target_link_libraries(scrollbar_test PRIVATE darling)
 endif()
 
-# ExpandableListContainer artifact (tree/hierarchy §1): headless add, expand/collapse, depth, checklist, remove suite.
+# ExpandableListContainer artifact (tree/hierarchy section1): headless add, expand/collapse, depth, checklist, remove suite.
 if(NOT TARGET expandable_list_container_test AND EXISTS "${DARLING_TEST_DIR}/expandable_list_container_test.c")
     add_executable(expandable_list_container_test
         ${DARLING_TEST_DIR}/expandable_list_container_test.c
@@ -316,7 +316,7 @@ if(NOT TARGET expandable_list_container_test AND EXISTS "${DARLING_TEST_DIR}/exp
     target_link_libraries(expandable_list_container_test PRIVATE darling)
 endif()
 
-# RadioGroup artifact (click §4): headless options, mutual exclusion, pointer click suite.
+# RadioGroup artifact (click section4): headless options, mutual exclusion, pointer click suite.
 if(NOT TARGET radiogroup_test AND EXISTS "${DARLING_TEST_DIR}/radiogroup_test.c")
     add_executable(radiogroup_test
         ${DARLING_TEST_DIR}/radiogroup_test.c
@@ -324,7 +324,7 @@ if(NOT TARGET radiogroup_test AND EXISTS "${DARLING_TEST_DIR}/radiogroup_test.c"
     target_link_libraries(radiogroup_test PRIVATE darling)
 endif()
 
-# Input artifact (text §1): headless text insertion, deletion, caret motion, key event suite.
+# Input artifact (text section1): headless text insertion, deletion, caret motion, key event suite.
 if(NOT TARGET darling_input_test AND EXISTS "${DARLING_TEST_DIR}/input_test.c")
     add_executable(darling_input_test
         ${DARLING_TEST_DIR}/input_test.c
@@ -332,7 +332,7 @@ if(NOT TARGET darling_input_test AND EXISTS "${DARLING_TEST_DIR}/input_test.c")
     target_link_libraries(darling_input_test PRIVATE darling)
 endif()
 
-# Textarea artifact (text §2): headless multiline buffer, caret, pointer, key event suite.
+# Textarea artifact (text section2): headless multiline buffer, caret, pointer, key event suite.
 if(NOT TARGET textarea_test AND EXISTS "${DARLING_TEST_DIR}/textarea_test.c")
     add_executable(textarea_test
         ${DARLING_TEST_DIR}/textarea_test.c
