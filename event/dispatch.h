@@ -23,4 +23,9 @@ void Darling_fireValue(Panel *source, ValueEvent *ev);
 void Darling_fireTree(Panel *parent, TreeEvent *ev);
 void Darling_fireGesture(Panel *target, GestureEvent *ev);
 
+// Focused key target getter (dispatch's s_focusedPanel, set by PTR_DOWN on
+// focusable kinds). Read by the GfxLoop demand probe to tick the focused
+// Input's caret blink. Null = nothing focused.
+Panel *Darling_getFocusedPanel(void);
+
 #endif

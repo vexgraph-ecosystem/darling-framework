@@ -440,6 +440,14 @@ void Darling_fireKey(Panel *focused, UIKeyEvent *ev) {
     dispatchKeyTo(target, ev);
 }
 
+// Focused key target getter (the Symmetric Getter/Setter Completeness Law
+// symmetric pair for s_focusedPanel): read by the GfxLoop demand probe to
+// tick the focused Input's caret blink. Null = nothing focused (safe
+// default per the Cold-Strict, Hot-Minimal Validation Law).
+Panel *Darling_getFocusedPanel(void) {
+    return s_focusedPanel;
+}
+
 void Darling_fireFocus(Panel *target, FocusEvent *ev) {
     ;;INCOMPLETE // capture walk root to target, target phase, bubble walk target to root
     if (!target || !ev)
