@@ -20,9 +20,17 @@ bool Dialog_requestClose(Dialog *dialog);
  * ============================================================================
  * Native macOS AppKit bridge establishing the window rendering hierarchy:
  *   NSWindow -> NSVisualEffectView -> CAMetalLayer (mtklayer)
- * where mtklayer is configured with presentsWithTransaction = YES to align
- * drawables atomically with the macOS WindowServer during live resize,
- * minimize, zoom, and restore events.
+ * where mtklayer is the Frame SEAM canvas — the window's SINGLE on-screen
+ * CAMetalLayer (the Window Compositing Layer Order Law, managed exception
+ * per the Conflict Triage Law): the seam pass composites the retained board
+ * images and presents on demand. It is configured with
+ * presentsWithTransaction = YES to align drawables atomically with the
+ * macOS WindowServer during live resize, minimize, zoom, and restore
+ * events, and with the Native Pixel Law contract: contentsScale mirrors
+ * the backing scale factor and drawableSize is set in native hardware
+ * pixels, re-chased on every resized step (frameCocoaResizeHook). The
+ * layer frame tracks the window natively via autoresizingMask, so resize
+ * never waits on layout.
  *
  * FUNCTION REGISTRY:
  * ----------------------------------------------------------------------------
@@ -33,8 +41,32 @@ bool Dialog_requestClose(Dialog *dialog);
  *   - Frame_platformAttach(frame)
  *   - Frame_platformDetach(frame)
  *   - Frame_platformSyncTransaction(frame)
+ *
+ * Private:
+ *   - frameCocoaResizeHook(userdata) (static) : WindowResizeRenderFn seam —
+ *     re-chases drawableSize in native px (Native Pixel Law) and forwards
+ *     to Frame_resize; runs per drag step on thread 0.
+ *   - frameCocoaOnResized/OnMinimized/OnRestored/OnZoom/... (static) :
+ *     WindowEvent bridge callbacks.
+ *   - seamLayerOf(frame) (static) : resolves the seam CAMetalLayer from
+ *     frame.nativeView (NSView layer or bare CAMetalLayer).
  * ============================================================================
  */
+
+// The seam CAMetalLayer: the window's single on-screen layer (the Frame
+// seam canvas — boards are retained offscreen VkLayer targets). Resolves
+// from frame.nativeView, which is the NSVisualEffectView when blur is on,
+// else the bare CAMetalLayer.
+static CAMetalLayer *seamLayerOf(Frame *frame) {
+    if (frame == nullptr || (*frame).nativeView == nullptr)
+        return nullptr;
+    id obj = (__bridge id) (*frame).nativeView;
+    if ([obj isKindOfClass:[NSView class]])
+        return (CAMetalLayer*) [(NSView*) obj layer];
+    if ([obj isKindOfClass:[CAMetalLayer class]])
+        return (CAMetalLayer*) obj;
+    return nullptr;
+}
 
 static void frameCocoaResizeHook(void *userdata) {
     Frame *frame = (Frame*) userdata;
@@ -43,6 +75,24 @@ static void frameCocoaResizeHook(void *userdata) {
 
     int w = Window_width((*frame).window);
     int h = Window_height((*frame).window);
+    if (w <= 0 || h <= 0)
+        return;
+
+    // Native Pixel Law: chase drawableSize in native hardware pixels from
+    // the live bounds + backing scale factor, BEFORE layout runs — the
+    // swapchain extent must match the screen every drag step (the
+    // Continuous Real-Time Live Resize Law); the layer frame itself tracks
+    // the window natively (autoresizingMask set at attach).
+    CAMetalLayer *seam = seamLayerOf(frame);
+    if (seam != nil) {
+        NSWindow *nsWindow = (*frame).window ? (__bridge NSWindow*) Window_nativeHandle((*frame).window) : nil;
+        CGFloat scale = nsWindow != nil ? [nsWindow backingScaleFactor] : 1.0;
+        if (scale <= 0.0)
+            scale = 1.0;
+        [seam setContentsScale:scale];
+        [seam setDrawableSize:CGSizeMake((CGFloat) w * scale, (CGFloat) h * scale)];
+    }
+
     Frame_resize(frame, w, h);
 }
 
@@ -156,6 +206,16 @@ void FrameCocoa_attach(Frame *frame) {
         metalLayer.bounds = bounds;
         metalLayer.frame = bounds;
         metalLayer.autoresizingMask = kCALayerWidthSizable | kCALayerHeightSizable;
+        // Native Pixel Law: contentsScale mirrors the backing scale factor
+        // and drawableSize is set in native hardware pixels at attach —
+        // bounds (logical points) x scale. The resize hook re-chases both
+        // per drag step; the swapchain always matches the screen 1:1.
+        CGFloat backingScale = [nsWindow backingScaleFactor];
+        if (backingScale <= 0.0)
+            backingScale = 1.0;
+        metalLayer.contentsScale = backingScale;
+        metalLayer.drawableSize = CGSizeMake(bounds.size.width * backingScale,
+                                             bounds.size.height * backingScale);
 
         if ((*frame).hasVisualEffect) {
             NSVisualEffectView *vfx = [[NSVisualEffectView alloc] initWithFrame:bounds];
