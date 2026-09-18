@@ -3,6 +3,9 @@
 #include "annotation/overview.h"
 #include "darling/dialog/dialog.h"
 #include "darling/panel/panel.h"
+#include "darling/compositor.h"
+#include "graphvex/graphics_loop.h"
+#include "event/bridge.h"
 #include "input/key_map.h"
 #include "kernel/application.h"
 #include "nio/mem.h"
@@ -39,10 +42,10 @@
  *   bool hasVisualEffect;                         // NSVisualEffectView vibrancy
  *   int visualEffectMaterial;                     // FrameVisualEffectMaterial
  *   bool presentsWithTransaction;                 // Atomic presentation flag
+ *   uint32_t presentedFrames;                       // Confirmed seam presents (infancy gate)
  *   int width;                                    // Pixel width
  *   int height;                                   // Pixel height
  *   bool inLiveResize;                            // Drag-resize active
- *   uint32_t presentedFrames;                       // Confirmed seam presents (infancy gate)
  *   bool isMinimized;                             // Window miniaturized
  *   bool isZoomed;                                // Window zoomed
  *   FrameFunction *functions;                     // Master-arena grown slot table
@@ -227,10 +230,10 @@ bool Frame_init(Window *win, void *graphics, Frame *frame) {
     (*frame).hasVisualEffect = false;
     (*frame).visualEffectMaterial = FRAME_MATERIAL_HUD_WINDOW;
     (*frame).presentsWithTransaction = true;
+    (*frame).presentedFrames = 0;
     (*frame).chromeMode = FRAME_DECORATED;
     (*frame).width = win ? Window_width(win) : 800;
     (*frame).height = win ? Window_height(win) : 600;
-    (*frame).presentedFrames = 0;
     (*frame).inLiveResize = false;
     (*frame).isMinimized = false;
     (*frame).isZoomed = false;
@@ -359,6 +362,31 @@ bool Frame_removeFrameHandler(Frame *frame, Application *app) {
         return true;
     }
     return false;
+}
+
+bool Darling_bridge(Frame *frame, Application *app) {
+    if (frame == nullptr || app == nullptr)
+        return false;
+
+    Window *window = Frame_getWindow(frame);
+    if (!window)
+        return false;
+
+    // 1. Initialize Vulkan/Metal compositor and board/pane flight
+    Darling_initCompositor(frame);
+
+    // 2. Attach UI event bridge to the root panel or content pane
+    Panel *target = (*frame).contentPane ? (*frame).contentPane : (*frame).rootPanel;
+    if (target)
+        Darling_bridgeAttach(target);
+    Darling_bridgeSetWindow(window);
+
+    // 3. Connect frame to the Application manifest and show window
+    Frame_addFrameHandler(frame, app);
+    Application_addWindow(app, window);
+    Frame_show(frame);
+
+    return true;
 }
 
 bool Frame_addLayer(Frame *frame, uint32_t width, uint32_t height, FrameLayer **outLayer) {
@@ -780,8 +808,10 @@ void Frame_show(Frame *frame) {
     if (frame == nullptr)
         return;
     (*frame).visible = true;
-    if ((*frame).window != nullptr)
+    if ((*frame).window != nullptr) {
         Window_show((*frame).window);
+        GraphicsLoop_markDirty(GraphicsLoop_default(), (*frame).window);
+    }
     Frame_render(frame);
     Frame_present(frame);
 }

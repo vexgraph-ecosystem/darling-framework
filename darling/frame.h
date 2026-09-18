@@ -131,6 +131,10 @@ bool Frame_addLayer(Frame *frame, uint32_t width, uint32_t height, FrameLayer **
 bool Frame_addFrameHandler(Frame *frame, Application *app);
 bool Frame_removeFrameHandler(Frame *frame, Application *app);
 
+// Unified Darling Bridge: one single bridge call connecting compositor, event bridge,
+// window linkage, and application frame handler, showing the frame ready for Kernel_run.
+bool Darling_bridge(Frame *frame, Application *app);
+
 // Platform hooks for AppKit / window_cocoa.m integration
 void Frame_platformAttach(Frame *frame);
 void Frame_platformDetach(Frame *frame);
