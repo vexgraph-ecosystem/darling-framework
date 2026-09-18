@@ -89,6 +89,7 @@ typedef struct Frame {
     bool hasVisualEffect;       // NSVisualEffectView vibrancy enabled
     int visualEffectMaterial;   // FrameVisualEffectMaterial
     bool presentsWithTransaction; // CAMetalLayer presentsWithTransaction = YES
+    uint32_t presentedFrames;     // Confirmed seam presents since attach (infancy gate)
 
     int width;
     int height;

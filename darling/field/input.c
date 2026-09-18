@@ -47,6 +47,22 @@
  *   bool focused;            // Focus-request flag (DOWN sets, dispatch consumes later)
  *   int32_t cursor;          // Caret offset into text
  *   Font *font;              // Optional SDF font descriptor (borrowed)
+ *   --- Typography & Native Raster Styling (owner fields, continued) ---
+ *   float fontSize;          // Font size in points (default 13.0)
+ *   uint32_t textColor;      // Text color packed ARGB (default white)
+ *   uint32_t placeholderColor; // Placeholder color packed ARGB
+ *   TextAlign align;         // LEFT/CENTER/RIGHT alignment
+ *   float spacingWidth;      // Kerning/tracking delta in points
+ *   bool ligatures;          // Standard typography ligatures (default true)
+ *   TextSelect select;       // Text selection state (anchor/active edges)
+ *   uint32_t selectionColor; // Highlight fill (default 0x662563EB)
+ *   int32_t rasterTex;       // Cached text raster texture (-1 = none)
+ *   int rasterW;             // Raster width in px
+ *   int rasterH;             // Raster height in px
+ *   float rasterBacking;     // Backing scale the raster was baked at
+ *   bool rasterDirty;        // Raster needs re-bake
+ *   float *glyphX;           // Per-byte pen offsets (len+1, arena-owned)
+ *   int32_t glyphN;          // Glyph table length
  *   --- Caret part (views only) ---
  *   int caretMode;           // BLINK/SOLID/GLIDE (default BLINK)
  *   uint32_t caretColor;     // Packed 0xAARRGGBB (default white)
@@ -90,6 +106,15 @@
  *   - Input_setOnSubmit(inp, fn)
  *   - Input_setCtx(inp, ctx)
  *   - Input_setMeasurer(inp, fn, ctx)
+ *   - Input_setFontSize(inp, size)
+ *   - Input_setTextColor(inp, color)
+ *   - Input_setPlaceholderColor(inp, color)
+ *   - Input_setTextAlign(inp, align)
+ *   - Input_setSpacingWidth(inp, width)
+ *   - Input_setLigatures(inp, ligatures)
+ *   - Input_setSelection(inp, start, end)
+ *   - Input_setSelectionColor(inp, color)
+ *   - Input_setSelectedText(inp, text)
  *   - Input_free(inp)
  *
  * Caret part:
@@ -100,7 +125,9 @@
  *   - Input_caret_setView(inp, view)
  *   - Input_caret_setOpacity(inp, opacity)
  *   - Input_caret_placeView(inp, view, centerY)
- *   - Input_caret_tick(inp, dt)
+ *   - Input_caret_tick(inp, dt) (depth-1 proving element: blink flip marks
+ *     ONLY the Input child dirty — never the board/tree — so Loop1
+ *     re-collages the tiny child target at ~2Hz)
  *
  * Getters:
  *   - Input_getText(inp)
@@ -111,6 +138,15 @@
  *   - Input_isFocused(inp)
  *   - Input_getCursor(inp)
  *   - Input_getFont(inp)
+ *   - Input_getFontSize(inp)
+ *   - Input_getTextColor(inp)
+ *   - Input_getPlaceholderColor(inp)
+ *   - Input_getTextAlign(inp)
+ *   - Input_getSpacingWidth(inp)
+ *   - Input_hasLigatures(inp)
+ *   - Input_getSelection(inp, outStart, outEnd)
+ *   - Input_getSelectionColor(inp)
+ *   - Input_getSelectedText(inp)
  *   - Input_getOnChange(inp)
  *   - Input_getOnSubmit(inp)
  *   - Input_getCtx(inp)
@@ -835,6 +871,15 @@ void Input_caret_placeView(Input *inp, Panel *view, float centerY) {
 }
 
 void Input_caret_tick(Input *inp, double dt) {
+    // Depth-1 proving element (depth-1 collage doctrine): the caret stays
+    // painted inside the Input child's own retained flight target at local
+    // coords (no cross-loop geometry — the board pass only collages the
+    // child's published frame). A blink phase change marks ONLY the Input
+    // child dirty via markDirty (Container_markDirty on the child's own
+    // base) — never the board, never the tree — so a blink re-renders a tiny
+    // target at ~2Hz and Loop1 re-collages. No path from here reaches
+    // Panel_markTreeDirty or board dirty; board demand arms one hop through
+    // Darling_propagatePaneDirty (child publish -> board dirty).
     if (!inp || dt <= 0.0)
         return;
     if ((*inp).caretMode == INPUT_CARET_BLINK) {

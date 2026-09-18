@@ -2,6 +2,8 @@
 // typedef colliding with our struct Collection (collection.h).
 #include <stddef.h>
 #include <stdatomic.h>
+#include <stdio.h>
+#include <stdlib.h>
 #include "oop/type.h"
 #include "nio/mem.h"
 #include "lang/vec4.h"
@@ -35,14 +37,28 @@
  *     (boards are RETAINED OFFSCREEN VkLayer targets — fixed pixel size,
  *     never a CALayer, never in the window tree; the Frame seam canvas is
  *     the window's single on-screen layer per the Window Compositing
- *     Layer Order Law)
- *   - Darling_attachLayers(window, contentPanel, width, height)
+ *     Layer Order Law; board setSize idle-gated via
+ *     Darling_compositorIdleForResize per the Pane-of-Glass Law, first-time
+ *     PanelCocoa_newBoard ungated; GRAPHICS_VK_STATS-gated
+ *     vk:board-resize log on true drift only)
+ *   - Darling_attachLayers(window, boardPanel, width, height)
+ *     (depth-1 collage doctrine: EVERY first-generation child of a board
+ *     owns a retained offscreen VkLayer flight target at fixed pixel size —
+ *     scenes and plain UI alike (Input included); DIRECT-pane children keep
+ *     their exception per the Conflict Triage Law and are skipped here.
+ *     Children iterated via Panel_childCount, never hardcoded counts, per
+ *     the Dynamic Scalability & Anti-Hardcoding Law; dirty=true on register
+ *     per the Pane-of-Glass Law; GRAPHICS_VK_STATS-gated vk:child-resize
+ *     log on true drift only, old extent via VkLayer_extent)
  *   - Darling_propagatePaneDirty(window, scenePane, contentPanel)
- *     (Panel_isTreeDirty -> VkPane_markDirty per DIRECT chain; COMPOSITED
- *     scenes re-arm their VkLayer from owner-subtree dirt (demand signal;
- *     wall-clock handlers advance on re-render, registration demands the
- *     first render); boards re-arm their VkLayer on tree dirt; bool
- *     stores only, safe on the worker mid-drag)
+ *     (Panel_isTreeDirty -> VkPane_markDirty per DIRECT chain; retained
+ *     child layers re-arm from owner-subtree dirt and arm board demand one
+ *     hop on child PUBLISH (VkLayer_presentCount delta against a per-board
+ *     snapshot — dirt dies on publish inside VkLayer_visit, so dirt is never
+ *     the publish signal); content-child demand arms ONLY the content board
+ *     and scene demand arms ONLY from the scene board's own children, never
+ *     cross-talk; boards re-arm their VkLayer on tree dirt; bool stores only,
+ *     safe on the worker mid-drag)
  *   - TextCore_backingScale(void)
  *   - for(i++)
  *   - PanelCocoa_fromPanel(panel)
@@ -124,6 +140,12 @@ int Darling_attachPanelBoards(Window *window, Panel *scenePane, Panel *contentPa
     extern void *PanelCocoa_fromPanel(void *panel);
     extern void *PanelCocoa_newBoard(void *panel, int w, int h);
     extern bool PanelCocoa_setSize(void *pc, int w, int h);
+    extern int PanelCocoa_width(const void *pc);
+    extern int PanelCocoa_height(const void *pc);
+    extern bool Darling_compositorIdleForResize(void);
+    static int s_boardDiag = -1;
+    if (s_boardDiag < 0)
+        s_boardDiag = getenv("GRAPHICS_VK_STATS") != nullptr || getenv("ANTI_VK_STATS") != nullptr;
     int done = 0;
     for (int i = 0; i < 2; i++) {
         Panel *board = boards[i];
@@ -134,6 +156,17 @@ int Darling_attachPanelBoards(Window *window, Panel *scenePane, Panel *contentPa
             extern bool PanelCocoa_isBoard(const void *pc);
             if (!PanelCocoa_isBoard(pc))
                 continue;
+            // Idle-gate parity with the child path (Darling_attachLayers):
+            // a board resize rebuilds flight targets the composite pass may
+            // still reference — defer to a quiescent tick per the
+            // Pane-of-Glass Law and retry next tick. First-time
+            // PanelCocoa_newBoard below stays ungated.
+            if (!Darling_compositorIdleForResize())
+                continue;
+            int oldW = PanelCocoa_width(pc);
+            int oldH = PanelCocoa_height(pc);
+            if (s_boardDiag && (oldW != pxW || oldH != pxH))
+                fprintf(stderr, "vk:board-resize %s %dx%d -> %dx%d\n", i == 0 ? "scene" : "content", oldW, oldH, pxW, pxH);
             if (PanelCocoa_setSize(pc, pxW, pxH))
                 done++;
         } else if (PanelCocoa_newBoard(board, pxW, pxH)) {
@@ -199,16 +232,22 @@ int Darling_attachPanes(Window *window, Panel *contentPanel, int width, int heig
     return attached;
 }
 
-// Attach retained offscreen VkLayer targets to the COMPOSITED scene children
-// of a content panel (Rule 14 default: a scene keeps a fixed pixel-size
-// flight target rendered by the present worker; the canvas samples it as a
-// textured quad). DIRECT scenes own Metal panes and are skipped. A layer's
-// pixel size is FIXED at register time — VkLayer_resize is a no-op when the
-// size is unchanged, so fixed scenes never rebuild on window resize (live
-// anchoring is exactly as panes: the composite rect tracks the anchor). The
-// PANEL itself is the layer's owner handle, so VkLayer_find(child) resolves
-// the composite pass's child -> layer index. Returns the number of layers
-// registered or resized.
+// Attach retained offscreen VkLayer targets to the FIRST-GENERATION children
+// of a board (depth-1 collage doctrine: retained presentables are exactly the
+// scene panel, the content panel, and their first-generation children; the
+// board pass collages each child's last-published frame and paints nothing
+// else; depth below 1 is each child's private affair). Scenes and plain UI
+// alike (Input included) get a fixed pixel-size flight target rendered by the
+// present worker; the canvas samples it as a textured quad. DIRECT children
+// (Metal pane + own swapchain) keep their exception per the Conflict Triage
+// Law and are skipped here. A layer's pixel size is FIXED at register time —
+// VkLayer_resize is a no-op when the size is unchanged, so fixed children
+// never rebuild on window resize (live anchoring: the composite rect tracks
+// the anchor). The PANEL itself is the layer's owner handle, so
+// VkLayer_find(child) resolves the composite pass's child -> layer index.
+// Children are iterated via Panel_childCount — never hardcoded counts — per
+// the Dynamic Scalability & Anti-Hardcoding Law. Returns the number of
+// layers registered or resized.
 int Darling_attachLayers(Window *window, Panel *contentPanel, int width, int height) {
     if (!window || !contentPanel)
         return 0;
@@ -219,22 +258,32 @@ int Darling_attachLayers(Window *window, Panel *contentPanel, int width, int hei
     float scale = TextCore_backingScale();
     if (scale <= 0.0f)
         scale = 1.0f;
+    extern void *PanelCocoa_fromPanel(void *panel);
+    extern bool PanelCocoa_isMetal(const void *pc);
+    static int s_childDiag = -1;
+    if (s_childDiag < 0)
+        s_childDiag = getenv("GRAPHICS_VK_STATS") != nullptr || getenv("ANTI_VK_STATS") != nullptr;
 
     for (size_t i = 0; i < childCount; i++) {
         Panel *child = Panel_getChild(contentPanel, i);
         if (!child)
             continue;
 
+        // DIRECT-pane exception (the Conflict Triage Law): a child with its
+        // own CAMetalLayer + swapchain renders and presents its own chain —
+        // never a retained collage target. Same dirty/publish contract.
+        void *childPc = PanelCocoa_fromPanel(child);
+        if (childPc && PanelCocoa_isMetal(childPc))
+            continue;
         uint64_t childType = Memory_type(child);
         bool isScene = (childType == TYPE_SCENE3D_SINGLETON || childType == TYPE_SCENE2D_SINGLETON
                         || childType == TYPE_SCENE_SINGLETON);
-        if (!isScene)
-            continue;
-        if (Scene_getPresentMode((Scene*) child) != SCENE_PRESENT_COMPOSITED)
+        if (isScene && Scene_getPresentMode((Scene*) child) == SCENE_PRESENT_DIRECT)
             continue;
 
         Vec4 rect;
-        Container_resolve(&(*child).base, 0.0f, 0.0f, (float) width, (float) height, &rect);
+        Container *childBase = &(*child).base;
+        Container_resolve(childBase, 0.0f, 0.0f, (float) width, (float) height, &rect);
         int allocW = (int) (rect.z * scale + 0.5f);
         int allocH = (int) (rect.w * scale + 0.5f);
         if (allocW <= 0 || allocH <= 0 || allocW > 16384 || allocH > 16384)
@@ -249,8 +298,15 @@ int Darling_attachLayers(Window *window, Panel *contentPanel, int width, int hei
             // same gate panes and textures honor. Unchanged sizes would no-op
             // inside resize; being gated they just wait a tick — harmless.
             extern bool Darling_compositorIdleForResize(void);
-            if (Darling_compositorIdleForResize() && VkLayer_resize(index, allocW, allocH))
-                attached++;
+            if (Darling_compositorIdleForResize()) {
+                VkExtent2D cur = VkLayer_extent(index);
+                int oldW = (int) cur.width;
+                int oldH = (int) cur.height;
+                if (s_childDiag && (oldW != allocW || oldH != allocH))
+                    fprintf(stderr, "vk:child-resize %s rect=%.0f,%.0f,%.0f,%.0f %dx%d -> %dx%d\n", isScene ? "scene" : "ui", rect.x, rect.y, rect.z, rect.w, oldW, oldH, allocW, allocH);
+                if (VkLayer_resize(index, allocW, allocH))
+                    attached++;
+            }
         } else if (VkLayer_register(allocW, allocH, child) >= 0) {
             attached++;
         }
@@ -290,37 +346,78 @@ void Darling_propagatePaneDirty(Window *window, Panel *scenePane, Panel *content
     extern int PanelCocoa_chain(const void *pc);
     extern void VkPane_markDirty(int index, bool dirty);
 
+    // Per-board snapshot of depth-1 child publish counts (one-hop on
+    // publish): the summed VkLayer_presentCount over each board's retained
+    // children at the last pass — index 0 scene, index 1 content.
+    // VkLayer_visit clears child dirt ON PUBLISH, so the publish signal dies
+    // the same tick it is born when read as dirt; the present-count delta
+    // survives it (presentCount bumps on every publish).
+    static uint64_t s_boardChildPublish[2] = { 0u, 0u };
+
+    // Depth-1 retained children of the CONTENT board (depth-1 collage
+    // doctrine): owner-subtree dirt re-arms the child's own flight target; a
+    // child PUBLISH since the last pass (present-count delta) arms
+    // content-board demand one hop so the board re-collages the fresh frame
+    // in the same-tick visit (next tick at the latest). DIRECT-pane children
+    // keep their exception (the Conflict Triage Law): own chain, own
+    // present, same dirty/publish contract — they never arm the board.
     size_t childCount = Panel_childCount(contentPanel);
-    bool anySceneDirty = false;
+    bool anyContentDemand = false;
+    uint64_t contentPublish = 0u;
     for (size_t i = 0; i < childCount; i++) {
         Panel *child = Panel_getChild(contentPanel, i);
         if (!child)
             continue;
-        uint64_t childType = Memory_type(child);
-        bool isScene = (childType == TYPE_SCENE3D_SINGLETON || childType == TYPE_SCENE2D_SINGLETON
-                        || childType == TYPE_SCENE_SINGLETON);
-        // COMPOSITED scenes own no Metal pane: their retained offscreen
-        // target re-arms only from owner-subtree dirt (the demand signal —
-        // owners mark once per motion burst; the latched dirt then buys
-        // full-rate re-renders until the tick clears it, so animation
-        // survives a stalled tick and rests on pause).
-        if (isScene && Scene_getPresentMode((Scene*) child) == SCENE_PRESENT_COMPOSITED) {
-            if (isScene || Panel_isTreeDirty(child)) {
-                int layer = VkLayer_find(child);
-                if (layer >= 0) {
-                    VkLayer_markDirty(layer, true);
-                    anySceneDirty = true;
-                }
+        int childLayer = VkLayer_find(child);
+        if (childLayer >= 0) {
+            if (Panel_isTreeDirty(child)) {
+                VkLayer_markDirty(childLayer, true);
+                anyContentDemand = true;
+            } else if (VkLayer_isDirty(childLayer)) {
+                anyContentDemand = true;
             }
+            contentPublish += VkLayer_presentCount(childLayer);
             continue;
         }
         void *pc = PanelCocoa_fromPanel(child);
         if (!pc || !PanelCocoa_isMetal(pc))
             continue;
-        if (isScene || Panel_isTreeDirty(child)) {
+        if (Panel_isTreeDirty(child)) {
             int chain = PanelCocoa_chain(pc);
             if (chain >= 0)
                 VkPane_markDirty(chain, true);
+        }
+    }
+    if (contentPublish != s_boardChildPublish[1]) {
+        anyContentDemand = true;
+        s_boardChildPublish[1] = contentPublish;
+    }
+
+    // Scene board arms ONLY from its own children — never content's. The
+    // scene board owns no depth-1 layers today, so this loop is the forward
+    // path: when it gains them they re-arm here under the same contract.
+    bool anySceneDemand = false;
+    uint64_t scenePublish = 0u;
+    if (scenePane) {
+        size_t sceneCount = Panel_childCount(scenePane);
+        for (size_t i = 0; i < sceneCount; i++) {
+            Panel *child = Panel_getChild(scenePane, i);
+            if (!child)
+                continue;
+            int childLayer = VkLayer_find(child);
+            if (childLayer < 0)
+                continue;
+            if (Panel_isTreeDirty(child)) {
+                VkLayer_markDirty(childLayer, true);
+                anySceneDemand = true;
+            } else if (VkLayer_isDirty(childLayer)) {
+                anySceneDemand = true;
+            }
+            scenePublish += VkLayer_presentCount(childLayer);
+        }
+        if (scenePublish != s_boardChildPublish[0]) {
+            anySceneDemand = true;
+            s_boardChildPublish[0] = scenePublish;
         }
     }
 
@@ -335,7 +432,8 @@ void Darling_propagatePaneDirty(Window *window, Panel *scenePane, Panel *content
         int chain = PanelCocoa_chain(bpc);
         if (chain < 0)
             continue;
-        bool boardDirty = Panel_isTreeDirty(board) || Window_isLiveResizing(window) || anySceneDirty;
+        bool childDemand = (i == 0) ? anySceneDemand : anyContentDemand;
+        bool boardDirty = Panel_isTreeDirty(board) || Window_isLiveResizing(window) || childDemand;
         if (boardDirty)
             VkLayer_markDirty(chain, true);
     }

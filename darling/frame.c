@@ -42,6 +42,7 @@
  *   int width;                                    // Pixel width
  *   int height;                                   // Pixel height
  *   bool inLiveResize;                            // Drag-resize active
+ *   uint32_t presentedFrames;                       // Confirmed seam presents (infancy gate)
  *   bool isMinimized;                             // Window miniaturized
  *   bool isZoomed;                                // Window zoomed
  *   FrameFunction *functions;                     // Master-arena grown slot table
@@ -229,6 +230,7 @@ bool Frame_init(Window *win, void *graphics, Frame *frame) {
     (*frame).chromeMode = FRAME_DECORATED;
     (*frame).width = win ? Window_width(win) : 800;
     (*frame).height = win ? Window_height(win) : 600;
+    (*frame).presentedFrames = 0;
     (*frame).inLiveResize = false;
     (*frame).isMinimized = false;
     (*frame).isZoomed = false;
