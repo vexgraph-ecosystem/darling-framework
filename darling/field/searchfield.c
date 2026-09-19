@@ -18,6 +18,9 @@
  * ============================================================================
  * Search input composite with search icon, clear button, and shortcut badge.
  * Wraps an inner Input component and coordinates search events.
+ *
+ * Ordered part pipeline: background (+ inner layout) -> image (icon + badge)
+ * -> border. Inner text/caret paint via the child Input's own pipeline.
  * ============================================================================
  */
 
@@ -36,17 +39,38 @@ static void onInnerChange(void *ctx) {
     Container_markDirty(&(*bp).base);
 }
 
-static void SearchField_renderFn(Panel *panel, void *renderer, void *cmdBuffer, float surfaceW, float surfaceH,
-                                float x, float y, float w, float h) {
+// Ordered part pipeline: background (+ inner layout) -> image (icon + badge)
+// -> border. Icon/badge sit inside the padded content area and never touch
+// the 1px edge, so the canonical border-over-content order is pixel-identical
+// to the legacy background/border/icon sequence.
+
+// Stage 0: field fill + inner Input layout (layout-in-paint preserved;
+// future work moves this to the layout pass next to Container_resolve).
+static bool searchPaintBackground(Panel *panel, void *renderer, void *cmdBuffer,
+                                  float surfaceW, float surfaceH,
+                                  float x, float y, float w, float h) {
     SearchField *sf = (SearchField*) panel;
     (void) renderer;
-    if (!sf || w <= 0.0f || h <= 0.0f)
-        return;
-    float op = Container_getOpacity(&(*panel).base);
+    if (!sf || !cmdBuffer)
+        return false;
+    if (w <= 0.0f || h <= 0.0f)
+        return false;
+    Container *c = &(*panel).base;
+    float op = Container_getOpacity(c);
     if (op <= 0.0f)
-        return;
-
-    // Background
+        return false;
+    Input *field = (*sf).input;
+    if (field) {
+        char *keys = (*sf).shortcut;
+        float rightPad = (keys && keys[0] != '\0') ? 48.0f : 28.0f;
+        float inW = w - 28.0f - rightPad;
+        if (inW < 10.0f)
+            inW = 10.0f;
+        Panel *inner = &(*field).base;
+        Container *ic = &(*inner).base;
+        Container_setLocation(ic, 28.0f, 0.0f);
+        Container_setSize(ic, inW, h);
+    }
     uint32_t bg = Panel_getBackgroundColor(panel);
     if ((bg >> 24) == 0)
         bg = 0xFF18181Bu;
@@ -54,50 +78,73 @@ static void SearchField_renderFn(Panel *panel, void *renderer, void *cmdBuffer, 
     float bgc = ((bg >> 8) & 0xFF) / 255.0f;
     float bb = (bg & 0xFF) / 255.0f;
     float ba = ((bg >> 24) & 0xFF) / 255.0f * op;
+    if (ba <= 0.0f)
+        return false;
     Vk_fillRect(cmdBuffer, surfaceW, surfaceH, x, y, w, h, br, bgc, bb, ba);
+    return true;
+}
 
-    // Border
-    bool focused = sf->input && Input_isFocused(sf->input);
-    uint32_t borderColor = focused ? 0xFF3B82F6u : 0xFF3F3F46u;
-    float b_r = ((borderColor >> 16) & 0xFF) / 255.0f;
-    float b_g = ((borderColor >> 8) & 0xFF) / 255.0f;
-    float b_b = (borderColor & 0xFF) / 255.0f;
-    float b_a = ((borderColor >> 24) & 0xFF) / 255.0f * op;
-    Vk_fillRect(cmdBuffer, surfaceW, surfaceH, x, y, w, 1.0f, b_r, b_g, b_b, b_a);
-    Vk_fillRect(cmdBuffer, surfaceW, surfaceH, x, y + h - 1.0f, w, 1.0f, b_r, b_g, b_b, b_a);
-    Vk_fillRect(cmdBuffer, surfaceW, surfaceH, x, y, 1.0f, h, b_r, b_g, b_b, b_a);
-    Vk_fillRect(cmdBuffer, surfaceW, surfaceH, x + w - 1.0f, y, 1.0f, h, b_r, b_g, b_b, b_a);
-
-    // Layout inner input
-    if (sf->input) {
-        float rightPad = (sf->shortcut && sf->shortcut[0] != '\0') ? 48.0f : 28.0f;
-        float inW = w - 28.0f - rightPad;
-        if (inW < 10.0f) inW = 10.0f;
-        Container_setLocation(&(*sf->input).base.base, 28.0f, 0.0f);
-        Container_setSize(&(*sf->input).base.base, inW, h);
-    }
-
-    // Leading search icon: draw magnifying glass vector
+// Stage 1: leading magnifier vector + trailing shortcut badge.
+static bool searchPaintImage(Panel *panel, void *renderer, void *cmdBuffer,
+                             float surfaceW, float surfaceH,
+                             float x, float y, float w, float h) {
+    SearchField *sf = (SearchField*) panel;
+    (void) renderer;
+    if (!sf || !cmdBuffer)
+        return false;
+    if (w <= 0.0f || h <= 0.0f)
+        return false;
+    Container *c = &(*panel).base;
+    float op = Container_getOpacity(c);
+    if (op <= 0.0f)
+        return false;
     float iconCx = x + 14.0f;
     float iconCy = y + h * 0.5f + 1.0f;
     float iconR = 4.0f;
     float iconCol_r = 0.6f, iconCol_g = 0.6f, iconCol_b = 0.65f, iconCol_a = 0.9f * op;
-    // Glass circle outline (approximate with rects)
     Vk_fillRect(cmdBuffer, surfaceW, surfaceH, iconCx - iconR, iconCy - iconR, iconR * 2.0f, 1.0f, iconCol_r, iconCol_g, iconCol_b, iconCol_a);
     Vk_fillRect(cmdBuffer, surfaceW, surfaceH, iconCx - iconR, iconCy + iconR, iconR * 2.0f, 1.0f, iconCol_r, iconCol_g, iconCol_b, iconCol_a);
     Vk_fillRect(cmdBuffer, surfaceW, surfaceH, iconCx - iconR, iconCy - iconR, 1.0f, iconR * 2.0f, iconCol_r, iconCol_g, iconCol_b, iconCol_a);
     Vk_fillRect(cmdBuffer, surfaceW, surfaceH, iconCx + iconR, iconCy - iconR, 1.0f, iconR * 2.0f, iconCol_r, iconCol_g, iconCol_b, iconCol_a);
-    // Handle
     Vk_fillRect(cmdBuffer, surfaceW, surfaceH, iconCx + 3.0f, iconCy - 5.0f, 3.0f, 1.5f, iconCol_r, iconCol_g, iconCol_b, iconCol_a);
-
-    // Trailing shortcut badge
-    if (sf->shortcut && sf->shortcut[0] != '\0') {
+    if ((*sf).shortcut && (*sf).shortcut[0] != '\0') {
         float badgeW = 32.0f;
         float badgeH = 18.0f;
         float badgeX = x + w - badgeW - 8.0f;
         float badgeY = y + (h - badgeH) * 0.5f;
         Vk_fillRect(cmdBuffer, surfaceW, surfaceH, badgeX, badgeY, badgeW, badgeH, 0.2f, 0.2f, 0.23f, op);
     }
+    return true;
+}
+
+// Stage 3: focused/idle stroke over content.
+static bool searchPaintBorder(Panel *panel, void *renderer, void *cmdBuffer,
+                              float surfaceW, float surfaceH,
+                              float x, float y, float w, float h) {
+    SearchField *sf = (SearchField*) panel;
+    (void) renderer;
+    if (!sf || !cmdBuffer)
+        return false;
+    if (w <= 0.0f || h <= 0.0f)
+        return false;
+    Container *c = &(*panel).base;
+    float op = Container_getOpacity(c);
+    if (op <= 0.0f)
+        return false;
+    Input *inner = (*sf).input;
+    bool focused = inner && Input_isFocused(inner);
+    uint32_t borderColor = focused ? 0xFF3B82F6u : 0xFF3F3F46u;
+    float b_r = ((borderColor >> 16) & 0xFF) / 255.0f;
+    float b_g = ((borderColor >> 8) & 0xFF) / 255.0f;
+    float b_b = (borderColor & 0xFF) / 255.0f;
+    float b_a = ((borderColor >> 24) & 0xFF) / 255.0f * op;
+    if (b_a <= 0.0f)
+        return false;
+    Vk_fillRect(cmdBuffer, surfaceW, surfaceH, x, y, w, 1.0f, b_r, b_g, b_b, b_a);
+    Vk_fillRect(cmdBuffer, surfaceW, surfaceH, x, y + h - 1.0f, w, 1.0f, b_r, b_g, b_b, b_a);
+    Vk_fillRect(cmdBuffer, surfaceW, surfaceH, x, y, 1.0f, h, b_r, b_g, b_b, b_a);
+    Vk_fillRect(cmdBuffer, surfaceW, surfaceH, x + w - 1.0f, y, 1.0f, h, b_r, b_g, b_b, b_a);
+    return true;
 }
 
 static void markDirty(SearchField *self) {
@@ -133,7 +180,11 @@ SearchField *SearchField_0(void) {
         Panel_addContainer(&(*sf).base, &(*sf).input->base);
     }
 
-    Panel_setRenderHandler(&(*sf).base, SearchField_renderFn);
+    Panel *sp = &(*sf).base;
+    Panel_setRenderHandler(sp, nullptr);
+    Panel_setBackgroundFn(sp, searchPaintBackground);
+    Panel_setImageFn(sp, searchPaintImage);
+    Panel_setBorderFn(sp, searchPaintBorder);
     return sf;
 }
 
