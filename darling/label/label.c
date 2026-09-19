@@ -76,7 +76,10 @@
  *   - Label_1_parent(parent)
  *
  * Core Functions:
- *   - Label_renderFn(panel, rend, cmd, surfaceW, surfaceH, x, y, w, h) : Draw handler
+ *   - labelPaintText(panel, rend, cmd, ...) : Stage 2 sharp raster / SDF glyphs
+ *     (registered via Panel_setTextFn in Label_0; background stays Panel default)
+ *   - labelPaintHighlight(panel, rend, cmd, ...) : Stage 4 selection overlay
+ *     (registered via Panel_setForegroundFn in Label_0; sharp path only)
  *   - Label_charIndexAt(const label, localX)                           : Byte offset from point (per-glyph table, uniform fallback)
  *   - Label_handlePointer(label, kind, localX, localY, window)         : Pointer event dispatcher
  *   - Label_onPointer(label, ev, window)                               : PointerEvent wrapper
@@ -532,18 +535,12 @@ static bool ensureRaster(Label *lbl) {
 static void drawSdfFallback(Panel *panel, void *cmdBuffer, float surfaceW, float surfaceH,
                             float x, float y, float w, float h) {
     Label *lbl = (Label*) panel;
+    (void) w;
+    (void) h;
     float op = Container_getOpacity(&(*panel).base);
     if (op <= 0.0f)
         return;
-    uint32_t bgColor = Panel_getBackgroundColor(panel);
-    if ((bgColor >> 24) > 0) {
-        float br = ((bgColor >> 16) & 0xFF) / 255.0f;
-        float bg = ((bgColor >> 8) & 0xFF) / 255.0f;
-        float bb = (bgColor & 0xFF) / 255.0f;
-        float ba = ((bgColor >> 24) & 0xFF) / 255.0f * op;
-        if (ba > 0.0f)
-            Vk_fillRect(cmdBuffer, surfaceW, surfaceH, x, y, w, h, br, bg, bb, ba);
-    }
+    // Background is stage 0 (Panel default) — never repainted here.
     if (!(*lbl).text || !(*lbl).font || (*lbl).fontSize <= 0)
         return;
     float cr = (((*lbl).textColor >> 16) & 0xFF) / 255.0f;
@@ -697,24 +694,20 @@ static void drawSelectionOverlay(Label *lbl, void *cmdBuffer, float surfaceW, fl
     Vk_fillRect(cmdBuffer, surfaceW, surfaceH, qx + x0, qy, x1 - x0, qh, br, bgc, bb, ba);
 }
 
-static void Label_renderFn(Panel *panel, void *renderer, void *cmdBuffer, float surfaceW, float surfaceH,
+// Stage 2: sharp raster quad, else SDF per-glyph fallback.
+// Background stays the Panel default (stage 0); selection is stage 4.
+static bool labelPaintText(Panel *panel, void *renderer, void *cmdBuffer,
+                           float surfaceW, float surfaceH,
                            float x, float y, float w, float h) {
     Label *lbl = (Label*) panel;
     (void) renderer;
-    float op = panel ? Container_getOpacity(&(*panel).base) : 1.0f;
+    if (!lbl || !cmdBuffer)
+        return false;
+    float op = Container_getOpacity(&(*panel).base);
     if (op <= 0.0f)
-        return;
-    uint32_t bgColor = Panel_getBackgroundColor(panel);
-    if ((bgColor >> 24) > 0) {
-        float br = ((bgColor >> 16) & 0xFF) / 255.0f;
-        float bgg = ((bgColor >> 8) & 0xFF) / 255.0f;
-        float bb = (bgColor & 0xFF) / 255.0f;
-        float ba = ((bgColor >> 24) & 0xFF) / 255.0f * op;
-        if (ba > 0.0f)
-            Vk_fillRect(cmdBuffer, surfaceW, surfaceH, x, y, w, h, br, bgg, bb, ba);
-    }
-    if (!lbl || !(*lbl).text || (*lbl).text[0] == '\0' || (*lbl).fontSize <= 0.0f)
-        return;
+        return false;
+    if (!(*lbl).text || (*lbl).text[0] == '\0' || (*lbl).fontSize <= 0.0f)
+        return false;
     // Sharp path: one native raster quad, top-left anchored in panel.
     // macOS panels are bottom-up (AppKit): panel origin is bottom-left,
     // so pin quad top to y + h - qh. Falls back to SDF per-glyph below.
@@ -732,13 +725,50 @@ static void Label_renderFn(Panel *panel, void *renderer, void *cmdBuffer, float 
         }
         float qx = x;
         float qy = y + h - qh;
-
         Vk_drawTexture(cmdBuffer, surfaceW, surfaceH, qx, qy, qw, qh, 1.0f, 1.0f, 1.0f, op,
             (*lbl).rasterTex, PICTURE_MODE_FIT, (float) (*lbl).rasterW, (float) (*lbl).rasterH);
-        drawSelectionOverlay(lbl, cmdBuffer, surfaceW, surfaceH, qx, qy, qh, op);
-        return;
+        return true;
     }
     drawSdfFallback(panel, cmdBuffer, surfaceW, surfaceH, x, y, w, h);
+    return true;
+}
+
+// Stage 4: live selection overlay over the stable sharp quad.
+// Sharp path only (matches the pre-split contract: SDF path paints none).
+static bool labelPaintHighlight(Panel *panel, void *renderer, void *cmdBuffer,
+                                float surfaceW, float surfaceH,
+                                float x, float y, float w, float h) {
+    Label *lbl = (Label*) panel;
+    (void) renderer;
+    (void) surfaceW;
+    (void) surfaceH;
+    (void) x;
+    (void) y;
+    (void) w;
+    (void) h;
+    if (!lbl || !cmdBuffer)
+        return false;
+    if (!(*lbl).highlightable)
+        return false;
+    if (!(*lbl).text || (*lbl).text[0] == '\0')
+        return false;
+    if ((*lbl).rasterTex < 0 || (*lbl).rasterW <= 0 || (*lbl).rasterH <= 0)
+        return false;
+    float op = Container_getOpacity(&(*panel).base);
+    if (op <= 0.0f)
+        return false;
+    float backing = (*lbl).rasterBacking;
+    if (backing <= 0.0f)
+        backing = 1.0f;
+    float qh = (float) (*lbl).rasterH;
+    Panel *basePanel = &(*lbl).base;
+    Container *container = &(*basePanel).base;
+    if (w <= (*container).w * 1.25f && backing > 1.0f)
+        qh /= backing;
+    float qx = x;
+    float qy = y + h - qh;
+    drawSelectionOverlay(lbl, cmdBuffer, surfaceW, surfaceH, qx, qy, qh, op);
+    return true;
 }
 
 // ============================================================================
@@ -794,7 +824,10 @@ Label *Label_0(void) {
             (*lbl).ownsFontFamily = true;
         }
     }
-    Panel_setRenderHandler(&(*lbl).base, Label_renderFn);
+    Panel *lb = &(*lbl).base;
+    Panel_setRenderHandler(lb, nullptr);
+    Panel_setTextFn(lb, labelPaintText);
+    Panel_setForegroundFn(lb, labelPaintHighlight);
     return lbl;
 }
 
