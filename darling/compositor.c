@@ -138,8 +138,10 @@
    *     a clean board CLEAN-SKIPs next tick instead of re-arming forever.
    *     LIVE DRAG skips the collage: allocations are frozen, so both boards
    *     paint inline at AFTER layout straight into the seam image through
-   *     Darling_layerRender (the live direct pass — no sampling, no lag,
-   *     no stretch; shrink drags pixel-perfect, grow drags pin top-left).
+   *     the shared board painter (the live direct pass — no sampling, no
+   *     lag, no stretch; points map with the live backing scale, never
+   *     drawW/panelW across the freeze; shrink drags pixel-perfect, grow
+   *     drags pin top-left).
    *     Window-level `demanded` (any board demand via tree/target dirt or
    *     depth-1 child present-count delta, never-presented, or live-resizing)
    *     presents exactly once per tick, else rests. Scene-bottom/content-top
@@ -463,6 +465,11 @@ static bool paintChildIntoPass(void *cmdBuffer, Panel *child,
     }
 }
 
+// Board-subtree painter (defined below, forward-declared so the pane hook
+// and the live direct pass share one implementation).
+static void paintBoardSubtree(void *cmdBuffer, int w, int h, Panel *panel,
+                              int panelW, int panelH, float kx, float ky);
+
 // Pane render hook: called by VkPane_presentAll per CAMetalLayer pane, inside
 // that pane's OWN render pass (already begun, cleared, viewport at 0,0 = pane
 // size). A leaf pane renders its Panel handler (or the fallback spinning tri
@@ -524,9 +531,23 @@ static void Darling_layerRender(void *cmdBuffer, int w, int h, void *owner) {
     Darling_getPanelSize(panel, &panelW, &panelH);
     if (panelW <= 0 || panelH <= 0)
         return;
-    float kx = (float) w / (float) panelW;
-    float ky = (float) h / (float) panelH;
+    paintBoardSubtree(cmdBuffer, w, h, panel, panelW, panelH,
+                       (float) w / (float) panelW, (float) h / (float) panelH);
+}
 
+// Board-subtree painter shared by the settled board pass and the live direct
+// pass. Children resolve against the board's point size; kx/ky map those
+// points to pass pixels. The settled pass derives them from its target
+// (w/panelW — converged, equals backing). The live pass MUST receive the
+// live backing scale instead: its target is frozen while layout runs at
+// AFTER size, and deriving across the freeze shrinks every drag step about
+// the origin (which reads exactly like broken anchors). Surface w/h stay
+// the REAL image size (NDC mapping + clip) — only the points factor varies.
+static void paintBoardSubtree(void *cmdBuffer, int w, int h, Panel *panel,
+                              int panelW, int panelH, float kx, float ky) {
+    if (!panel || !cmdBuffer)
+        return;
+    size_t childCount = Panel_childCount(panel);
     // Board's own backdrop: the board panel IS the window surface (the
     // Window Board Root Lock Law) — paint its background as the full-pane
     // first op so a styled root (dark app backdrop) shows through between
@@ -862,16 +883,31 @@ void Darling_renderFrame(void *cmdBuffer, int drawW, int drawH, void *userdata) 
         // into the seam image through the shared board painter (backdrop,
         // then children in tree order; COMPOSITED scenes sample their frozen
         // targets at their own extent, DIRECT panes keep their own chains).
-        // Clipped to the current image: shrink drags are pixel-perfect, grow
-        // drags pin top-left with a clear strip the settle rebuild fills.
-        for (int i = 0; i < 2; i++) {
-            Panel *board = boardPanels[i];
-            if (!board)
-                continue;
-            Darling_layerRender(cmdBuffer, drawW, drawH, board);
+        // Points map with the LIVE backing scale (never drawW/panelW across
+        // the freeze — the frozen image and AFTER layout disagree, and that
+        // mismatch shrinks every step about the origin); the surface stays
+        // the real image size for NDC + clip. Shrink drags are pixel-perfect,
+        // grow drags pin top-left with a clear strip the settle rebuild
+        // fills. A dead scale falls through to the sampling collage below
+        // (stale but working) instead of painting blind.
+        extern float TextCore_backingScale(void);
+        extern void Darling_getPanelSize(Panel *p, int *outW, int *outH);
+        float liveScale = TextCore_backingScale();
+        if (liveScale > 0.0f) {
+            for (int i = 0; i < 2; i++) {
+                Panel *board = boardPanels[i];
+                if (!board)
+                    continue;
+                int panelW = 0, panelH = 0;
+                Darling_getPanelSize(board, &panelW, &panelH);
+                if (panelW <= 0 || panelH <= 0)
+                    continue;
+                paintBoardSubtree(cmdBuffer, drawW, drawH, board,
+                                  panelW, panelH, liveScale, liveScale);
+            }
+            s_seamNonEmpty = true;
+            return;
         }
-        s_seamNonEmpty = true;
-        return;
     }
     for (int i = 0; i < 2; i++) {
         Panel *board = boardPanels[i];
