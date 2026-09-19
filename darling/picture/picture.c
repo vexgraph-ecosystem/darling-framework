@@ -38,7 +38,8 @@
  *   - Picture(image)                          : Picture_1(image)
  *
  * Core Functions:
- *   - Picture_renderFn(panel, rend, cmd, ...) : Built-in Vulkan drawTexture renderer
+ *   - picturePaintImage(panel, rend, cmd, ...) : Stage 1 texture quad / amber
+ *     placeholder (via Panel_setImageFn; background stays Panel default)
  *   - Picture_load(p, vfsPath)                : Loads texture via VFS and binds to node
  *   - Picture_cycleMode(p)                    : Advances to next PictureMode seamlessly
  *   - Picture_getModeName(mode)               : String label for PictureMode
@@ -66,28 +67,34 @@
 // CORE FUNCTIONS (Default Renderer)
 // ============================================================================
 
-static void Picture_renderFn(Panel *panel, void *renderer, void *cmdBuffer,
-                             float surfaceW, float surfaceH,
-                             float x, float y, float w, float h) {
+// Stage 1: texture quad via texture_quad, amber placeholder when unbound.
+// Background (Panel color) is stage 0 and runs beneath this.
+static bool picturePaintImage(Panel *panel, void *renderer, void *cmdBuffer,
+                              float surfaceW, float surfaceH,
+                              float x, float y, float w, float h) {
     (void)renderer;
     Picture *p = (Picture*) panel;
-    if (!p) return;
-
+    if (!p || !cmdBuffer)
+        return false;
+    if (w <= 0.0f || h <= 0.0f)
+        return false;
     int32_t texId = (*p).textureId;
     if (texId < 0) {
         Vk_fillRect(cmdBuffer, surfaceW, surfaceH, x, y, w, h, 1.0f, 0.8f, 0.0f, 1.0f);
-        return;
+        return true;
     }
-
     uint32_t imgW = 1, imgH = 1;
     Texture_getSize(texId, &imgW, &imgH);
-
-    float op = Container_getOpacity(&(*panel).base);
+    Container *c = &(*panel).base;
+    float op = Container_getOpacity(c);
+    if (op <= 0.0f)
+        return false;
     Vk_drawTexture(cmdBuffer, surfaceW, surfaceH, x, y, w, h,
                    1.0f, 1.0f, 1.0f, op,
                    texId,
                    (*p).mode,
                    (float) imgW, (float) imgH);
+    return true;
 }
 
 // ============================================================================
@@ -120,7 +127,9 @@ Picture *Picture_0(void) {
     (*p).mode = PICTURE_MODE_FIT;
     (*p).ownsTexture = false;
 
-    Panel_setRenderHandler(&(*p).base, Picture_renderFn);
+    Panel *pp = &(*p).base;
+    Panel_setRenderHandler(pp, nullptr);
+    Panel_setImageFn(pp, picturePaintImage);
 
     return p;
 }
