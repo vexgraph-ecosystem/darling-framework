@@ -47,7 +47,8 @@
  *   - RichLabel_1(parent)
  *
  * Core Functions:
- *   - RichLabel_renderFn(panel, rend, cmd, surfaceW, surfaceH, x, y, w, h) : Draw handler
+ *   - richPaintText(panel, rend, cmd, ...) : Stage 2 spans + glyph quads
+ *     (via Panel_setTextFn; background stays Panel default)
  *   - RichLabel_charIndexAt(label, localX, localY)                        : Byte index from point
  *   - RichLabel_handlePointer(label, kind, localX, localY, window)        : Pointer event dispatcher
  *   - RichLabel_onPointer(label, ev, window)                              : PointerEvent wrapper
@@ -297,49 +298,44 @@ static void drawSelectionSpans(void *cmdBuffer, float surfaceW, float surfaceH,
         Vk_fillRect(cmdBuffer, surfaceW, surfaceH, x + sx0, y + sy0, sx1 - sx0, sy1 - sy0, br, bgc, bb, ba);
 }
 
-static void RichLabel_renderFn(Panel *panel, void *renderer, void *cmdBuffer, float surfaceW, float surfaceH,
-                               float x, float y, float w, float h) {
+// Stage 2: selection spans beneath glyph quads, in tree order.
+// Background stays the Panel default (stage 0). Selection-under-glyphs order
+// is preserved verbatim from the legacy monolith: spans first, then quads.
+static bool richPaintText(Panel *panel, void *renderer, void *cmdBuffer,
+                          float surfaceW, float surfaceH,
+                          float x, float y, float w, float h) {
     RichLabel *rl = (RichLabel*) panel;
     (void)renderer;
-
-    float op = panel ? Container_getOpacity(&(*panel).base) : 1.0f;
+    (void) w;
+    (void) h;
+    if (!rl || !cmdBuffer)
+        return false;
+    Container *c = &(*panel).base;
+    float op = Container_getOpacity(c);
     if (op <= 0.0f)
-        return;
-    uint32_t bgColor = Panel_getBackgroundColor(panel);
-    if ((bgColor >> 24) > 0) {
-        float br = ((bgColor >> 16) & 0xFF) / 255.0f;
-        float bg = ((bgColor >> 8) & 0xFF) / 255.0f;
-        float bb = (bgColor & 0xFF) / 255.0f;
-        float ba = ((bgColor >> 24) & 0xFF) / 255.0f * op;
-        if (ba > 0.0f)
-            Vk_fillRect(cmdBuffer, surfaceW, surfaceH, x, y, w, h, br, bg, bb, ba);
-    }
-
+        return false;
     RichText *tm = (*rl).textModel;
     if (!tm || !(*tm).quads)
-        return;
-
+        return false;
     int32_t selStart = -1, selEnd = -1;
-    if ((*rl).highlightable && TextSelect_getSpan(&(*rl).select, &selStart, &selEnd)) {
+    TextSelect *sel = &(*rl).select;
+    if ((*rl).highlightable && TextSelect_getSpan(sel, &selStart, &selEnd)) {
         if (selEnd > selStart)
             drawSelectionSpans(cmdBuffer, surfaceW, surfaceH, x, y, tm, selStart, selEnd,
                                (*rl).highlightColor, op);
     }
-
+    bool drew = (selEnd > selStart) && (*rl).highlightable;
     for (size_t i = 0; i < (*tm).quadCount; i++) {
         TextQuad *q = &(*tm).quads[i];
-
         float cr = (((*q).color >> 16) & 0xFF) / 255.0f;
         float cg = (((*q).color >> 8) & 0xFF) / 255.0f;
         float cb = ((*q).color & 0xFF) / 255.0f;
         float ca = (((*q).color >> 24) & 0xFF) / 255.0f * op;
-
+        if (ca <= 0.0f)
+            continue;
         float qx = x + (*q).x;
         float qy = y + (*q).y;
-
         if ((*q).decor != DECOR_NONE || (*q).textureId < 0) {
-            // TODO: Pass decor to a specialized shader for Dash/Squiggle.
-            // For now, it draws a solid line.
             Vk_fillRect(cmdBuffer, surfaceW, surfaceH, qx, qy, (*q).w, (*q).h, cr, cg, cb, ca);
         } else if ((*q).isColor) {
             Vk_drawColorGlyph(cmdBuffer, surfaceW, surfaceH, qx, qy, (*q).w, (*q).h,
@@ -349,7 +345,9 @@ static void RichLabel_renderFn(Panel *panel, void *renderer, void *cmdBuffer, fl
                            cr, cg, cb, ca, (*q).textureId, (*q).bold, 0.5f,
                            (*q).u0, (*q).v0, (*q).u1, (*q).v1);
         }
+        drew = true;
     }
+    return drew;
 }
 
 // ============================================================================
@@ -379,7 +377,9 @@ RichLabel *RichLabel_0(void) {
     (*rl).highlightable = false;
     (*rl).select = TextSelect_default();
     (*rl).highlightColor = 0x662563EBu;
-    Panel_setRenderHandler(&(*rl).base, RichLabel_renderFn);
+    Panel *rp = &(*rl).base;
+    Panel_setRenderHandler(rp, nullptr);
+    Panel_setTextFn(rp, richPaintText);
 
     return rl;
 }
