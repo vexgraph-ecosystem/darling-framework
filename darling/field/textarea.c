@@ -198,16 +198,23 @@ static bool ensureTextareaRaster(Textarea *ta, float innerW) {
     return true;
 }
 
-static void Textarea_renderFn(Panel *panel, void *renderer, void *cmdBuffer, float surfaceW, float surfaceH,
-                             float x, float y, float w, float h) {
-    Textarea *ta = (Textarea*) panel;
-    (void) renderer;
-    if (!ta || w <= 0.0f || h <= 0.0f)
-        return;
-    float op = Container_getOpacity(&(*panel).base);
-    if (op <= 0.0f)
-        return;
+// Ordered part pipeline: background -> text -> border -> caret.
+// Border over content per the canonical order (edge never overlaps the
+// padded/scrolled raster, so the reorder is pixel-identical).
 
+// Stage 0: field fill (Panel color, dark fallback when transparent).
+static bool textareaPaintBackground(Panel *panel, void *renderer, void *cmdBuffer,
+                                    float surfaceW, float surfaceH,
+                                    float x, float y, float w, float h) {
+    (void) renderer;
+    if (!panel || !cmdBuffer)
+        return false;
+    if (w <= 0.0f || h <= 0.0f)
+        return false;
+    Container *c = &(*panel).base;
+    float op = Container_getOpacity(c);
+    if (op <= 0.0f)
+        return false;
     uint32_t bg = Panel_getBackgroundColor(panel);
     if ((bg >> 24) == 0)
         bg = 0xFF18181Bu;
@@ -215,69 +222,124 @@ static void Textarea_renderFn(Panel *panel, void *renderer, void *cmdBuffer, flo
     float bgc = ((bg >> 8) & 0xFF) / 255.0f;
     float bb = (bg & 0xFF) / 255.0f;
     float ba = ((bg >> 24) & 0xFF) / 255.0f * op;
+    if (ba <= 0.0f)
+        return false;
     Vk_fillRect(cmdBuffer, surfaceW, surfaceH, x, y, w, h, br, bgc, bb, ba);
+    return true;
+}
 
-    uint32_t borderColor = (*ta).focused ? 0xFF3B82F6u : 0xFF3F3F46u;
-    float b_r = ((borderColor >> 16) & 0xFF) / 255.0f;
-    float b_g = ((borderColor >> 8) & 0xFF) / 255.0f;
-    float b_b = (borderColor & 0xFF) / 255.0f;
-    float b_a = ((borderColor >> 24) & 0xFF) / 255.0f * op;
-    Vk_fillRect(cmdBuffer, surfaceW, surfaceH, x, y, w, 1.0f, b_r, b_g, b_b, b_a);
-    Vk_fillRect(cmdBuffer, surfaceW, surfaceH, x, y + h - 1.0f, w, 1.0f, b_r, b_g, b_b, b_a);
-    Vk_fillRect(cmdBuffer, surfaceW, surfaceH, x, y, 1.0f, h, b_r, b_g, b_b, b_a);
-    Vk_fillRect(cmdBuffer, surfaceW, surfaceH, x + w - 1.0f, y, 1.0f, h, b_r, b_g, b_b, b_a);
-
+// Stage 2: scrolled document raster quad.
+static bool textareaPaintText(Panel *panel, void *renderer, void *cmdBuffer,
+                              float surfaceW, float surfaceH,
+                              float x, float y, float w, float h) {
+    Textarea *ta = (Textarea*) panel;
+    (void) renderer;
+    if (!ta || !cmdBuffer)
+        return false;
+    if (w <= 0.0f || h <= 0.0f)
+        return false;
+    Container *c = &(*panel).base;
+    float op = Container_getOpacity(c);
+    if (op <= 0.0f)
+        return false;
+    if (!(*ta).text || (*ta).text[0] == '\0')
+        return false;
     float padX = 8.0f;
     float padY = 8.0f;
     float innerW = w - padX * 2.0f;
     if (innerW < 10.0f)
         innerW = 10.0f;
+    if (!ensureTextareaRaster(ta, innerW))
+        return false;
+    if ((*ta).rasterTex < 0 || (*ta).rasterW <= 0 || (*ta).rasterH <= 0)
+        return false;
+    float backing = (*ta).rasterBacking > 0.0f ? (*ta).rasterBacking : 1.0f;
+    float qw = (float) (*ta).rasterW / backing;
+    float qh = (float) (*ta).rasterH / backing;
+    float qx = x + padX;
+    float qy = y + h - padY - qh + (*ta).scrollY;
+    Vk_drawTexture(cmdBuffer, surfaceW, surfaceH, qx, qy, qw, qh, 1.0f, 1.0f, 1.0f, op,
+                   (*ta).rasterTex, PICTURE_MODE_FIT, (float) (*ta).rasterW, (float) (*ta).rasterH);
+    return true;
+}
 
-    if ((*ta).text && (*ta).text[0] != '\0') {
-        if (ensureTextareaRaster(ta, innerW)) {
-            if ((*ta).rasterTex >= 0 && (*ta).rasterW > 0 && (*ta).rasterH > 0) {
-                float backing = (*ta).rasterBacking > 0.0f ? (*ta).rasterBacking : 1.0f;
-                float qw = (float) (*ta).rasterW / backing;
-                float qh = (float) (*ta).rasterH / backing;
-                float qx = x + padX;
-                float qy = y + h - padY - qh + (*ta).scrollY;
-                Vk_drawTexture(cmdBuffer, surfaceW, surfaceH, qx, qy, qw, qh, 1.0f, 1.0f, 1.0f, op,
-                               (*ta).rasterTex, PICTURE_MODE_FIT, (float) (*ta).rasterW, (float) (*ta).rasterH);
+// Stage 3: focused/idle stroke over content.
+static bool textareaPaintBorder(Panel *panel, void *renderer, void *cmdBuffer,
+                                float surfaceW, float surfaceH,
+                                float x, float y, float w, float h) {
+    Textarea *ta = (Textarea*) panel;
+    (void) renderer;
+    if (!ta || !cmdBuffer)
+        return false;
+    if (w <= 0.0f || h <= 0.0f)
+        return false;
+    Container *c = &(*panel).base;
+    float op = Container_getOpacity(c);
+    if (op <= 0.0f)
+        return false;
+    uint32_t borderColor = (*ta).focused ? 0xFF3B82F6u : 0xFF3F3F46u;
+    float b_r = ((borderColor >> 16) & 0xFF) / 255.0f;
+    float b_g = ((borderColor >> 8) & 0xFF) / 255.0f;
+    float b_b = (borderColor & 0xFF) / 255.0f;
+    float b_a = ((borderColor >> 24) & 0xFF) / 255.0f * op;
+    if (b_a <= 0.0f)
+        return false;
+    Vk_fillRect(cmdBuffer, surfaceW, surfaceH, x, y, w, 1.0f, b_r, b_g, b_b, b_a);
+    Vk_fillRect(cmdBuffer, surfaceW, surfaceH, x, y + h - 1.0f, w, 1.0f, b_r, b_g, b_b, b_a);
+    Vk_fillRect(cmdBuffer, surfaceW, surfaceH, x, y, 1.0f, h, b_r, b_g, b_b, b_a);
+    Vk_fillRect(cmdBuffer, surfaceW, surfaceH, x + w - 1.0f, y, 1.0f, h, b_r, b_g, b_b, b_a);
+    return true;
+}
+
+// Stage 4: multiline caret with align offset + scroll + clip.
+static bool textareaPaintCaret(Panel *panel, void *renderer, void *cmdBuffer,
+                               float surfaceW, float surfaceH,
+                               float x, float y, float w, float h) {
+    Textarea *ta = (Textarea*) panel;
+    (void) renderer;
+    if (!ta || !cmdBuffer)
+        return false;
+    if (!(*ta).focused)
+        return false;
+    Container *c = &(*panel).base;
+    float op = Container_getOpacity(c);
+    if (op <= 0.0f)
+        return false;
+    float padX = 8.0f;
+    float padY = 8.0f;
+    float innerW = w - padX * 2.0f;
+    if (innerW < 10.0f)
+        innerW = 10.0f;
+    int32_t line = 0, col = 0;
+    int32_t cur = (*ta).cursor;
+    if ((*ta).text) {
+        for (int32_t i = 0; i < cur && (*ta).text[i] != '\0'; i++) {
+            if ((*ta).text[i] == '\n') {
+                line++;
+                col = 0;
+            } else {
+                col++;
             }
         }
     }
-
-    if ((*ta).focused) {
-        int32_t line = 0, col = 0;
-        int32_t cur = (*ta).cursor;
-        if ((*ta).text) {
-            for (int32_t i = 0; i < cur && (*ta).text[i] != '\0'; i++) {
-                if ((*ta).text[i] == '\n') {
-                    line++;
-                    col = 0;
-                } else {
-                    col++;
-                }
-            }
-        }
-        float lineH = (*ta).fontSize * 1.35f + (*ta).spacingHeight;
-        float charW = (*ta).fontSize * 0.55f;
-        float alignOff = 0.0f;
-        if ((*ta).align != TEXT_ALIGN_LEFT && (*ta).text) {
-            int32_t start = lineStart((*ta).text, line);
-            int32_t len = lineLen((*ta).text, start);
-            float totalW = (float)len * charW;
-            if ((*ta).align == TEXT_ALIGN_CENTER && innerW > totalW)
-                alignOff = (innerW - totalW) * 0.5f;
-            else if ((*ta).align == TEXT_ALIGN_RIGHT && innerW > totalW)
-                alignOff = innerW - totalW;
-        }
-        float caretX = padX + alignOff + (float) col * charW;
-        float caretY = y + h - padY - (float)(line + 1) * lineH + (*ta).scrollY;
-        if (caretY >= y && caretY + lineH <= y + h + 2.0f) {
-            Vk_fillRect(cmdBuffer, surfaceW, surfaceH, x + caretX, caretY, 1.5f, lineH, 1.0f, 1.0f, 1.0f, op);
-        }
+    float lineH = (*ta).fontSize * 1.35f + (*ta).spacingHeight;
+    float charW = (*ta).fontSize * 0.55f;
+    float alignOff = 0.0f;
+    if ((*ta).align != TEXT_ALIGN_LEFT && (*ta).text) {
+        int32_t start = lineStart((*ta).text, line);
+        int32_t len = lineLen((*ta).text, start);
+        float totalW = (float)len * charW;
+        if ((*ta).align == TEXT_ALIGN_CENTER && innerW > totalW)
+            alignOff = (innerW - totalW) * 0.5f;
+        else if ((*ta).align == TEXT_ALIGN_RIGHT && innerW > totalW)
+            alignOff = innerW - totalW;
     }
+    float caretX = padX + alignOff + (float) col * charW;
+    float caretY = y + h - padY - (float)(line + 1) * lineH + (*ta).scrollY;
+    if (caretY < y || caretY + lineH > y + h + 2.0f)
+        return false;
+    Vk_fillRect(cmdBuffer, surfaceW, surfaceH, x + caretX, caretY, 1.5f, lineH, 1.0f, 1.0f, 1.0f, op);
+    return true;
 }
 
 Textarea *Textarea_0(void) {
@@ -314,7 +376,12 @@ Textarea *Textarea_0(void) {
     (*ta).rasterH = 0;
     (*ta).rasterBacking = 1.0f;
     (*ta).rasterDirty = true;
-    Panel_setRenderHandler(&(*ta).base, Textarea_renderFn);
+    Panel *tp = &(*ta).base;
+    Panel_setRenderHandler(tp, nullptr);
+    Panel_setBackgroundFn(tp, textareaPaintBackground);
+    Panel_setTextFn(tp, textareaPaintText);
+    Panel_setBorderFn(tp, textareaPaintBorder);
+    Panel_setForegroundFn(tp, textareaPaintCaret);
     return ta;
 }
 
