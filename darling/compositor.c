@@ -129,36 +129,42 @@
   *     skipped board, so demand gates board RE-RENDER (visit-side dirty,
   *     already working), never sampling. Each board composites at its OWN
   *     pixel extent pinned top-left in the drawable — never stretched to
-  *     fill it, so a board target that lags the window for a step pins its
-  *     last publish crisply instead of gravity-resizing it (the Continuous
-  *     Real-Time Live Resize Law); a converged board (extent == drawable)
-  *     samples identically to a full-extent quad. Unpublished boards
-  *     (published<0) no-op inside VkLayer_composite. A successful board
-  *     composite clears that board's tree dirt (scene and content alike) so
-  *     a clean board CLEAN-SKIPs next tick instead of re-arming forever.
-  *     Window-level `demanded` (any board demand via tree/target dirt or
-  *     depth-1 child present-count delta, never-presented, or live-resizing)
-  *     presents exactly once per tick, else rests. Scene-bottom/content-top
-  *     order per the Window Compositing Layer Order Law; minimized windows
-  *     suppress. When no board exists, paints root children directly.
+   *     fill it, so a board target that lags the window for a step pins its
+   *     last publish crisply instead of gravity-resizing it (the Continuous
+   *     Real-Time Live Resize Law); a converged board (extent == drawable)
+   *     samples identically to a full-extent quad. Unpublished boards
+   *     (published<0) no-op inside VkLayer_composite. A successful board
+   *     composite clears that board's tree dirt (scene and content alike) so
+   *     a clean board CLEAN-SKIPs next tick instead of re-arming forever.
+   *     LIVE DRAG skips the collage: allocations are frozen, so both boards
+   *     paint inline at AFTER layout straight into the seam image through
+   *     Darling_layerRender (the live direct pass — no sampling, no lag,
+   *     no stretch; shrink drags pixel-perfect, grow drags pin top-left).
+   *     Window-level `demanded` (any board demand via tree/target dirt or
+   *     depth-1 child present-count delta, never-presented, or live-resizing)
+   *     presents exactly once per tick, else rests. Scene-bottom/content-top
+   *     order per the Window Compositing Layer Order Law; minimized windows
+   *     suppress. When no board exists, paints root children directly.
   *     Reports the pass through
   *     s_seamNonEmpty (false at entry; true on any board composite success,
   *     any fallback child actually painted, or deliberate !demanded rest —
   *     the empty-present guard: present callbacks gate their verdicts on it
   *     so a successful-but-empty present retries instead of settling blank)
-  *   - Darling_preFrame(window, drawW, drawH, userdata=Frame*)
-  *     (full layout every tick: the live flag is consumed as a demand ticket
-  *     (moving edge re-arms the client dirty so the drag presents at cadence,
-  *     idle ticks rest); live points resolve from the Frame first (the frame
-  *     hook already ran Frame_resize with live OS points) with the cached
-  *     Window size as fallback only, so Container_setSize + pane/layer
-  *     attaches stay in step with the border (the Native Pixel Law + the
-  *     Window Board Root Lock Law); board VkLayers attach with the live
-  *     drawable px directly (board px == drawable px, never width * stale
-  *     scale) and VkLayer_visit publishes dirty boards + COMPOSITED scenes
-  *     BEFORE the seam pass samples them — same-queue ordering;
-  *     Darling_layerRender runs inside VkLayer_visit and VkPane_presentAll
-  *     always)
+   *   - Darling_preFrame(window, drawW, drawH, userdata=Frame*)
+   *     (the live flag is consumed as a demand ticket (moving edge re-arms
+   *     the client dirty so the drag presents at cadence, idle ticks rest);
+   *     live points resolve from the Frame first (the frame hook already ran
+   *     Frame_resize with live OS points) with the cached Window size as
+   *     fallback only. LIVE DRAG takes the freeze branch: AFTER-size layout
+   *     + clear-color refresh only — attach, resize, layer work, and
+   *     VkLayer_visit are all skipped so no target is created, destroyed,
+   *     or re-rendered mid-drag. Settled ticks run the full path
+   *     (Container_setSize + pane/layer attaches in step with the border per
+   *     the Native Pixel Law + the Window Board Root Lock Law; board VkLayers
+   *     attach with the live drawable px directly; VkLayer_visit publishes
+   *     dirty boards + COMPOSITED scenes BEFORE the seam pass samples them —
+   *     same-queue ordering; Darling_layerRender runs inside VkLayer_visit
+   *     and VkPane_presentAll always; first settled tick re-attaches once)
 *   - Darling_layerRender(cmdBuffer, w, h, owner) : pane + retained-layer
   *     pass leaf (leaf panel or board subtree; runs every tick — the shared
   *     painter for DIRECT pane chains and COMPOSITED VkLayer targets, boards
@@ -578,22 +584,48 @@ static void Darling_layerRender(void *cmdBuffer, int w, int h, void *owner) {
     }
 }
 
+// Clear-color refresh shared by the live freeze branch and the settled tail
+// (uniform update only, zero layer mutation — safe on the worker mid-drag).
+static void refreshClearColor(Panel *scenePanel, Panel *root, Panel *contentPanel) {
+    if (scenePanel) {
+        uint32_t bgColor = Panel_getBackgroundColor(scenePanel);
+        if (bgColor != 0) {
+            float r = ((bgColor >> 16) & 0xFF) / 255.0f;
+            float g = ((bgColor >> 8) & 0xFF) / 255.0f;
+            float b = (bgColor & 0xFF) / 255.0f;
+            float a = ((bgColor >> 24) & 0xFF) / 255.0f;
+            Vk_setClearColor(r, g, b, a);
+        }
+        return;
+    }
+    if (root && root != contentPanel) {
+        uint32_t bgColor = Panel_getBackgroundColor(root);
+        if (bgColor != 0) {
+            float r = ((bgColor >> 16) & 0xFF) / 255.0f;
+            float g = ((bgColor >> 8) & 0xFF) / 255.0f;
+            float b = (bgColor & 0xFF) / 255.0f;
+            float a = ((bgColor >> 24) & 0xFF) / 255.0f;
+            Vk_setClearColor(r, g, b, a);
+        }
+    }
+}
+
 void Darling_preFrame(Window *window, int drawW, int drawH, void *userdata) {
     if (!window)
         return;
 
-    // LIVE RESIZE GATE, LAYOUT-ONLY (the Continuous Real-Time Live Resize Law): during a drag thread 0 owns
-    // ALL layer motion — setFrameSize's synchronous composite pins every pane
-    // to its selfAnchor per drag step. The present worker must NOT mutate
-    // container layout or composite layers concurrently: that race tears the
-    // anchor math and pane layers drift away from their pinned corners. Only
-    // the layout block below is gated; repaint-demand propagation and the
-    // clear-color refresh run every tick (zero layer mutation), and pane
-    // painting runs inside VkPane_presentAll through Darling_layerRender —
-    // never through preFrame — so the four scenes keep animating the whole
-    // drag. On settle the flag clears and preFrame resumes: one layout, one
-    // final re-record, one board rebuild. Layer mutation stays thread-0-only
-    // (composite calls self-gate + dispatch to main).
+    // LIVE RESIZE FREEZE (the Continuous Real-Time Live Resize Law): during a
+    // drag thread 0 owns ALL layer motion — setFrameSize's synchronous
+    // composite pins every pane to its selfAnchor per drag step. The freeze
+    // branch below runs layout at the AFTER size plus the clear-color refresh
+    // (both zero layer mutation) and returns: no attach, no resize, no
+    // visit, no re-render mid-drag — allocations and flight targets are
+    // untouched, so no step can lag behind the edge. Pane painting still runs
+    // inside VkPane_presentAll through Darling_layerRender (frozen chains
+    // present pinned). On settle the flag clears and preFrame resumes the
+    // full path: one layout, one attach at the converged size, one board
+    // rebuild. Layer mutation stays thread-0-only (composite calls self-gate
+    // + dispatch to main).
     bool live = Window_isLiveResizing(window);
 
     // Live points resolve from the borrowing Frame (userdata) first — the
@@ -629,6 +661,25 @@ void Darling_preFrame(Window *window, int drawW, int drawH, void *userdata) {
     // BEFORE the seam pass samples them.
     if (live)
         GraphicsLoop_markDirty(GraphicsLoop_default(), window);
+    if (live) {
+        // Live-drag freeze (sticky, no churn): layout runs at the AFTER size
+        // (CPU only — Container_setSize marks dirt, zero allocation), then
+        // this tick returns. Board attach/resize, layer attach, pane demand
+        // propagation, and VkLayer_visit are ALL skipped: no flight target is
+        // destroyed, created, or re-rendered mid-drag, so the seam pass can
+        // never sample a half-rebuilt board or lag one step behind the edge.
+        // The render pass paints the whole tree inline at AFTER layout
+        // straight into the seam image (the live direct pass below).
+        // COMPOSITED scenes hold their last publish (frozen, stable) and
+        // resume on settle with wall-clock time (no jump). The first settled
+        // tick re-attaches at the converged size exactly once.
+        if (contentPanel)
+            Container_setSize(&(*contentPanel).base, (float)winW, (float)winH);
+        if (scenePanel)
+            Container_setSize(&(*scenePanel).base, (float)winW, (float)winH);
+        refreshClearColor(scenePanel, root, contentPanel);
+        return;
+    }
     // Boards first: scene + content panels attach their full-window Metal
     // boards here so the pane attach below sees board backing (its
     // metal-parent gate) and the subtree painters see board sizes.
@@ -699,27 +750,9 @@ void Darling_preFrame(Window *window, int drawW, int drawH, void *userdata) {
     if (scenePanel)
         Container_setSize(&(*scenePanel).base, (float)winW, (float)winH);
 
-    // Every tick, live or settled: clear-color refresh (uniform update only,
-    // zero layer mutation — safe on the worker mid-drag).
-    if (scenePanel) {
-        uint32_t bgColor = Panel_getBackgroundColor(scenePanel);
-        if (bgColor != 0) {
-            float r = ((bgColor >> 16) & 0xFF) / 255.0f;
-            float g = ((bgColor >> 8) & 0xFF) / 255.0f;
-            float b = (bgColor & 0xFF) / 255.0f;
-            float a = ((bgColor >> 24) & 0xFF) / 255.0f;
-            Vk_setClearColor(r, g, b, a);
-        }
-    } else if (root && root != contentPanel) {
-        uint32_t bgColor = Panel_getBackgroundColor(root);
-        if (bgColor != 0) {
-            float r = ((bgColor >> 16) & 0xFF) / 255.0f;
-            float g = ((bgColor >> 8) & 0xFF) / 255.0f;
-            float b = (bgColor & 0xFF) / 255.0f;
-            float a = ((bgColor >> 24) & 0xFF) / 255.0f;
-            Vk_setClearColor(r, g, b, a);
-        }
-    }
+    // Every settled tick: clear-color refresh (uniform update only, zero
+    // layer mutation). Live ticks refresh through the freeze branch above.
+    refreshClearColor(scenePanel, root, contentPanel);
 }
 
 void Darling_renderFrame(void *cmdBuffer, int drawW, int drawH, void *userdata) {
@@ -819,6 +852,24 @@ void Darling_renderFrame(void *cmdBuffer, int drawW, int drawH, void *userdata) 
         // screen already holds it (!demanded implies hasPresented — a
         // never-presented client always demands). Report non-empty so the
         // present verdict latches rest instead of retrying clean content.
+        s_seamNonEmpty = true;
+        return;
+    }
+    if (live && boardsRegistered) {
+        // Live direct pass: allocations are frozen, so there is nothing to
+        // sample — sampling a stale-extent board is exactly the one-step lag
+        // and the stretch. Paint both boards inline at AFTER layout straight
+        // into the seam image through the shared board painter (backdrop,
+        // then children in tree order; COMPOSITED scenes sample their frozen
+        // targets at their own extent, DIRECT panes keep their own chains).
+        // Clipped to the current image: shrink drags are pixel-perfect, grow
+        // drags pin top-left with a clear strip the settle rebuild fills.
+        for (int i = 0; i < 2; i++) {
+            Panel *board = boardPanels[i];
+            if (!board)
+                continue;
+            Darling_layerRender(cmdBuffer, drawW, drawH, board);
+        }
         s_seamNonEmpty = true;
         return;
     }
