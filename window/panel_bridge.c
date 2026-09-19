@@ -4,6 +4,7 @@
 #include <stdatomic.h>
 #include <stdio.h>
 #include <stdlib.h>
+#include <math.h>
 #include "oop/type.h"
 #include "nio/mem.h"
 #include "lang/vec4.h"
@@ -33,23 +34,42 @@
  *
  * Core Functions:
  *   - Darling_attachPanes(window, contentPanel, width, height)
- *   - Darling_attachPanelBoards(window, scenePane, contentPane, width, height)
- *     (boards are RETAINED OFFSCREEN VkLayer targets — fixed pixel size,
- *     never a CALayer, never in the window tree; the Frame seam canvas is
- *     the window's single on-screen layer per the Window Compositing
- *     Layer Order Law; board setSize idle-gated via
- *     Darling_compositorIdleForResize per the Pane-of-Glass Law, first-time
- *     PanelCocoa_newBoard ungated; GRAPHICS_VK_STATS-gated
- *     vk:board-resize log on true drift only)
+  *   - Darling_attachPanelBoards(window, scenePane, contentPane, width, height, drawW, drawH)
+  *     (boards are RETAINED OFFSCREEN VkLayer targets — fixed pixel size,
+  *     never a CALayer, never in the window tree; the Frame seam canvas is
+  *     the window's single on-screen layer per the Window Compositing
+  *     Layer Order Law; width/height are live points, drawW/drawH are the
+  *     live drawable px — board px == drawable px directly when drawW/drawH
+  *     are positive (the Native Pixel Law, never width * stale scale), else
+  *     a width * TextCore_backingScale fallback via lround — the scale is
+  *     override-pinned to the dragged window's liveScale every drag step
+  *     (frameCocoaResizeHook setter, cleared on settle), so the fallback
+  *     never reads mainScreen mid-drag and never breathes; board setSize
+  *     idle-gated via Darling_compositorIdleForResize per the Pane-of-Glass
+  *     Law on the settle path, BYPASSED while Window_isLiveResizing
+  *     (boards track the drawable every drag step — the retired chains
+  *     drain 3 generations later, so immediate resize is safe); first-time
+  *     PanelCocoa_newBoard ungated; GRAPHICS_VK_STATS-gated vk:board-resize
+  *     log on true drift only)
  *   - Darling_attachLayers(window, boardPanel, width, height)
- *     (depth-1 collage doctrine: EVERY first-generation child of a board
- *     owns a retained offscreen VkLayer flight target at fixed pixel size —
- *     scenes and plain UI alike (Input included); DIRECT-pane children keep
- *     their exception per the Conflict Triage Law and are skipped here.
- *     Children iterated via Panel_childCount, never hardcoded counts, per
- *     the Dynamic Scalability & Anti-Hardcoding Law; dirty=true on register
- *     per the Pane-of-Glass Law; GRAPHICS_VK_STATS-gated vk:child-resize
- *     log on true drift only, old extent via VkLayer_extent)
+ *     (classification-driven retained flight targets per the Immediate vs
+ *     Retained Element Model — darling.md section 55: a depth-1 child owns
+ *     a retained offscreen VkLayer flight target at fixed pixel size ONLY
+ *     when its subtree contains retained-output (RR) content — a COMPOSITED
+ *     scene rendered on its own timeline and collaged. All-immediate /
+ *     retained-texture (I / R) subtrees paint INLINE into the board pass via
+ *     the recursive subtree walk in compositor.c — zero targets, zero
+ *     copies, zero memory for plain UI. A child reclassified to I/R
+ *     unregisters its stale layer, idle-gated exactly like the resize path
+ *     (its targets may still be referenced by a flying seam sampler — the
+ *     unregister wait drains them). DIRECT-pane children keep their
+ *     exception per the Conflict Triage Law and are skipped here.
+  *     Children iterated via Panel_childCount, never hardcoded counts, per
+  *     the Dynamic Scalability & Anti-Hardcoding Law; dirty=true on register
+  *     per the Pane-of-Glass Law; GRAPHICS_VK_STATS-gated vk:child-resize
+  *     log on true drift only, old extent via VkLayer_extent; px =
+  *     lround(rect * override-pinned TextCore_backingScale) from live
+  *     points — no signature change, the pin flows through the seam)
  *   - Darling_propagatePaneDirty(window, scenePane, contentPanel)
  *     (Panel_isTreeDirty -> VkPane_markDirty per DIRECT chain; retained
  *     child layers re-arm from owner-subtree dirt and arm board demand one
@@ -125,15 +145,22 @@
 // on-screen layer). The seam pass composites the published board images in
 // z-order (scene bottom, content top). Returns the number of boards attached
 // or resized.
-int Darling_attachPanelBoards(Window *window, Panel *scenePane, Panel *contentPane, int width, int height) {
+int Darling_attachPanelBoards(Window *window, Panel *scenePane, Panel *contentPane, int width, int height, int drawW, int drawH) {
     if (!window || width <= 0 || height <= 0)
         return 0;
-    extern float TextCore_backingScale(void);
-    float scale = TextCore_backingScale();
-    if (scale <= 0.0f)
-        scale = 1.0f;
-    int pxW = (int) (width * scale + 0.5f);
-    int pxH = (int) (height * scale + 0.5f);
+    int pxW = 0;
+    int pxH = 0;
+    if (drawW > 0 && drawH > 0) {
+        pxW = drawW;
+        pxH = drawH;
+    } else {
+        extern float TextCore_backingScale(void);
+        float scale = TextCore_backingScale();
+        if (scale <= 0.0f)
+            scale = 1.0f;
+        pxW = (int) lround((double) width * (double) scale);
+        pxH = (int) lround((double) height * (double) scale);
+    }
     if (pxW <= 0 || pxH <= 0 || pxW > 16384 || pxH > 16384)
         return 0;
     Panel *boards[2] = { scenePane, contentPane };
@@ -160,8 +187,13 @@ int Darling_attachPanelBoards(Window *window, Panel *scenePane, Panel *contentPa
             // a board resize rebuilds flight targets the composite pass may
             // still reference — defer to a quiescent tick per the
             // Pane-of-Glass Law and retry next tick. First-time
-            // PanelCocoa_newBoard below stays ungated.
-            if (!Darling_compositorIdleForResize())
+            // PanelCocoa_newBoard below stays ungated. Live-drag bypass:
+            // while Window_isLiveResizing the boards track the drawable
+            // every step (the Continuous Real-Time Live Resize Law) — the
+            // graveyard retires old chains 3 generations later, so
+            // immediate resize is safe; the settle path keeps the gate.
+            bool live = Window_isLiveResizing(window);
+            if (!live && !Darling_compositorIdleForResize())
                 continue;
             int oldW = PanelCocoa_width(pc);
             int oldH = PanelCocoa_height(pc);
@@ -216,8 +248,8 @@ int Darling_attachPanes(Window *window, Panel *contentPanel, int width, int heig
 
         Vec4 rect;
         Container_resolve(&(*child).base, 0.0f, 0.0f, (float) width, (float) height, &rect);
-        int allocW = (int) (rect.z * scale + 0.5f);
-        int allocH = (int) (rect.w * scale + 0.5f);
+        int allocW = (int) lround((double) rect.z * (double) scale);
+        int allocH = (int) lround((double) rect.w * (double) scale);
         if (allocW <= 0 || allocH <= 0 || allocW > 16384 || allocH > 16384)
             continue;
 
@@ -232,19 +264,50 @@ int Darling_attachPanes(Window *window, Panel *contentPanel, int width, int heig
     return attached;
 }
 
-// Attach retained offscreen VkLayer targets to the FIRST-GENERATION children
-// of a board (depth-1 collage doctrine: retained presentables are exactly the
-// scene panel, the content panel, and their first-generation children; the
-// board pass collages each child's last-published frame and paints nothing
-// else; depth below 1 is each child's private affair). Scenes and plain UI
-// alike (Input included) get a fixed pixel-size flight target rendered by the
-// present worker; the canvas samples it as a textured quad. DIRECT children
-// (Metal pane + own swapchain) keep their exception per the Conflict Triage
-// Law and are skipped here. A layer's pixel size is FIXED at register time —
-// VkLayer_resize is a no-op when the size is unchanged, so fixed children
-// never rebuild on window resize (live anchoring: the composite rect tracks
-// the anchor). The PANEL itself is the layer's owner handle, so
-// VkLayer_find(child) resolves the composite pass's child -> layer index.
+// Classification probe (the Immediate vs Retained Element Model — darling.md
+// section 55): true when the subtree contains retained-output (RR) content —
+// a COMPOSITED scene whose pixels are produced on its own timeline and
+// sampled as a collaged quad. All-immediate / retained-texture-only (I / R)
+// subtrees answer false: every widget already paints itself through its own
+// render handler, so such subtrees paint inline into the board pass
+// (paintChildIntoPass's recursive subtree walk) with zero flight targets,
+// zero copies, zero memory. Walk is bounded by panel tree depth and runs on
+// the attach path only (cold, the Cold-Strict, Hot-Minimal Validation Law).
+static bool panelSubtreeNeedsRetained(Panel *p) {
+    if (!p)
+        return false;
+    uint64_t t = Memory_type(p);
+    bool isScene = (t == TYPE_SCENE3D_SINGLETON || t == TYPE_SCENE2D_SINGLETON
+                    || t == TYPE_SCENE_SINGLETON);
+    if (isScene && Scene_getPresentMode((Scene*) p) == SCENE_PRESENT_COMPOSITED)
+        return true;
+    size_t n = Panel_childCount(p);
+    for (size_t i = 0; i < n; i++) {
+        if (panelSubtreeNeedsRetained(Panel_getChild(p, i)))
+            return true;
+    }
+    return false;
+}
+
+// Attach retained offscreen VkLayer targets to the depth-1 children of a
+// board whose SUBTREE contains retained-output content (classification, the
+// Immediate vs Retained Element Model: retained presentables are the scene
+// panel, the content panel, and the COMPOSITED-scene-carrying subtrees
+// attached here; the board pass collages each retained child's
+// last-published frame — everything else, the all-immediate chrome and the
+// retained-texture (text raster / image) parts every widget already paints
+// through its own render handler, paints INLINE into the board pass via the
+// recursive subtree painter in compositor.c (paintChildIntoPass): zero
+// full-window flight targets, zero copies, zero memory for plain UI).
+// DIRECT children (Metal pane + own swapchain) keep their exception per the
+// Conflict Triage Law and are skipped here. A layer's pixel size is FIXED at
+// register time — VkLayer_resize is a no-op when the size is unchanged, so
+// fixed children never rebuild on window resize (live anchoring: the
+// composite rect tracks the anchor). The PANEL itself is the layer's owner
+// handle, so VkLayer_find(child) resolves the composite pass's child ->
+// layer index. A child reclassified to I/R unregisters its stale layer,
+// idle-gated exactly like the resize path (its targets may still be
+// referenced by a flying seam sampler — the unregister wait drains them).
 // Children are iterated via Panel_childCount — never hardcoded counts — per
 // the Dynamic Scalability & Anti-Hardcoding Law. Returns the number of
 // layers registered or resized.
@@ -281,11 +344,33 @@ int Darling_attachLayers(Window *window, Panel *contentPanel, int width, int hei
         if (isScene && Scene_getPresentMode((Scene*) child) == SCENE_PRESENT_DIRECT)
             continue;
 
+        // Classification (the Immediate vs Retained Element Model, darling.md
+        // section 55): a depth-1 child owns a retained offscreen target only
+        // when its SUBTREE contains retained-output (RR) content — a
+        // COMPOSITED scene rendered on its own timeline and collaged.
+        // All-immediate / retained-texture (I / R) subtrees paint INLINE
+        // into the board pass via paintChildIntoPass's recursive subtree
+        // walk (compositor.c) — zero targets, zero copies, zero memory. A
+        // child reclassified to I/R unregisters its stale layer, idle-gated
+        // exactly like the resize path (its targets may still be referenced
+        // by a flying seam sampler — the unregister wait drains them);
+        // VkLayer_unregister false (budget-bound wait) leaves the layer for
+        // the next attach tick (drop-degrade, the Bounded Wait Law).
+        if (!panelSubtreeNeedsRetained(child)) {
+            int stale = VkLayer_find(child);
+            if (stale >= 0) {
+                extern bool Darling_compositorIdleForResize(void);
+                if (Darling_compositorIdleForResize())
+                    VkLayer_unregister(stale);
+            }
+            continue;
+        }
+
         Vec4 rect;
         Container *childBase = &(*child).base;
         Container_resolve(childBase, 0.0f, 0.0f, (float) width, (float) height, &rect);
-        int allocW = (int) (rect.z * scale + 0.5f);
-        int allocH = (int) (rect.w * scale + 0.5f);
+        int allocW = (int) lround((double) rect.z * (double) scale);
+        int allocH = (int) lround((double) rect.w * (double) scale);
         if (allocW <= 0 || allocH <= 0 || allocW > 16384 || allocH > 16384)
             continue;
 
@@ -354,13 +439,16 @@ void Darling_propagatePaneDirty(Window *window, Panel *scenePane, Panel *content
     // survives it (presentCount bumps on every publish).
     static uint64_t s_boardChildPublish[2] = { 0u, 0u };
 
-    // Depth-1 retained children of the CONTENT board (depth-1 collage
-    // doctrine): owner-subtree dirt re-arms the child's own flight target; a
-    // child PUBLISH since the last pass (present-count delta) arms
-    // content-board demand one hop so the board re-collages the fresh frame
-    // in the same-tick visit (next tick at the latest). DIRECT-pane children
-    // keep their exception (the Conflict Triage Law): own chain, own
-    // present, same dirty/publish contract — they never arm the board.
+    // Depth-1 retained children of the CONTENT board (classification, the
+    // Immediate vs Retained Element Model): owner-subtree dirt re-arms the
+    // child's own flight target; a child PUBLISH since the last pass
+    // (present-count delta) arms content-board demand one hop so the board
+    // re-collages the fresh frame in the same-tick visit (next tick at the
+    // latest). Inline (I/R) children own no target — their dirt reaches the
+    // board through the board's own Panel_isTreeDirty subtree recursion.
+    // DIRECT-pane children keep their exception (the Conflict Triage Law):
+    // own chain, own present, same dirty/publish contract — they never arm
+    // the board.
     size_t childCount = Panel_childCount(contentPanel);
     bool anyContentDemand = false;
     uint64_t contentPublish = 0u;
@@ -462,8 +550,8 @@ int Darling_resizePanes(Window *window, Panel *contentPanel, int width, int heig
         if (pc) {
             Vec4 rect;
             Container_resolve(&(*child).base, 0.0f, 0.0f, (float) width, (float) height, &rect);
-            int w = (int) (rect.z * scale + 0.5f);
-            int h = (int) (rect.w * scale + 0.5f);
+            int w = (int) lround((double) rect.z * (double) scale);
+            int h = (int) lround((double) rect.w * (double) scale);
             if (w > 16384) w = 16384;
             if (h > 16384) h = 16384;
             if (w > 0 && h > 0) {
