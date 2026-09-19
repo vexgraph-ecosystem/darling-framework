@@ -20,6 +20,7 @@
 #include "window/window.h"
 
 #include <vulkan/vulkan_core.h>
+#include <math.h>
 #include <stdio.h>
 #include <stdlib.h>
 
@@ -48,7 +49,8 @@
  * Compositing Layer Order Law, managed exception per the Conflict Triage
  *   Law). No IOSurface transport remains.
  *
- * LOOP1 PSEUDOCODE (the depth-1 collage doctrine; Loop1 samples, Loop2 renders):
+ * LOOP1 PSEUDOCODE (board collage, classification-driven per the Immediate
+ * vs Retained Element Model; Loop1 samples, Loop2 renders):
  * ----------------------------------------------------------------------------
  *   for every active window {
  *       if minimized: continue
@@ -56,6 +58,8 @@
  *       infancy (presentedFrames < DARLING_INFANCY_PRESENTS): demand-gating
  *           off — run the resize sequence every tick until 3 consecutive
  *           successful presents, then settle into on-demand rest
+ *       (warm-up: Darling_initCompositor presents once synchronously
+ *           pre-show, so the opened window is already painted)
  *       for each board in [scene, content] {  // scene bottom, content top
  *           if board tree dirty, target dirty, or a depth-1 child published
  *               since its last composite (present-count delta): demanded = true
@@ -77,10 +81,17 @@
  *           publish
  *  }
  *
- * Retained presentables are EXACTLY the two boards plus their first-gen
- * children (synchronous plaster needs finished images); depth below 1 is
- * each child's private affair. Immediate parts (caret blink) paint inside
- * their owner's own target, so Loop1 paints nothing except the collage.
+ * Retained presentables are the two boards plus the first-gen subtrees that
+ * contain retained-output content (a COMPOSITED scene rendered on its own
+ * timeline — classification, the Immediate vs Retained Element Model,
+ * darling.md section 55); synchronous plaster needs finished images. Depth
+ * below 1 is each retained child's private affair. All-immediate /
+ * retained-texture (I/R) subtrees paint INLINE into the board pass via
+ * paintChildIntoPass's recursive subtree walk — zero flight targets, zero
+ * copies for plain UI. Immediate parts (caret blink) paint inside their
+ * owner's own target or inline, so Loop1 paints nothing except the collage.
+ * Pane-backed children (DIRECT scenes) present their own chain (the
+ * Present-On-Demand Law).
  *
  * STRUCT FIELDS (local to this file): none — procedural (no owned struct).
  *
@@ -88,46 +99,84 @@
  * ----------------------------------------------------------------------------
  * Core Functions:
  *   - Darling_initCompositor(frame)
+ *     (Vk init, shader bake, board/pane flight setup, GraphicsLoop client
+ *     registration — then a synchronous WARM-UP PRESENT: "run at least
+ *     once" per the Present-On-Demand Law first-render baseline and the
+ *     Window Compositing Layer Order Law registration-demand. Runs the same
+ *     resize sequence the loop's first step would (boards attach + render +
+ *     publish, seam composites, one clear-present) BEFORE Frame_show, so
+ *     the window opens already painted — no blank first beat over the blur
+ *     view while the loop's first step is still scheduling. Latches
+ *     hasPresented so the probe rests; animated content re-arms via its own
+ *     demand paths. Failure degrades: the loop retries at its first step.)
  *   - Darling_shutdownCompositor(void)
  *   - darlingGfxFrameFn(window, dt, userdata) (private) : GfxFrameFn demand
  *     probe registered into graphvex's GfxLoop (the Conflict Triage Law
  *     downward seam — the loop lives in R3, darling registers into it).
  *     Probed every resting pass (the Present-On-Demand Law): ticks the
- *     focused Input's caret blink and re-arms present demand on
- *     tree/pane/layer/live-resize dirt (VkLayer_hasDemand covers retained
- *     boards + COMPOSITED scenes) — probe free, present gated on demand.
- *   - Darling_renderFrame(cmdBuffer, drawW, drawH, userdata=Frame*)
- *     (Loop1 seam collage, composite != render: the seam pass samples EVERY
- *     registered board on EVERY present — sampling is one draw call per
- *     board (cheap) and the fresh-cleared swapchain image would ERASE a
- *     skipped board, so demand gates board RE-RENDER (visit-side dirty),
- *     never sampling. Unpublished boards (published<0) no-op inside
- *     VkLayer_composite. A successful board composite clears that board's
- *     tree dirt (scene and content alike) so a clean board CLEAN-SKIPs
- *     instead of re-arming forever. Window-level `demanded` (any board
- *     demand via tree/target dirt or depth-1 child present-count delta,
- *     never-presented, or live-resizing) presents exactly once per tick,
- *     else rests. Scene-bottom/content-top order per the Window
- *     Compositing Layer Order Law; minimized windows suppress. When no board
- *     exists, paints root children directly)
- *   - Darling_preFrame(window, drawW, drawH, userdata=Frame*)
- *     (full layout every tick: live gate was removed; setFrameSize drives
- *     layout directly per drag step; board VkLayers attach/resize here and
- *     VkLayer_visit publishes dirty boards + COMPOSITED scenes BEFORE the
- *     seam pass samples them — same-queue ordering; Darling_layerRender
- *     runs inside VkLayer_visit and VkPane_presentAll always)
- *   - Darling_layerRender(cmdBuffer, w, h, owner) : pane + retained-layer
- *     pass leaf (leaf panel or board subtree via depth-1 collage; runs
- *     every tick — the shared painter for DIRECT pane chains and COMPOSITED
- *     VkLayer targets, boards included. A board target collages each
- *     depth-1 child's last-published frame via VkLayer_composite at the
- *     child's anchor rect and skips unpublished children (published<0 keeps
- *     prior canvas content); children without a target fall back to
- *     paintChildIntoPass. Depth below 1 is each child's private affair:
- *     a child target paints its own subtree directly)
- *   - paintChildIntoPass(cmdBuffer, child, ...) (private) : one child
- *     into board or board-pane pass (the Present-On-Demand Law pane-skip + COMPOSITED layer
- *     composite inside)
+  *     focused Input's caret blink and re-arms present demand on
+  *     tree/pane/layer/live-resize dirt (VkLayer_hasDemand covers retained
+  *     boards + COMPOSITED scenes) or a publish-generation delta
+  *     (VkLayer_publishGeneration vs the frame's lastPublishGen — a fresh
+  *     publish summons its composite) — probe free, present gated on demand.
+  *   - Darling_renderFrame(cmdBuffer, drawW, drawH, userdata=Frame*)
+  *     (Loop1 seam collage, composite != render: winW/winH resolve from the
+  *     Frame's live points first (Window cached size is fallback only) so
+  *     kx = drawW/winW tracks the live scale every step and never stretches
+  *     fresh px over a stale point size (the Native Pixel Law); the seam pass samples EVERY
+  *     registered board on EVERY present — sampling is one draw call per
+  *     board (cheap) and the fresh-cleared swapchain image would ERASE a
+  *     skipped board, so demand gates board RE-RENDER (visit-side dirty,
+  *     already working), never sampling. Each board composites at its OWN
+  *     pixel extent pinned top-left in the drawable — never stretched to
+  *     fill it, so a board target that lags the window for a step pins its
+  *     last publish crisply instead of gravity-resizing it (the Continuous
+  *     Real-Time Live Resize Law); a converged board (extent == drawable)
+  *     samples identically to a full-extent quad. Unpublished boards
+  *     (published<0) no-op inside VkLayer_composite. A successful board
+  *     composite clears that board's tree dirt (scene and content alike) so
+  *     a clean board CLEAN-SKIPs next tick instead of re-arming forever.
+  *     Window-level `demanded` (any board demand via tree/target dirt or
+  *     depth-1 child present-count delta, never-presented, or live-resizing)
+  *     presents exactly once per tick, else rests. Scene-bottom/content-top
+  *     order per the Window Compositing Layer Order Law; minimized windows
+  *     suppress. When no board exists, paints root children directly.
+  *     Reports the pass through
+  *     s_seamNonEmpty (false at entry; true on any board composite success,
+  *     any fallback child actually painted, or deliberate !demanded rest —
+  *     the empty-present guard: present callbacks gate their verdicts on it
+  *     so a successful-but-empty present retries instead of settling blank)
+  *   - Darling_preFrame(window, drawW, drawH, userdata=Frame*)
+  *     (full layout every tick: the live flag is consumed as a demand ticket
+  *     (moving edge re-arms the client dirty so the drag presents at cadence,
+  *     idle ticks rest); live points resolve from the Frame first (the frame
+  *     hook already ran Frame_resize with live OS points) with the cached
+  *     Window size as fallback only, so Container_setSize + pane/layer
+  *     attaches stay in step with the border (the Native Pixel Law + the
+  *     Window Board Root Lock Law); board VkLayers attach with the live
+  *     drawable px directly (board px == drawable px, never width * stale
+  *     scale) and VkLayer_visit publishes dirty boards + COMPOSITED scenes
+  *     BEFORE the seam pass samples them — same-queue ordering;
+  *     Darling_layerRender runs inside VkLayer_visit and VkPane_presentAll
+  *     always)
+*   - Darling_layerRender(cmdBuffer, w, h, owner) : pane + retained-layer
+  *     pass leaf (leaf panel or board subtree; runs every tick — the shared
+  *     painter for DIRECT pane chains and COMPOSITED VkLayer targets, boards
+  *     included. A board target collages each retained depth-1 child's
+  *     last-published frame via VkLayer_composite at the child's anchor rect
+  *     and skips unpublished children (published<0 keeps prior canvas
+  *     content); children without a target fall back to paintChildIntoPass —
+  *     now recursive: the whole I/R subtree paints inline into the same pass
+  *     (the Immediate vs Retained Element Model, darling.md section 55).
+  *     Depth below 1 is each retained child's private affair: a child target
+  *     paints its own subtree directly)
+  *   - paintChildIntoPass(cmdBuffer, child, ...) (private) : one child
+  *     — and, for handler-less plain containers, its whole immediate subtree
+  *     recursively — into board or board-pane pass (the Present-On-Demand
+  *     Law pane-skip + COMPOSITED layer composite inside); each level resolves
+  *     against its own parent's extents and offsets by the parent's absolute
+  *     origin; returns true when any draw was issued (feeds the
+  *     s_seamNonEmpty empty-present guard)
  *   - Darling_compositorSettled(void)          : true when no pane submit flies
  *   - Darling_compositorIdleForResize(void)    : settled alias for pane/
  *     texture resize callers — resize-class work runs only when idle
@@ -137,47 +186,57 @@
  *     fence signaled AND every pane fence signaled. Closes the page-fault
  *     window where texture.c's 2-frame CPU lag freed an old image under a
  *     still-flying pane/present CB.
- *   - darlingPresentResizeSequence(window, userdata) (private) : shared
- *     first-frame/resize present body (one path for both): guards
- *     (Vk_ready, minimized, extent>0), Darling_preFrame at current extent
- *     (VkLayer_visit included) + VkPane_presentAll + Vk_clearPresent
- *     (wrapped in Window_workerPresentBegin/End, which are inert stubs);
- *     on success latches hasPresented via GraphicsLoop_findClient so a
- *     healed resize present stops the never-presented re-arm spin. Returns
- *     the Vk_clearPresent verdict for Loop2 bookkeeping.
- *   - Darling_resizeRenderHook(userdata) (private) : WindowResizeRenderFn
- *     registered by Darling_initCompositor; called on thread 0 by
- *     VulkanView.setFrameSize once per drag step, AFTER drawableSize and
- *     all panel layouts are already updated. Calls
- *     darlingPresentResizeSequence so rendered content tracks the window
- *     border in real time. Thread 0 exclusively owns presents during live
- *     resize; the present worker gates itself out via Window_isLiveResizing
- *     to avoid a concurrent present race.
- *   - darlingWindowPresentFn(window, userdata) (private) : GraphicsPresentFn
- *     per-window present callback; while the frame's presentedFrames stays
- *     below DARLING_INFANCY_PRESENTS it ignores demand and runs
- *     darlingPresentResizeSequence every tick (ready/minimized/extent
- *     guards stay), bumping presentedFrames only on success and retrying
- *     infancy on failure — never settling on an unconfirmed present. At
- *     infancy it emits one GRAPHICS_VK_STATS-gated settle line and takes
- *     the normal on-demand path thereafter (never-presented client runs
- *     the resize sequence, otherwise the bare Vk_clearPresent). The
- *     return value feeds Loop2 hasPresented latch + dirty clear.
+  *   - darlingPresentResizeSequence(window, userdata) (private) : shared
+  *     first-frame/resize present body (one path for both): guards
+  *     (Vk_ready, minimized, extent>0), Darling_preFrame at current extent
+  *     (VkLayer_visit included) + VkPane_presentAll + Vk_clearPresent
+  *     (wrapped in Window_workerPresentBegin/End, which are inert stubs);
+  *     on a NON-EMPTY success (s_seamNonEmpty) latches hasPresented via
+  *     GraphicsLoop_findClient so a healed resize present stops the
+  *     never-presented re-arm spin — an empty success latches nothing, so
+  *     the loop retries instead of resting blank. Returns
+  *     the Vk_clearPresent verdict for Loop2 bookkeeping.
+ *   - Darling_resizeRenderHook(userdata) (private)
+ *     : WindowResizeRenderFn registered by Darling_initCompositor into the
+ *     window's resize-hook slot. NOTE: FrameCocoa_attach later OVERWRITES
+ *     that slot with frameCocoaResizeHook (drawableSize re-chase in native
+ *     px + Frame_resize) — the drag path is the frame hook, and the IRS is
+ *     the shared present body for the warm-up and infancy presents. Either
+ *     way the sequence is thread 0, per drag step, with the cached window
+ *     size already the NEW extent: preFrame layout stays in step with the
+ *     border and the seam presents the boards pinned top-left at their own
+ *     extent (never stretched). Thread 0 exclusively owns presents during
+ *     live resize; the present worker gates itself out via
+ *     Window_isLiveResizing to avoid a concurrent present race.
+  *   - darlingWindowPresentFn(window, userdata) (private) : GraphicsPresentFn
+  *     per-window present callback; while the frame's presentedFrames stays
+  *     below DARLING_INFANCY_PRESENTS it ignores demand and runs
+  *     darlingPresentResizeSequence every tick (ready/minimized/extent
+  *     guards stay), bumping presentedFrames only on NON-EMPTY success
+  *     (s_seamNonEmpty) and retrying infancy on empty or failed presents —
+  *     never settling on an unconfirmed or blank present. Past
+  *     DARLING_EMPTY_PRESENT_CAP consecutive empty presents it settles on
+  *     clear color (bounded retry, the Bounded Wait Law). At
+  *     infancy it emits one GRAPHICS_VK_STATS-gated settle line and takes
+  *     the normal on-demand path thereafter (never-presented client runs
+  *     the resize sequence gated on non-empty, otherwise the bare
+  *     Vk_clearPresent). The return value feeds Loop2 hasPresented latch +
+  *     dirty clear, so false keeps demand armed for the retry.
  * ============================================================================
  */
 
 // Accessors for Vulkan device state from vexspoke
-extern VkDevice Vk_getDevice(void);
-extern VkQueue Vk_getQueue(void);
-extern VkCommandBuffer Vk_getCmdBuffer(void);
-extern VkPipeline Vk_getTriPipeline(void);
-extern VkPipelineLayout Vk_getTriLayout(void);
-extern uint64_t Vk_getAnimStartNanos(void);
-extern PFN_vkGetDeviceProcAddr Vk_getGdpa(void);
-extern VkInstance Vk_getInstance(void);
-extern PFN_vkGetInstanceProcAddr Vk_getGpa(void);
-extern VkPhysicalDevice Vk_getPhys(void);
-extern uint32_t Vk_getQueueFamily(void);
+extern VkDevice Vk_getDevice();
+extern VkQueue Vk_getQueue();
+extern VkCommandBuffer Vk_getCmdBuffer();
+extern VkPipeline Vk_getTriPipeline();
+extern VkPipelineLayout Vk_getTriLayout();
+extern uint64_t Vk_getAnimStartNanos();
+extern PFN_vkGetDeviceProcAddr Vk_getGdpa();
+extern VkInstance Vk_getInstance();
+extern PFN_vkGetInstanceProcAddr Vk_getGpa();
+extern VkPhysicalDevice Vk_getPhys();
+extern uint32_t Vk_getQueueFamily();
 
 extern bool VkView_refreshAll(VkInstance instance, PFN_vkGetInstanceProcAddr gpa, VkPhysicalDevice phys, VkDevice device);
 extern bool VkSceneCanvas_initModule(VkInstance instance, PFN_vkGetInstanceProcAddr gpa, VkPhysicalDevice phys, VkDevice device);
@@ -195,6 +254,24 @@ extern void VkSceneCanvas_shutdownModule(void);
     }
 
 #define DARLING_INFANCY_PRESENTS (3u)
+
+// Empty-present guard: the seam present succeeds (a clear-color frame hits
+// the screen) even when Darling_renderFrame composited zero boards —
+// unpublished targets no-op, unregistered boards skip, the root fallback
+// paints nothing. Latching hasPresented / clearing dirty / bumping
+// presentedFrames on such an empty success rests the loop on a blank frame
+// with no dirt left to re-arm it (the first-frame-blank defect: only a
+// resize re-arms demand). s_seamNonEmpty reports the last seam pass:
+// Darling_renderFrame sets it false at entry, true when at least one board
+// composite succeeds, a fallback child actually paints, or the pass rests
+// on purpose (!demanded with hasPresented already latched — the screen
+// already holds the last composite). Present callbacks gate their verdicts
+// on it so empty presents retry instead of settling. DARLING_EMPTY_PRESENT_CAP
+// bounds the retry (the Bounded Wait Law): past the cap the frame settles
+// on clear color rather than hot-spinning a persistently empty composite.
+#define DARLING_EMPTY_PRESENT_CAP (180u)
+
+static bool s_seamNonEmpty = false;
 
 
 
@@ -237,25 +314,41 @@ bool Darling_compositorIdleForResize(void) {
 
 // // CORE FUNCTIONS
 
-// Paint one child panel into an already-begun render pass — shared by the
-// legacy board (Darling_renderFrame) and board panes (Darling_layerRender
-// subtree walk). Scenes always paint (handler or tri fallback); plain UI
-// paints only when paintUI is set (content-board subtree — the legacy
+// Paint one child panel — and, for handler-less plain containers, its whole
+// immediate subtree recursively — into an already-begun render pass, shared
+// by the legacy board (Darling_renderFrame), board panes, and retained
+// layers (Darling_layerRender subtree walk). The Immediate vs Retained
+// Element Model (darling.md section 55) makes this the INLINE path for
+// all-immediate / retained-texture subtrees: a depth-1 child with no
+// retained-output content owns no flight target, so the pass paints the
+// child, then its children, then theirs — tree order is z-order; each level
+// resolves against its own parent's extents and offsets by the parent's
+// absolute origin (mirrors the depth-1 layer pass whose canvas was the
+// child's own rect). Scenes always paint (handler or tri fallback); plain
+// UI paints only when paintUI is set (content-board subtree — the legacy
 // board stamps scenes alone). Pane-backed children never paint here: they
-// present their OWN chain (the Present-On-Demand Law, recursive Vulkan-rect tree).
-static void paintChildIntoPass(void *cmdBuffer, Panel *child, float winW, float winH, float kx, float ky, float drawW, float drawH, bool paintUI) {
+// present their OWN chain (the Present-On-Demand Law, recursive Vulkan-rect
+// tree). Returns true when any draw was issued (feeds the s_seamNonEmpty
+// empty-present guard). Recursion depth equals panel tree depth — shallow
+// by design, cold path only, zero allocation (the Cold-Strict, Hot-Minimal
+// Validation Law).
+static bool paintChildIntoPass(void *cmdBuffer, Panel *child,
+                               float absX, float absY,
+                               float parentW, float parentH,
+                               float kx, float ky,
+                               float drawW, float drawH, bool paintUI) {
     if (!cmdBuffer || !child)
-        return;
+        return false;
     Vec4 rect;
-    Container_resolve(&(*child).base, 0.0f, 0.0f, winW, winH, &rect);
+    Container_resolve(&(*child).base, 0.0f, 0.0f, parentW, parentH, &rect);
     if (rect.z <= 0.0f || rect.w <= 0.0f)
-        return;
+        return false;
 
     uint64_t cType = Memory_type(child);
     bool childIsScene = (cType == TYPE_SCENE3D_SINGLETON || cType == TYPE_SCENE2D_SINGLETON
                          || cType == TYPE_SCENE_SINGLETON);
     if (!childIsScene && !paintUI)
-        return;
+        return false;
 
     // Pane-backed child (CAMetalLayer + own swapchain): renders into its
     // OWN chain — the pass must never stamp it (the Present-On-Demand Law).
@@ -263,18 +356,20 @@ static void paintChildIntoPass(void *cmdBuffer, Panel *child, float winW, float 
     extern bool PanelCocoa_isMetal(const void *pc);
     void *panePc = PanelCocoa_fromPanel(child);
     if (panePc && PanelCocoa_isMetal(panePc))
-        return;
+        return false;
 
-    float px = rect.x * kx;
-    float py = rect.y * ky;
+    float px = (absX + rect.x) * kx;
+    float py = (absY + rect.y) * ky;
     float pw = rect.z * kx;
     float ph = rect.w * ky;
     if (px < 0.0f) { pw += px; px = 0.0f; }
     if (py < 0.0f) { ph += py; py = 0.0f; }
-    if (pw <= 0.0f || ph <= 0.0f) return;
+    if (pw <= 0.0f || ph <= 0.0f)
+        return false;
     if (px + pw > drawW) pw = drawW - px;
     if (py + ph > drawH) ph = drawH - py;
-    if (pw <= 0.0f || ph <= 0.0f) return;
+    if (pw <= 0.0f || ph <= 0.0f)
+        return false;
 
     uint64_t childType = Memory_type(child);
     bool isScene = (childType == TYPE_SCENE3D_SINGLETON || childType == TYPE_SCENE2D_SINGLETON
@@ -290,18 +385,19 @@ static void paintChildIntoPass(void *cmdBuffer, Panel *child, float winW, float 
     // stamped TWICE (once into the window swapchain, once into the board).
     if (isScene && Scene_getPresentMode((Scene*) child) == SCENE_PRESENT_COMPOSITED) {
         if (!paintUI)
-            return;
+            return false;
         int layer = VkLayer_find(child);
-        if (layer >= 0)
-            VkLayer_composite(cmdBuffer, drawW, drawH, layer, px, py, pw, ph,
-                              1.0f, 1.0f, 1.0f, 1.0f);
-        return;
+        if (layer < 0)
+            return false;
+        return VkLayer_composite(cmdBuffer, drawW, drawH, layer, px, py, pw, ph,
+                                 1.0f, 1.0f, 1.0f, 1.0f);
     }
 
     if (isScene) {
         Panel_RenderFn handler = Panel_getRenderHandler(child);
         if (handler) {
             handler(child, nullptr, cmdBuffer, drawW, drawH, px, py, pw, ph);
+            return true;
         } else {
             COMPOSITOR_LOAD_DEVICE(CmdSetViewport);
             COMPOSITOR_LOAD_DEVICE(CmdSetScissor);
@@ -322,23 +418,42 @@ static void paintChildIntoPass(void *cmdBuffer, Panel *child, float winW, float 
             VkRect2D defaultSc = { .offset = { 0, 0 }, .extent = { (uint32_t)drawW, (uint32_t)drawH } };
             CmdSetViewport_fn((VkCommandBuffer) cmdBuffer, 0, 1, &defaultVp);
             CmdSetScissor_fn((VkCommandBuffer) cmdBuffer, 0, 1, &defaultSc);
+            return true;
         }
     } else {
-        Panel_RenderFn handler = Panel_getRenderHandler(child);
-        if (handler) {
-            handler(child, nullptr, cmdBuffer, drawW, drawH, px, py, pw, ph);
-        } else {
-            uint32_t color = Panel_getBackgroundColor(child);
-            if (color != 0) {
-                float r = (float)((color >> 16) & 0xFF) / 255.0f;
-                float g = (float)((color >> 8)  & 0xFF) / 255.0f;
-                float b = (float)( color        & 0xFF) / 255.0f;
-                float a = (float)((color >> 24) & 0xFF) / 255.0f
-                    * Container_getOpacity(&(*child).base);
-                if (a > 0.0f)
-                    Vk_fillRect(cmdBuffer, drawW, drawH, px, py, pw, ph, r, g, b, a);
-            }
+        // Ordered part pipeline (background -> image -> text -> border ->
+        // foreground). Legacy monoliths keep their exact old contract (paint
+        // self, no recurse) via the back-compat path inside Panel_paintParts;
+        // migrated / plain nodes paint stages then collage kids below.
+        if (Panel_getRenderHandler(child)) {
+            Panel_paintParts(child, nullptr, cmdBuffer, drawW, drawH,
+                             px, py, pw, ph);
+            return true;
         }
+        bool drew = Panel_paintParts(child, nullptr, cmdBuffer, drawW, drawH,
+                                     px, py, pw, ph);
+        // Inline subtree (the Immediate vs Retained Element Model, darling.md
+        // section 55): a handler-less plain container paints its children
+        // beneath itself in tree order — each resolved against THIS node's
+        // extents and offset by this node's absolute origin, mirroring the
+        // depth-1 retained pass whose canvas was the child's own rect.
+        // Pane-backed grandchildren skip (own chain); layer-backed
+        // grandchildren cannot exist beyond depth 1 (attach registers
+        // depth-1 only) and the leaf logic above leaves them unpainted,
+        // exactly as before classification.
+        size_t n = Panel_childCount(child);
+        for (size_t i = 0; i < n; i++) {
+            Panel *g = Panel_getChild(child, i);
+            if (!g)
+                continue;
+            void *gpc = PanelCocoa_fromPanel(g);
+            if (gpc && PanelCocoa_isMetal(gpc))
+                continue;
+            if (paintChildIntoPass(cmdBuffer, g, rect.x, rect.y, rect.z, rect.w,
+                                   kx, ky, drawW, drawH, paintUI))
+                drew = true;
+        }
+        return drew;
     }
 }
 
@@ -365,11 +480,11 @@ static void Darling_layerRender(void *cmdBuffer, int w, int h, void *owner) {
 
     size_t childCount = Panel_childCount(panel);
     if (childCount == 0) {
-        Panel_RenderFn handler = Panel_getRenderHandler(panel);
-        if (handler) {
-            handler(panel, nullptr, cmdBuffer, (float) w, (float) h, 0.0f, 0.0f, (float) w, (float) h);
+        // Leaf pane: ordered parts first (legacy monolith included); scene
+        // tri-fallback only when nothing drew.
+        if (Panel_paintParts(panel, nullptr, cmdBuffer, (float) w, (float) h,
+                             0.0f, 0.0f, (float) w, (float) h))
             return;
-        }
 
         uint64_t panelType = Memory_type(panel);
         bool isScene = (panelType == TYPE_SCENE3D_SINGLETON || panelType == TYPE_SCENE2D_SINGLETON
@@ -424,12 +539,15 @@ static void Darling_layerRender(void *cmdBuffer, int w, int h, void *owner) {
         Panel *child = Panel_getChild(panel, i);
         if (!child)
             continue;
-        // Depth-1 collage: a first-generation child with its own retained
-        // flight target reaches the board ONLY as a collaged published frame
-        // — the board pass never re-invokes the child's painter
-        // (composite != render). Unpublished children (published<0) skip and
-        // keep prior canvas content. DIRECT-pane children keep their
-        // exception (the Conflict Triage Law): own chain, own present.
+        // Retained depth-1 child (classification — the Immediate vs Retained
+        // Element Model: only COMPOSITED-scene subtrees own targets): reaches
+        // the board ONLY as a collaged published frame — the board pass never
+        // re-invokes the child's painter (composite != render). Unpublished
+        // children (published<0) skip and keep prior canvas content.
+        // DIRECT-pane children keep their exception (the Conflict Triage
+        // Law): own chain, own present. Children with NO target (I/R
+        // subtrees) fall through to paintChildIntoPass, which paints the
+        // whole subtree inline recursively.
         extern void *PanelCocoa_fromPanel(void *panel);
         extern bool PanelCocoa_isMetal(const void *pc);
         void *childPc = PanelCocoa_fromPanel(child);
@@ -456,13 +574,13 @@ static void Darling_layerRender(void *cmdBuffer, int w, int h, void *owner) {
                               cx, cy, cw, ch, 1.0f, 1.0f, 1.0f, 1.0f);
             continue;
         }
-        paintChildIntoPass(cmdBuffer, child, (float) panelW, (float) panelH, kx, ky, (float) w, (float) h, true);
+        paintChildIntoPass(cmdBuffer, child, 0.0f, 0.0f, (float) panelW, (float) panelH, kx, ky, (float) w, (float) h, true);
     }
 }
 
 void Darling_preFrame(Window *window, int drawW, int drawH, void *userdata) {
-    (void)userdata;
-    if (!window) return;
+    if (!window)
+        return;
 
     // LIVE RESIZE GATE, LAYOUT-ONLY (the Continuous Real-Time Live Resize Law): during a drag thread 0 owns
     // ALL layer motion — setFrameSize's synchronous composite pins every pane
@@ -478,26 +596,44 @@ void Darling_preFrame(Window *window, int drawW, int drawH, void *userdata) {
     // (composite calls self-gate + dispatch to main).
     bool live = Window_isLiveResizing(window);
 
-    int winW = Window_width(window);
-    int winH = Window_height(window);
-    if (winW <= 0 || winH <= 0) return;
-
-    (void)drawW;
-    (void)drawH;
+    // Live points resolve from the borrowing Frame (userdata) first — the
+    // frame hook chases Frame_resize with live OS points before modalTick, so
+    // Frame points lead the cached Window size by a step mid-drag (the Native
+    // Pixel Law + the Window Board Root Lock Law). The Window cached size is
+    // the fallback only (null frame or not-yet-synced).
+    Frame *frame = (Frame*) userdata;
+    int winW = 0;
+    int winH = 0;
+    if (frame != nullptr) {
+        winW = Frame_getWidth(frame);
+        winH = Frame_getHeight(frame);
+    }
+    if (winW <= 0 || winH <= 0) {
+        winW = Window_width(window);
+        winH = Window_height(window);
+    }
+    if (winW <= 0 || winH <= 0)
+        return;
 
     // Panes resolve from the borrowing Frame (userdata) — never the Window.
-    Frame *frame = (Frame*) userdata;
     if (frame == nullptr)
         return;
     Panel *root = Frame_getRootPanel(frame);
     Panel *contentPanel = Frame_getContentPane(frame);
     Panel *scenePanel = Frame_getScenePane(frame);
-    (void)live;
+    // Moving edge is a demand ticket (the Present-On-Demand Law): while live,
+    // force the client dirty every tick so the loop keeps presenting at drag
+    // cadence; idle ticks rest untouched. Atomic store only — no layout, no
+    // driver call, no allocation. Visit-then-composite order below is
+    // unchanged: VkLayer_visit publishes dirty boards + COMPOSITED scenes
+    // BEFORE the seam pass samples them.
+    if (live)
+        GraphicsLoop_markDirty(GraphicsLoop_default(), window);
     // Boards first: scene + content panels attach their full-window Metal
     // boards here so the pane attach below sees board backing (its
     // metal-parent gate) and the subtree painters see board sizes.
-    extern int Darling_attachPanelBoards(Window *window, Panel *scenePane, Panel *contentPane, int width, int height);
-    Darling_attachPanelBoards(window, scenePanel, contentPanel, winW, winH);
+    extern int Darling_attachPanelBoards(Window *window, Panel *scenePane, Panel *contentPane, int width, int height, int drawW, int drawH);
+    Darling_attachPanelBoards(window, scenePanel, contentPanel, winW, winH, drawW, drawH);
 
     if (contentPanel) {
         static int s_lastCompW = 0, s_lastCompH = 0;
@@ -540,11 +676,12 @@ void Darling_preFrame(Window *window, int drawW, int drawH, void *userdata) {
         }
     }
 
-    // Depth-1 flight targets for the scene board too (depth-1 collage
-    // doctrine: each board's first-generation children own retained targets;
-    // children iterated via Panel_childCount inside Darling_attachLayers,
-    // never hardcoded counts, per the Dynamic Scalability &
-    // Anti-Hardcoding Law).
+    // Depth-1 flight targets for the scene board too (classification, the
+    // Immediate vs Retained Element Model: only children whose subtree holds
+    // retained-output content — a COMPOSITED scene — own retained targets;
+    // I/R-only subtrees paint inline into the board pass; children iterated
+    // via Panel_childCount inside Darling_attachLayers, never hardcoded
+    // counts, per the Dynamic Scalability & Anti-Hardcoding Law).
     if (scenePanel) {
         extern int Darling_attachLayers(Window *window, Panel *contentPanel, int width, int height);
         Darling_attachLayers(window, scenePanel, winW, winH);
@@ -587,6 +724,7 @@ void Darling_preFrame(Window *window, int drawW, int drawH, void *userdata) {
 
 void Darling_renderFrame(void *cmdBuffer, int drawW, int drawH, void *userdata) {
     Frame *rframe = (Frame*) userdata;
+    s_seamNonEmpty = false;
     Window *window = rframe ? Frame_getWindow(rframe) : nullptr;
     if (!window || !cmdBuffer) return;
     // Minimized suppression: never re-composite the layer tree or record off
@@ -594,12 +732,21 @@ void Darling_renderFrame(void *cmdBuffer, int drawW, int drawH, void *userdata) 
     if (Window_isMinimized(window))
         return;
 
-    int winW = Window_width(window);
-    int winH = Window_height(window);
-    if (winW <= 0 || winH <= 0) return;
+    int winW = 0;
+    int winH = 0;
+    if (rframe != nullptr) {
+        winW = Frame_getWidth(rframe);
+        winH = Frame_getHeight(rframe);
+    }
+    if (winW <= 0 || winH <= 0) {
+        winW = Window_width(window);
+        winH = Window_height(window);
+    }
+    if (winW <= 0 || winH <= 0)
+        return;
 
-    float kx = (float)drawW / (float)winW;
-    float ky = (float)drawH / (float)winH;
+    float kx = (float) drawW / (float) winW;
+    float ky = (float) drawH / (float) winH;
 
     Panel *root = Frame_getRootPanel(rframe);
 
@@ -618,6 +765,8 @@ void Darling_renderFrame(void *cmdBuffer, int drawW, int drawH, void *userdata) 
     extern void *PanelCocoa_fromPanel(void *panel);
     extern bool PanelCocoa_isBoard(const void *pc);
     extern int PanelCocoa_chain(const void *pc);
+    extern int PanelCocoa_width(const void *pc);
+    extern int PanelCocoa_height(const void *pc);
     extern bool VkLayer_composite(void *cmdBuffer, float surfaceW, float surfaceH,
                                   int index, float x, float y, float w, float h,
                                   float r, float g, float b, float a);
@@ -665,8 +814,14 @@ void Darling_renderFrame(void *cmdBuffer, int drawW, int drawH, void *userdata) 
         demanded = true;
     if (!boardsRegistered && root && Panel_isTreeDirty(root))
         demanded = true;
-    if (!demanded)
+    if (!demanded) {
+        // Deliberate rest: nothing changed since the last composite and the
+        // screen already holds it (!demanded implies hasPresented — a
+        // never-presented client always demands). Report non-empty so the
+        // present verdict latches rest instead of retrying clean content.
+        s_seamNonEmpty = true;
         return;
+    }
     for (int i = 0; i < 2; i++) {
         Panel *board = boardPanels[i];
         if (!board)
@@ -682,11 +837,28 @@ void Darling_renderFrame(void *cmdBuffer, int drawW, int drawH, void *userdata) 
         // Success clears that board's tree dirt — the scene-tree dirt leak
         // fix: Panel_clearTreeDirty ran for content only, so scene dirt
         // re-armed layer 0 every tick.
-        if (VkLayer_composite(cmdBuffer, (float) drawW, (float) drawH, boardLayer,
-                              0.0f, 0.0f, (float) drawW, (float) drawH,
-                              1.0f, 1.0f, 1.0f, 1.0f)) {
+        // Pinned top-left in FRAMEBUFFER space, sized to the board's OWN
+        // pixel extent — never stretched to fill the drawable (the
+        // Continuous Real-Time Live Resize Law). VkLayer_composite's
+        // negative viewport (y=surfaceH, height=-surfaceH) makes a quad
+        // grow DOWNWARD from its y base in framebuffer space, so a y=0
+        // base would pin the board at the BOTTOM-left and expose the seam
+        // clear strip along the top/right during one-step convergence —
+        // the original "stretch at top-right, fine at bottom-left"
+        // signature. Offset y to drawH - boardH so the published image
+        // pins TOP-left, matching the seam layer's kCAGravityTopLeft
+        // anchor. A converged board (boardH == drawH) yields y == 0 and
+        // samples identically to the old full-extent quad.
+        int boardW = PanelCocoa_width(boardPc);
+        int boardH = PanelCocoa_height(boardPc);
+        int boardY = drawH - boardH;
+        if (boardW > 0 && boardH > 0
+            && VkLayer_composite(cmdBuffer, (float) drawW, (float) drawH, boardLayer,
+                                 0.0f, (float) boardY, (float) boardW, (float) boardH,
+                                 1.0f, 1.0f, 1.0f, 1.0f)) {
             s_lastChildPresent[i] = curPresent[i];
             Panel_clearTreeDirty(board);
+            s_seamNonEmpty = true;
         }
     }
     s_loop1First = false;
@@ -699,8 +871,10 @@ void Darling_renderFrame(void *cmdBuffer, int drawW, int drawH, void *userdata) 
         size_t childCount = Panel_childCount(root);
         for (size_t i = 0; i < childCount; i++) {
             Panel *child = Panel_getChild(root, i);
-            if (!child) continue;
-            paintChildIntoPass(cmdBuffer, child, (float)winW, (float)winH, kx, ky, (float)drawW, (float)drawH, false);
+            if (!child)
+                continue;
+            if (paintChildIntoPass(cmdBuffer, child, 0.0f, 0.0f, (float)winW, (float)winH, kx, ky, (float)drawW, (float)drawH, false))
+                s_seamNonEmpty = true;
         }
     }
 }
@@ -746,16 +920,33 @@ static bool darlingPresentResizeSequence(void *window, void *userdata) {
     // window the WindowServer is warping into or out of the dock.
     if (Window_isMinimized(w))
         return false;
-    int winW = Window_width(w);
-    int winH = Window_height(w);
+    int winW = 0;
+    int winH = 0;
+    if (hframe != nullptr) {
+        winW = Frame_getWidth(hframe);
+        winH = Frame_getHeight(hframe);
+    }
+    if (winW <= 0 || winH <= 0) {
+        winW = Window_width(w);
+        winH = Window_height(w);
+    }
     if (winW <= 0 || winH <= 0)
         return false;
-    Darling_preFrame(w, winW, winH, userdata);
+    // Live drawable px (not 0,0): the board attach must see the same px the
+    // seam present will use, or infancy/live steps size boards twice per
+    // tick (fallback then real) and lag a step behind the drawable.
+    extern float TextCore_backingScale(void);
+    float liveScale = TextCore_backingScale();
+    if (liveScale <= 0.0f)
+        liveScale = 1.0f;
+    int pxW = (int) lround((double) winW * (double) liveScale);
+    int pxH = (int) lround((double) winH * (double) liveScale);
+    Darling_preFrame(w, pxW, pxH, userdata);
     Window_workerPresentBegin();
     VkPane_presentAll();
     bool presented = Vk_clearPresent();
     Window_workerPresentEnd();
-    if (presented) {
+    if (presented && s_seamNonEmpty) {
         GraphicsClient *client = GraphicsLoop_findClient(GraphicsLoop_default(), w);
         if (client)
             (*client).hasPresented = true;
@@ -789,8 +980,9 @@ static void *darlingSeamMetalLayer(void *window) {
 //     path exactly on phase change;
 //   - present demand: a live resize, any DIRTY pane chain (DIRECT scenes),
 //     any dirty retained target — the boards + COMPOSITED layer re-arms
-//     propagated by Darling_propagatePaneDirty (VkLayer_hasDemand) — or a
-//     dirty panel tree re-arms the client.
+//     propagated by Darling_propagatePaneDirty (VkLayer_hasDemand) — a
+//     dirty panel tree, or a publish-generation delta since the last probe,
+//     re-arms the client.
 // Deliberately tiny: thread 0, struct reads + one markDirty only — no
 // layout, no driver calls, no allocation (the Cold-Strict, Hot-Minimal
 // Validation Law hot path). The probe is free; the present gate stays strict.
@@ -817,6 +1009,16 @@ static void darlingGfxFrameFn(void *window, double dt, void *userdata) {
     GraphicsClient *client = GraphicsLoop_findClient(GraphicsLoop_default(), window);
     if (client && !(*client).hasPresented)
         demand = true;
+    // Publish re-arm: a retained frame published since the last probe is
+    // itself demand — the composite may not have sampled it yet (the visit
+    // that published it consumed the dirt). Without this, a publish that
+    // lands with no dirt anywhere never summons its composite and the
+    // fresh pixels sit unpresented until an unrelated demand arrives.
+    uint64_t gen = VkLayer_publishGeneration();
+    if (gen != (*hframe).lastPublishGen) {
+        (*hframe).lastPublishGen = gen;
+        demand = true;
+    }
     if (demand)
         GraphicsLoop_markDirty(GraphicsLoop_default(), window);
 }
@@ -855,22 +1057,41 @@ static bool darlingWindowPresentFn(void *window, void *userdata) {
     Frame *hframe = (Frame*) userdata;
     if (hframe != nullptr && (*hframe).presentedFrames < DARLING_INFANCY_PRESENTS) {
         bool ok = darlingPresentResizeSequence(window, userdata);
+        bool nonEmpty = ok && s_seamNonEmpty;
         bool diag = getenv("GRAPHICS_VK_STATS") != nullptr || getenv("ANTI_VK_STATS") != nullptr;
-        if (ok) {
+        if (nonEmpty) {
             (*hframe).presentedFrames = (*hframe).presentedFrames + 1;
+            (*hframe).emptyPresents = 0;
             if (diag)
                 fprintf(stderr, "darling: infancy present %u/3 ok\n", (*hframe).presentedFrames);
             if ((*hframe).presentedFrames >= DARLING_INFANCY_PRESENTS && diag)
                 fprintf(stderr, "darling: settled into on-demand rest after %u infancy presents\n",
                         (*hframe).presentedFrames);
-        } else if (diag)
-            fprintf(stderr, "darling: infancy present failed\n");
-        return ok;
+        } else {
+            // Empty seam present (nothing composited) or driver failure: do
+            // NOT count infancy, do NOT latch — Loop2 keeps dirty armed and
+            // retries next tick. Only driver-quiet empties feed the cap;
+            // driver failures already retry through the dirty flag alone.
+            if (ok)
+                (*hframe).emptyPresents = (*hframe).emptyPresents + 1;
+            if (diag)
+                fprintf(stderr, "darling: infancy present empty (no board composited), retrying\n");
+            if ((*hframe).emptyPresents >= DARLING_EMPTY_PRESENT_CAP) {
+                if (diag)
+                    fprintf(stderr, "darling: empty-present cap reached, settling on clear color\n");
+                (*hframe).presentedFrames = DARLING_INFANCY_PRESENTS;
+                (*hframe).emptyPresents = 0;
+                return true;
+            }
+        }
+        return nonEmpty;
     }
     GraphicsClient *client = GraphicsLoop_findClient(GraphicsLoop_default(), window);
     bool neverPresented = client && !(*client).hasPresented;
-    if (neverPresented)
-        return darlingPresentResizeSequence(window, userdata);
+    if (neverPresented) {
+        bool ok = darlingPresentResizeSequence(window, userdata);
+        return ok && s_seamNonEmpty;
+    }
     return Vk_clearPresent();
 }
 
@@ -928,11 +1149,20 @@ void Darling_initCompositor(Frame *frame) {
     // samples instead of a Metal surface presenting them.
     VkLayer_setRenderer(Darling_layerRender);
 
-    // Live-resize present hook: called by VulkanView.setFrameSize on thread 0
-    // once per drag step. Drives one synchronous VkPane_presentAll so content
-    // tracks the window border in real time. Must be registered AFTER Vk_init
-    // so the pane/layer hooks are installed and the first present is valid.
+    // Live-resize present hook FALLBACK: FrameCocoa_attach overwrites this
+    // slot with frameCocoaResizeHook (the effective per-drag-step seam),
+    // which chases drawableSize + Frame_resize + GfxLoop_modalTick — the
+    // synchronous render-at-NEW-size-then-present per step. Darling_…
+    // resizeRenderHook is only reached if a Frame never attaches its cocoa
+    // shim; it runs the same present-resize sequence directly. Registered
+    // AFTER Vk_init so the pane/layer hooks are installed and the first
+    // present is valid.
     Window_setResizeRenderHook(window, Darling_resizeRenderHook, frame);
+    // The Frame shim was already attached at Frame creation (its hook set
+    // there); the fallback above just overwrote it. Reassert the cocoa hook
+    // last so the effective drag seam chases drawableSize + Frame_resize +
+    // forced present per step — the fallback only serves shim-less frames.
+    Frame_platformReassertResizeHook(frame);
 
     // Register into graphvex's GraphicsLoop: the frame loop runs our probe every
     // pass (demand re-arm + caret blink) and presents through the per-window loop.
@@ -942,6 +1172,33 @@ void Darling_initCompositor(Frame *frame) {
     GraphicsLoop_setClientMtkLayer(GraphicsLoop_default(), window, Frame_getNativeView(frame));
     GraphicsLoop_setClientReadyFn(GraphicsLoop_default(), window, darlingWindowReadyFn);
     GraphicsLoop_setClientPresentFn(GraphicsLoop_default(), window, darlingWindowPresentFn);
+
+    // WARM-UP PRESENT ("run at least once" — the Present-On-Demand Law's
+    // first-render baseline; registration demands the first render per the
+    // Window Compositing Layer Order Law). The frame loop's first step lands
+    // only AFTER Frame_show, so a freshly opened window would otherwise sit
+    // blank (transparent canvas over the blur view) for that first beat.
+    // Present synchronously HERE — thread 0, pre-show, zero concurrency —
+    // running the exact resize sequence the loop would: preFrame attaches,
+    // renders, and publishes the boards (registration dirty -> first visit
+    // paints them), the seam composites them, one clear-present paints the
+    // frame into the layer the user's first glance sees. hasPresented is
+    // latched so the loop's probe rests instead of double-forcing the same
+    // frame; animated content re-arms through its own demand paths. Failure
+    // is not fatal: the loop retries normally at its first step
+    // (drop-degrade, the Bounded Wait Law).
+    if (darlingWindowReadyFn(window, frame)) {
+        bool ok = darlingPresentResizeSequence(window, frame);
+        if (ok && s_seamNonEmpty) {
+            GraphicsClient *client = GraphicsLoop_findClient(GraphicsLoop_default(), window);
+            if (client)
+                (*client).hasPresented = true;
+        }
+        bool diag = getenv("GRAPHICS_VK_STATS") != nullptr || getenv("ANTI_VK_STATS") != nullptr;
+        if (diag)
+            fprintf(stderr, "darling: warm-up present %s (non-empty %d)\n",
+                    ok ? "ok" : "failed", s_seamNonEmpty ? 1 : 0);
+    }
 }
 
 void Darling_shutdownCompositor(void) {
