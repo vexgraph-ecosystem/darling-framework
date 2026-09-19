@@ -699,6 +699,11 @@ void Darling_preFrame(Window *window, int drawW, int drawH, void *userdata) {
         if (scenePanel)
             Container_setSize(&(*scenePanel).base, (float)winW, (float)winH);
         refreshClearColor(scenePanel, root, contentPanel);
+        static int freezeLog = -1;
+        if (freezeLog < 0)
+            freezeLog = getenv("VEX_GEOMETRY_LOG") != nullptr;
+        if (freezeLog)
+            fprintf(stderr, "freeze: win=(%dx%d) draw=(%dx%d)\n", winW, winH, drawW, drawH);
         return;
     }
     // Boards first: scene + content panels attach their full-window Metal
@@ -894,12 +899,18 @@ void Darling_renderFrame(void *cmdBuffer, int drawW, int drawH, void *userdata) 
         extern void Darling_getPanelSize(Panel *p, int *outW, int *outH);
         float liveScale = TextCore_backingScale();
         if (liveScale > 0.0f) {
+            static int directLog = -1;
+            if (directLog < 0)
+                directLog = getenv("VEX_GEOMETRY_LOG") != nullptr;
             for (int i = 0; i < 2; i++) {
                 Panel *board = boardPanels[i];
                 if (!board)
                     continue;
                 int panelW = 0, panelH = 0;
                 Darling_getPanelSize(board, &panelW, &panelH);
+                if (directLog)
+                    fprintf(stderr, "direct: win=(%dx%d) draw=(%dx%d) scale=%.2f panel=(%dx%d)\n",
+                            winW, winH, drawW, drawH, liveScale, panelW, panelH);
                 if (panelW <= 0 || panelH <= 0)
                     continue;
                 paintBoardSubtree(cmdBuffer, drawW, drawH, board,
