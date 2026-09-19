@@ -32,4 +32,8 @@ void Frame_platformSyncTransaction(Frame *frame) {
     (void) frame;
 }
 
+void Frame_platformReassertResizeHook(Frame *frame) {
+    (void) frame;
+}
+
 #endif // !__APPLE__

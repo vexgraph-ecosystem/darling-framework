@@ -90,6 +90,8 @@ typedef struct Frame {
     int visualEffectMaterial;   // FrameVisualEffectMaterial
     bool presentsWithTransaction; // CAMetalLayer presentsWithTransaction = YES
     uint32_t presentedFrames;     // Confirmed seam presents since attach (infancy gate)
+    uint32_t emptyPresents;       // Consecutive empty seam presents (empty-cap guard)
+    uint64_t lastPublishGen;      // Last observed VkLayer publish generation (probe re-arm)
 
     int width;
     int height;
@@ -139,6 +141,7 @@ bool Darling_bridge(Frame *frame, Application *app);
 void Frame_platformAttach(Frame *frame);
 void Frame_platformDetach(Frame *frame);
 void Frame_platformSyncTransaction(Frame *frame);
+void Frame_platformReassertResizeHook(Frame *frame);
 
 // Setters:
 void Frame_setWindow(Frame *frame, Window *window);

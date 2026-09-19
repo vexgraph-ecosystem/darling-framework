@@ -11,6 +11,7 @@ extern "C" {
 void FrameCocoa_attach(Frame *frame);
 void FrameCocoa_detach(Frame *frame);
 void FrameCocoa_syncTransaction(Frame *frame);
+void FrameCocoa_reassertHook(Frame *frame);
 
 #ifdef __cplusplus
 }

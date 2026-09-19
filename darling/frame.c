@@ -43,6 +43,8 @@
  *   int visualEffectMaterial;                     // FrameVisualEffectMaterial
  *   bool presentsWithTransaction;                 // Atomic presentation flag
  *   uint32_t presentedFrames;                       // Confirmed seam presents (infancy gate)
+ *   uint32_t emptyPresents;                         // Consecutive empty seam presents (empty-cap guard)
+ *   uint64_t lastPublishGen;                        // Last observed VkLayer publish generation (probe re-arm)
  *   int width;                                    // Pixel width
  *   int height;                                   // Pixel height
  *   bool inLiveResize;                            // Drag-resize active
@@ -231,6 +233,8 @@ bool Frame_init(Window *win, void *graphics, Frame *frame) {
     (*frame).visualEffectMaterial = FRAME_MATERIAL_HUD_WINDOW;
     (*frame).presentsWithTransaction = true;
     (*frame).presentedFrames = 0;
+    (*frame).emptyPresents = 0;
+    (*frame).lastPublishGen = 0;
     (*frame).chromeMode = FRAME_DECORATED;
     (*frame).width = win ? Window_width(win) : 800;
     (*frame).height = win ? Window_height(win) : 600;
