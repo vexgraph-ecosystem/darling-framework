@@ -30,13 +30,26 @@ typedef void (*Panel_RenderFn)(struct Panel *panel, void *renderer,
                                void *cmdBuffer, float surfaceW, float surfaceH,
                                float x, float y, float w, float h);
 
+// Per-part paint slot: one stage of the ordered pipeline
+// (background -> image -> text -> border -> foreground).
+// Records into the open pass like Panel_RenderFn; returns true when a draw
+// was issued (feeds the empty-present guard). nullptr = skip stage.
+typedef bool (*Panel_PartFn)(struct Panel *panel, void *renderer,
+                             void *cmdBuffer, float surfaceW, float surfaceH,
+                             float x, float y, float w, float h);
+
 typedef struct Panel {
     Container base;         // embedded prefix — pass &(*panel).base upward
     uint32_t color;         // 0xAARRGGBB
     void *filters;          // render-graph slot (@Draft placeholder)
     void *image;            // payload slot (shared through views)
-    Panel_RenderFn renderHandler; // draw override; nullptr = renderer default
+    Panel_RenderFn renderHandler; // legacy monolith; non-null = back-compat path
     void *renderUserdata;   // opaque arg handed back to renderHandler
+    Panel_PartFn backgroundFn; // stage 0: fill / material; nullptr = skip
+    Panel_PartFn imageFn;   // stage 1: picture / video / scene content
+    Panel_PartFn textFn;    // stage 2: raster / SDF label quad
+    Panel_PartFn borderFn;  // stage 3: stroke over content; nullptr = skip
+    Panel_PartFn foregroundFn; // stage 4: caret / selection / filter / glow
     struct Panel *source;   // canonical panel this view proxies; nullptr = owns
     struct Panel *parent;   // nullptr = root
     List *children;
@@ -69,6 +82,27 @@ void Panel_setRenderHandler(Panel *p, Panel_RenderFn fn);
 // CAMetalLayer pane scenes). Never interpreted by the panel itself.
 void *Panel_getRenderUserdata(const Panel *p);
 void Panel_setRenderUserdata(Panel *p, void *userdata);
+
+// Per-part paint slots (ordered pipeline: background -> image -> text
+// -> border -> foreground). Setter is the @Override; nullptr skips the
+// stage. Each setter marks the tree dirty so holders re-render this tick.
+Panel_PartFn Panel_getBackgroundFn(const Panel *p);
+void Panel_setBackgroundFn(Panel *p, Panel_PartFn fn);
+Panel_PartFn Panel_getImageFn(const Panel *p);
+void Panel_setImageFn(Panel *p, Panel_PartFn fn);
+Panel_PartFn Panel_getTextFn(const Panel *p);
+void Panel_setTextFn(Panel *p, Panel_PartFn fn);
+Panel_PartFn Panel_getBorderFn(const Panel *p);
+void Panel_setBorderFn(Panel *p, Panel_PartFn fn);
+Panel_PartFn Panel_getForegroundFn(const Panel *p);
+void Panel_setForegroundFn(Panel *p, Panel_PartFn fn);
+
+// Ordered dispatcher: runs legacy renderHandler when set (back-compat
+// for unmigrated widgets), else runs background -> image -> text ->
+// border -> foreground, skipping nulls. Returns true when any stage ran.
+bool Panel_paintParts(Panel *panel, void *renderer, void *cmdBuffer,
+                      float surfaceW, float surfaceH,
+                      float x, float y, float w, float h);
 
 // Layout facade — the delegation chain ends here. Every accessor below is a
 // one-hop static inline to the embedded Container, so call sites never write
