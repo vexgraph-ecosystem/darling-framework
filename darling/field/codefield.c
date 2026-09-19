@@ -19,6 +19,12 @@
  * ============================================================================
  * Code editor widget with line number gutter and active line indicator.
  * Wraps a Textarea editor configured for monospace source code.
+ *
+ * Ordered part pipeline: background (gutter fill + divider + inner layout)
+ * -> text (line numbers + active-line marker) -> border (reserved) ->
+ * foreground (reserved: loc text / buttons / highlight). Code text, selection
+ * highlight, and caret paint via the child Textarea's own pipeline — the seam
+ * never re-invokes them here (composite != render).
  * ============================================================================
  */
 
@@ -40,111 +46,136 @@ static void markDirty(CodeField *self) {
     Container_markDirty(&(*bp).base);
 }
 
-static void CodeField_renderFn(Panel *panel, void *renderer, void *cmdBuffer, float surfaceW, float surfaceH,
-                              float x, float y, float w, float h) {
+// Ordered part pipeline: background (gutter + divider + layout) -> text
+// (line numbers + active marker). Code text / highlight / caret belong to the
+// child Textarea and are never re-invoked here.
+
+// Stage 0: gutter fill + divider + inner editor layout (layout-in-paint
+// preserved; future work moves this next to Container_resolve).
+static bool codePaintBackground(Panel *panel, void *renderer, void *cmdBuffer,
+                                float surfaceW, float surfaceH,
+                                float x, float y, float w, float h) {
     CodeField *cf = (CodeField*) panel;
     (void) renderer;
-    if (!cf || w <= 0.0f || h <= 0.0f)
-        return;
-    float op = Container_getOpacity(&(*panel).base);
+    if (!cf || !cmdBuffer)
+        return false;
+    if (w <= 0.0f || h <= 0.0f)
+        return false;
+    Container *c = &(*panel).base;
+    float op = Container_getOpacity(c);
     if (op <= 0.0f)
-        return;
-
+        return false;
     float gw = (*cf).gutterWidth > 0.0f ? (*cf).gutterWidth : CODEFIELD_DEFAULT_GUTTER_W;
-
-    // 1. Gutter background
+    Textarea *ed = (*cf).editor;
+    if (ed) {
+        float edW = w - gw;
+        if (edW < 10.0f)
+            edW = 10.0f;
+        Panel *ebp = &(*ed).base;
+        Container *ec = &(*ebp).base;
+        Container_setLocation(ec, gw, 0.0f);
+        Container_setSize(ec, edW, h);
+    }
     uint32_t gbg = (*cf).gutterBackground;
     float gr = ((gbg >> 16) & 0xFF) / 255.0f;
     float gg = ((gbg >> 8) & 0xFF) / 255.0f;
     float gb = (gbg & 0xFF) / 255.0f;
     float ga = ((gbg >> 24) & 0xFF) / 255.0f * op;
-    Vk_fillRect(cmdBuffer, surfaceW, surfaceH, x, y, gw, h, gr, gg, gb, ga);
-
-    // 2. Gutter divider line
+    if (ga > 0.0f)
+        Vk_fillRect(cmdBuffer, surfaceW, surfaceH, x, y, gw, h, gr, gg, gb, ga);
     Vk_fillRect(cmdBuffer, surfaceW, surfaceH, x + gw - 1.0f, y, 1.0f, h, 0.25f, 0.25f, 0.28f, op);
+    return true;
+}
 
-    // 3. Layout inner editor
-    if (cf->editor) {
-        float edW = w - gw;
-        if (edW < 10.0f) edW = 10.0f;
-        Container_setLocation(&(*cf->editor).base.base, gw, 0.0f);
-        Container_setSize(&(*cf->editor).base.base, edW, h);
-    }
-
-    // 4. Draw line numbers in gutter
-    if (cf->editor) {
-        const char *txt = Textarea_getText(cf->editor);
-        int32_t lines = 1;
-        if (txt) {
-            for (size_t i = 0; txt[i] != '\0'; i++) {
-                if (txt[i] == '\n') lines++;
-            }
-        }
-
-        // Active line
-        int32_t cur = Textarea_getCursor(cf->editor);
-        int32_t activeLine = 0;
-        if (txt) {
-            for (int32_t i = 0; i < cur && txt[i] != '\0'; i++) {
-                if (txt[i] == '\n') activeLine++;
-            }
-        }
-
-        float padY = 8.0f;
-        float lineH = Textarea_getFontSize(cf->editor) * 1.35f + Textarea_getSpacingHeight(cf->editor);
-        float scrollY = Textarea_getScrollY(cf->editor);
-
-        float backing = TextCore_backingScale();
-        if (backing <= 0.0f) backing = 1.0f;
-        float pxH = 11.0f * backing;
-
-        for (int32_t l = 0; l < lines; l++) {
-            float lineY = y + h - padY - (float)(l + 1) * lineH + scrollY;
-            if (lineY + lineH < y || lineY > y + h)
-                continue;
-
-            bool isActive = (l == activeLine) && Textarea_isFocused(cf->editor);
-            uint32_t numCol = isActive ? (*cf).activeLineColor : (*cf).gutterTextColor;
-
-            if (isActive) {
-                // Active line gutter marker indicator
-                Vk_fillRect(cmdBuffer, surfaceW, surfaceH, x + gw - 2.5f, lineY, 2.5f, lineH, 0.23f, 0.51f, 0.96f, op);
-            }
-
-            char numStr[16];
-            snprintf(numStr, sizeof(numStr), "%d", l + 1);
-
-            TextStyleDescriptor style = {
-                .ligatures = false,
-                .spacingWidth = 0.0f,
-                .spacingHeight = 0.0f,
-                .underline = UNDERLINE_NONE,
-                .underlineColor = 0,
-                .mnemonicIndex = -1,
-                .selectionStart = -1,
-                .selectionEnd = -1,
-                .highlightRadius = 0.0f,
-                .highlightColor = 0,
-                .align = TEXT_ALIGN_RIGHT,
-                .boundsWidth = gw - 8.0f,
-            };
-
-            uint8_t *rgba = nullptr;
-            int rw = 0, rh = 0;
-            bool ok = TextCore_rasterStyled(numStr, "Menlo", pxH, numCol, &style, &rgba, &rw, &rh);
-            if (ok && rgba && rw > 0 && rh > 0) {
-                int32_t tex = Texture_loadRaw(rgba, (uint32_t) rw, (uint32_t) rh);
-                float qw = (float) rw / backing;
-                float qh = (float) rh / backing;
-                float qx = x + gw - 8.0f - qw;
-                float qy = lineY + (lineH - qh) * 0.5f;
-                Vk_drawTexture(cmdBuffer, surfaceW, surfaceH, qx, qy, qw, qh, 1.0f, 1.0f, 1.0f, op,
-                               tex, PICTURE_MODE_FIT, (float) rw, (float) rh);
-                Texture_free(tex);
-                free(rgba);
-            }
+// Stage 2: gutter line numbers + active-line marker.
+static bool codePaintText(Panel *panel, void *renderer, void *cmdBuffer,
+                          float surfaceW, float surfaceH,
+                          float x, float y, float w, float h) {
+    CodeField *cf = (CodeField*) panel;
+    (void) renderer;
+    (void) w;
+    if (!cf || !cmdBuffer)
+        return false;
+    if (w <= 0.0f || h <= 0.0f)
+        return false;
+    Container *c = &(*panel).base;
+    float op = Container_getOpacity(c);
+    if (op <= 0.0f)
+        return false;
+    Textarea *ed = (*cf).editor;
+    if (!ed)
+        return false;
+    float gw = (*cf).gutterWidth > 0.0f ? (*cf).gutterWidth : CODEFIELD_DEFAULT_GUTTER_W;
+    const char *txt = Textarea_getText(ed);
+    int32_t lines = 1;
+    if (txt) {
+        for (size_t i = 0; txt[i] != '\0'; i++) {
+            if (txt[i] == '\n')
+                lines++;
         }
     }
+    int32_t cur = Textarea_getCursor(ed);
+    int32_t activeLine = 0;
+    if (txt) {
+        for (int32_t i = 0; i < cur && txt[i] != '\0'; i++) {
+            if (txt[i] == '\n')
+                activeLine++;
+        }
+    }
+    float padY = 8.0f;
+    float lineH = Textarea_getFontSize(ed) * 1.35f + Textarea_getSpacingHeight(ed);
+    float scrollY = Textarea_getScrollY(ed);
+    float backing = TextCore_backingScale();
+    if (backing <= 0.0f)
+        backing = 1.0f;
+    float pxH = 11.0f * backing;
+    bool drew = false;
+    bool edFocused = Textarea_isFocused(ed);
+    uint32_t activeCol = (*cf).activeLineColor;
+    uint32_t idleCol = (*cf).gutterTextColor;
+    for (int32_t l = 0; l < lines; l++) {
+        float lineY = y + h - padY - (float)(l + 1) * lineH + scrollY;
+        if (lineY + lineH < y || lineY > y + h)
+            continue;
+        bool isActive = (l == activeLine) && edFocused;
+        uint32_t numCol = isActive ? activeCol : idleCol;
+        if (isActive) {
+            Vk_fillRect(cmdBuffer, surfaceW, surfaceH, x + gw - 2.5f, lineY, 2.5f, lineH, 0.23f, 0.51f, 0.96f, op);
+            drew = true;
+        }
+        char numStr[16];
+        snprintf(numStr, sizeof(numStr), "%d", l + 1);
+        TextStyleDescriptor style = {
+            .ligatures = false,
+            .spacingWidth = 0.0f,
+            .spacingHeight = 0.0f,
+            .underline = UNDERLINE_NONE,
+            .underlineColor = 0,
+            .mnemonicIndex = -1,
+            .selectionStart = -1,
+            .selectionEnd = -1,
+            .highlightRadius = 0.0f,
+            .highlightColor = 0,
+            .align = TEXT_ALIGN_RIGHT,
+            .boundsWidth = gw - 8.0f,
+        };
+        uint8_t *rgba = nullptr;
+        int rw = 0, rh = 0;
+        bool ok = TextCore_rasterStyled(numStr, "Menlo", pxH, numCol, &style, &rgba, &rw, &rh);
+        if (ok && rgba && rw > 0 && rh > 0) {
+            int32_t tex = Texture_loadRaw(rgba, (uint32_t) rw, (uint32_t) rh);
+            float qw = (float) rw / backing;
+            float qh = (float) rh / backing;
+            float qx = x + gw - 8.0f - qw;
+            float qy = lineY + (lineH - qh) * 0.5f;
+            Vk_drawTexture(cmdBuffer, surfaceW, surfaceH, qx, qy, qw, qh, 1.0f, 1.0f, 1.0f, op,
+                           tex, PICTURE_MODE_FIT, (float) rw, (float) rh);
+            Texture_free(tex);
+            free(rgba);
+            drew = true;
+        }
+    }
+    return drew;
 }
 
 CodeField *CodeField_0(void) {
@@ -177,7 +208,10 @@ CodeField *CodeField_0(void) {
         Panel_addContainer(&(*cf).base, &(*cf).editor->base);
     }
 
-    Panel_setRenderHandler(&(*cf).base, CodeField_renderFn);
+    Panel *cp = &(*cf).base;
+    Panel_setRenderHandler(cp, nullptr);
+    Panel_setBackgroundFn(cp, codePaintBackground);
+    Panel_setTextFn(cp, codePaintText);
     return cf;
 }
 
