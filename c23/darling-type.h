@@ -93,6 +93,11 @@
 // parent chain registers them as roots alongside the transient events) ---
 #define ID_FRAME_FUNCTION  55u
 
+// --- DARLING STRUCTURAL LEAF (immediate on-demand rendering base;
+// no Panel base, no tree — a leaf that renders detached from any container;
+// parent chain registers it as a root) ---
+#define ID_COMPONENT  56u
+
 // --- STRUCTURAL SINGLETONS (darling tree) ---
 #define TYPE_PANEL_SINGLETON       (PROJ_DARLING | FORM_SINGLETON | ID_PANEL)
 #define TYPE_CONTAINER_SINGLETON   (PROJ_DARLING | FORM_SINGLETON | ID_CONTAINER)
@@ -157,5 +162,8 @@
 
 // --- SLOT RECORD ARRAY FORMS ---
 #define TYPE_FRAME_FUNCTION_ARRAY     (PROJ_DARLING | FORM_ARRAY | ID_FRAME_FUNCTION)
+
+// --- STRUCTURAL LEAF SINGLETONS ---
+#define TYPE_COMPONENT_SINGLETON      (PROJ_DARLING | FORM_SINGLETON | ID_COMPONENT)
 
 #endif

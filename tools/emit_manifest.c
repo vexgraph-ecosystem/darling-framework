@@ -6,7 +6,9 @@
 
 #include "c23/darling-type.h"
 #include "c23/darling_parents.h"
+#include "darling/component.h"
 #include "darling/container.h"
+#include "darling/frame.h"
 #include "darling/panel/panel.h"
 #include "darling/scene/canvas.h"
 #include "darling/picture/picture.h"
@@ -154,6 +156,8 @@ static const EmitRow kRows[] = {
     { "ID_CURSOR", (uint64_t) TYPE_CURSOR_SINGLETON, ID_CURSOR, sizeof(Cursor) },
     { "ID_SEARCHFIELD", (uint64_t) TYPE_SEARCHFIELD_SINGLETON, ID_SEARCHFIELD, sizeof(SearchField) },
     { "ID_CODEFIELD", (uint64_t) TYPE_CODEFIELD_SINGLETON, ID_CODEFIELD, sizeof(CodeField) },
+    { "ID_FRAME_FUNCTION", (uint64_t) TYPE_FRAME_FUNCTION_ARRAY, ID_FRAME_FUNCTION, sizeof(FrameFunction) },
+    { "ID_COMPONENT", (uint64_t) TYPE_COMPONENT_SINGLETON, ID_COMPONENT, sizeof(Component) },
 };
 
 _Static_assert(sizeof(kRows) / sizeof(kRows[0]) == DARLING_PARENT_COUNT - 1u,

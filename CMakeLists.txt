@@ -55,6 +55,7 @@ add_library(darling STATIC
         c23/add.c
     darling/scene/canvas.c
     darling/compositor.c
+    darling/component.c
     darling/container.c
     darling/anim/anim.c
     darling/cursor/cursor.c
@@ -202,6 +203,14 @@ if(NOT TARGET corner_test AND EXISTS "${DARLING_TEST_DIR}/corner_test.c")
         ${DARLING_TEST_DIR}/corner_test.c
     )
     target_link_libraries(corner_test PRIVATE darling)
+endif()
+
+# Component artifact (new architecture leaf): eager-abs lattice + hooks suite.
+if(NOT TARGET component_test AND EXISTS "${DARLING_TEST_DIR}/component_test.c")
+    add_executable(component_test
+        ${DARLING_TEST_DIR}/component_test.c
+    )
+    target_link_libraries(component_test PRIVATE darling)
 endif()
 
 # Anim artifact (anim section1): headless easing + keyframe player suite.

@@ -104,6 +104,8 @@ const char *Darling_kindName(uint64_t classId) {
         return "Scene3D";
     if (cls == ID_CONTAINER)
         return "Container";
+    if (cls == ID_COMPONENT)
+        return "Component";
     if (cls == ID_CANVAS)
         return "Canvas";
     if (cls == ID_LAYERED_CONTAINER)
