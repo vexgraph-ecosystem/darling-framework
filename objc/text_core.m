@@ -25,10 +25,14 @@
  * FUNCTION REGISTRY:
  * ----------------------------------------------------------------------------
  * Core Functions:
- *   - TextCore_backingScale(void)
+ *   - TextCore_backingScale(void) (override-pinned when > 0, else mainScreen)
  *   - TextCore_rasterLine(utf8, family, pxHeight, argb, outRgba, outW, outH)
  *   - TextCore_rasterStyled(utf8, family, pxHeight, argb, style, outRgba, outW, outH)
  *   - TextCore_lineOffsets(utf8, family, pxHeight, ligatures, kernPts, outPts, cap)
+ *
+ * Setters:
+ *   - TextCore_setBackingScaleOverride(scale) (live-drag pin from resize hook)
+ *   - TextCore_clearBackingScaleOverride(void) (settle resync to mainScreen)
  * ============================================================================
  */
 
@@ -41,13 +45,28 @@
 static bool s_testClip = false;
 static char s_testClipBuf[8192];
 
+// Live scale override (sticky seam pin): > 0 pins TextCore_backingScale to
+// the dragged window's live backingScaleFactor (set every drag step from
+// frameCocoaResizeHook); <= 0 resyncs to mainScreen (cleared on settle).
+static float s_override = 0.0f;
+
 void TextCore_setTestClipboard(bool enable) {
     s_testClip = enable;
     if (s_testClipBuf[0] != '\0')
         s_testClipBuf[0] = '\0';
 }
 
+void TextCore_setBackingScaleOverride(float scale) {
+    s_override = scale;
+}
+
+void TextCore_clearBackingScaleOverride(void) {
+    s_override = 0.0f;
+}
+
 float TextCore_backingScale(void) {
+    if (s_override > 0.0f)
+        return s_override;
     CGFloat s = [[NSScreen mainScreen] backingScaleFactor];
     if (s > 0.0)
         return (float) s;

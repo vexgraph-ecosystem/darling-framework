@@ -52,7 +52,17 @@ typedef struct TextStyleDescriptor {
 
 // Active backing scale: NSScreen backingScaleFactor (Retina points to pixels).
 // For active-mode currentWidth/pointWidth, combine with DisplayInfo on top.
+// During a live-resize drag the frame hook pins this seam to the window's
+// live backingScaleFactor via TextCore_setBackingScaleOverride, so button /
+// label / input raster and attachLayers / attachPanes px math track the
+// dragged window — never [[NSScreen mainScreen]] mid-drag. Cleared on settle.
 float TextCore_backingScale(void);
+
+// Live scale override (sticky seam pin): positive pins backingScale, cleared
+// (<= 0) resyncs to mainScreen. Set every drag step from the resize hook,
+// cleared on the settle step. Cold seam only, never from tick/render paths.
+void TextCore_setBackingScaleOverride(float scale);
+void TextCore_clearBackingScaleOverride(void);
 
 // Rasterize one UTF-8 line. pxHeight is native pixels (points * backing).
 // Returns malloc'd RGBA8 (caller frees with free), or nullptr on failure.

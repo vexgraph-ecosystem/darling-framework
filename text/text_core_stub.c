@@ -20,10 +20,14 @@
  * FUNCTION REGISTRY:
  * ----------------------------------------------------------------------------
  * Core Functions:
- *   - TextCore_backingScale(void)
+ *   - TextCore_backingScale(void) (override-pinned when > 0, else 1.0)
  *   - TextCore_rasterLine(utf8, family, pxHeight, argb, outRgba, outW, outH)
  *   - TextCore_rasterStyled(utf8, family, pxHeight, argb, style, outRgba, outW, outH)
  *   - TextCore_lineOffsets(utf8, family, pxHeight, ligatures, kernPts, outPts, cap)
+ *
+ * Setters:
+ *   - TextCore_setBackingScaleOverride(scale) (live-drag pin, mirrors objc seam)
+ *   - TextCore_clearBackingScaleOverride(void) (settle resync)
  * ============================================================================
  */
 
@@ -33,8 +37,22 @@
 ;;DRAFT
 ;;INTENTION("Stub native raster off Apple, SDF fallback owns text")
 
+// Live scale override mirror (same contract as objc/text_core.m): > 0 pins
+// backingScale, cleared resyncs to 1.0. Headless seam only, never tick paths.
+static float s_override = 0.0f;
+
 float TextCore_backingScale(void) {
+    if (s_override > 0.0f)
+        return s_override;
     return 1.0f;
+}
+
+void TextCore_setBackingScaleOverride(float scale) {
+    s_override = scale;
+}
+
+void TextCore_clearBackingScaleOverride(void) {
+    s_override = 0.0f;
 }
 
 bool TextCore_rasterLine(const char *utf8, const char *family, float pxHeight, uint32_t argb, uint8_t **outRgba, int *outW, int *outH) {
