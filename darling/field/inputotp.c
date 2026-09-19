@@ -93,73 +93,188 @@ static void ensureBoxRaster(InputOTP *otp, int32_t idx, char ch) {
     }
 }
 
-static void InputOTP_renderFn(Panel *panel, void *renderer, void *cmdBuffer, float surfaceW, float surfaceH,
-                             float x, float y, float w, float h) {
-    InputOTP *otp = (InputOTP*) panel;
-    (void) renderer;
-    if (!otp || w <= 0.0f || h <= 0.0f)
-        return;
-    float op = Container_getOpacity(&(*panel).base);
-    if (op <= 0.0f)
-        return;
+// Ordered part pipeline, one loop per stage (boxes never overlap, so the
+// grouped order is pixel-identical to the legacy per-box interleave):
+// background (all boxes) -> border (all boxes) -> text (all digits) ->
+// foreground (active-box caret). Layout math lives once in boxLayout.
 
+// Shared box geometry: centers len boxes in the node rect. Dest-last outs.
+static void boxLayout(InputOTP *otp, float x, float y, float w, float h,
+                      int32_t *outLen, float *outBs, float *outStartX, float *outStartY) {
     int32_t len = (*otp).length;
-    if (len <= 0) return;
-    if (len > INPUTOTP_MAX_BOXES) len = INPUTOTP_MAX_BOXES;
-
+    if (len <= 0)
+        len = 1;
+    if (len > INPUTOTP_MAX_BOXES)
+        len = INPUTOTP_MAX_BOXES;
     float bs = (*otp).boxSize > 0.0f ? (*otp).boxSize : INPUTOTP_DEFAULT_BOX;
     float gap = (*otp).gap >= 0.0f ? (*otp).gap : INPUTOTP_DEFAULT_GAP;
     float totalW = (float)len * bs + (float)(len - 1) * gap;
-    float startX = x + (w > totalW ? (w - totalW) * 0.5f : 0.0f);
-    float startY = y + (h > bs ? (h - bs) * 0.5f : 0.0f);
+    *outLen = len;
+    *outBs = bs;
+    *outStartX = x + (w > totalW ? (w - totalW) * 0.5f : 0.0f);
+    *outStartY = y + (h > bs ? (h - bs) * 0.5f : 0.0f);
+}
 
-    size_t dlen = (*otp).digits ? strlen((*otp).digits) : 0;
-
+// Stage 0: every box fill.
+static bool otpPaintBackground(Panel *panel, void *renderer, void *cmdBuffer,
+                               float surfaceW, float surfaceH,
+                               float x, float y, float w, float h) {
+    InputOTP *otp = (InputOTP*) panel;
+    (void) renderer;
+    if (!otp || !cmdBuffer)
+        return false;
+    if (w <= 0.0f || h <= 0.0f)
+        return false;
+    Container *c = &(*panel).base;
+    float op = Container_getOpacity(c);
+    if (op <= 0.0f)
+        return false;
+    int32_t len = 0;
+    float bs = 0.0f;
+    float startX = 0.0f;
+    float startY = 0.0f;
+    boxLayout(otp, x, y, w, h, &len, &bs, &startX, &startY);
+    float gap = (*otp).gap >= 0.0f ? (*otp).gap : INPUTOTP_DEFAULT_GAP;
+    bool drew = false;
     for (int32_t i = 0; i < len; i++) {
         float bx = startX + (float)i * (bs + gap);
         float by = startY;
-
-        // 1. Box background
         uint32_t bg = (*otp).boxBackground;
         float br = ((bg >> 16) & 0xFF) / 255.0f;
         float bgc = ((bg >> 8) & 0xFF) / 255.0f;
         float bb = (bg & 0xFF) / 255.0f;
         float ba = ((bg >> 24) & 0xFF) / 255.0f * op;
+        if (ba <= 0.0f)
+            continue;
         Vk_fillRect(cmdBuffer, surfaceW, surfaceH, bx, by, bs, bs, br, bgc, bb, ba);
+        drew = true;
+    }
+    return drew;
+}
 
-        // 2. Box border
+// Stage 3: every box stroke (active box gets the accent + wider stroke).
+static bool otpPaintBorder(Panel *panel, void *renderer, void *cmdBuffer,
+                           float surfaceW, float surfaceH,
+                           float x, float y, float w, float h) {
+    InputOTP *otp = (InputOTP*) panel;
+    (void) renderer;
+    if (!otp || !cmdBuffer)
+        return false;
+    if (w <= 0.0f || h <= 0.0f)
+        return false;
+    Container *c = &(*panel).base;
+    float op = Container_getOpacity(c);
+    if (op <= 0.0f)
+        return false;
+    int32_t len = 0;
+    float bs = 0.0f;
+    float startX = 0.0f;
+    float startY = 0.0f;
+    boxLayout(otp, x, y, w, h, &len, &bs, &startX, &startY);
+    float gap = (*otp).gap >= 0.0f ? (*otp).gap : INPUTOTP_DEFAULT_GAP;
+    bool drew = false;
+    for (int32_t i = 0; i < len; i++) {
+        float bx = startX + (float)i * (bs + gap);
+        float by = startY;
         bool isActive = (*otp).focused && ((*otp).cursor == i);
         uint32_t borderColor = isActive ? (*otp).boxActiveBorder : (*otp).boxBorderColor;
         float b_r = ((borderColor >> 16) & 0xFF) / 255.0f;
         float b_g = ((borderColor >> 8) & 0xFF) / 255.0f;
         float b_b = (borderColor & 0xFF) / 255.0f;
         float b_a = ((borderColor >> 24) & 0xFF) / 255.0f * op;
+        if (b_a <= 0.0f)
+            continue;
         float stroke = isActive ? 1.5f : 1.0f;
         Vk_fillRect(cmdBuffer, surfaceW, surfaceH, bx, by, bs, stroke, b_r, b_g, b_b, b_a);
         Vk_fillRect(cmdBuffer, surfaceW, surfaceH, bx, by + bs - stroke, bs, stroke, b_r, b_g, b_b, b_a);
         Vk_fillRect(cmdBuffer, surfaceW, surfaceH, bx, by, stroke, bs, b_r, b_g, b_b, b_a);
         Vk_fillRect(cmdBuffer, surfaceW, surfaceH, bx + bs - stroke, by, stroke, bs, b_r, b_g, b_b, b_a);
+        drew = true;
+    }
+    return drew;
+}
 
-        // 3. Digit / dot raster
+// Stage 2: every digit / dot raster quad.
+static bool otpPaintText(Panel *panel, void *renderer, void *cmdBuffer,
+                         float surfaceW, float surfaceH,
+                         float x, float y, float w, float h) {
+    InputOTP *otp = (InputOTP*) panel;
+    (void) renderer;
+    if (!otp || !cmdBuffer)
+        return false;
+    if (w <= 0.0f || h <= 0.0f)
+        return false;
+    Container *c = &(*panel).base;
+    float op = Container_getOpacity(c);
+    if (op <= 0.0f)
+        return false;
+    int32_t len = 0;
+    float bs = 0.0f;
+    float startX = 0.0f;
+    float startY = 0.0f;
+    boxLayout(otp, x, y, w, h, &len, &bs, &startX, &startY);
+    float gap = (*otp).gap >= 0.0f ? (*otp).gap : INPUTOTP_DEFAULT_GAP;
+    size_t dlen = (*otp).digits ? strlen((*otp).digits) : 0;
+    bool drew = false;
+    for (int32_t i = 0; i < len; i++) {
+        float bx = startX + (float)i * (bs + gap);
+        float by = startY;
         char ch = (i < (int32_t)dlen) ? (*otp).digits[i] : '\0';
         ensureBoxRaster(otp, i, ch);
-        if ((*otp).boxTex[i] >= 0 && (*otp).boxW[i] > 0 && (*otp).boxH[i] > 0) {
-            float backing = TextCore_backingScale();
-            if (backing <= 0.0f) backing = 1.0f;
-            float qw = (float)(*otp).boxW[i] / backing;
-            float qh = (float)(*otp).boxH[i] / backing;
-            float qx = bx + (bs - qw) * 0.5f;
-            float qy = by + (bs - qh) * 0.5f;
-            Vk_drawTexture(cmdBuffer, surfaceW, surfaceH, qx, qy, qw, qh, 1.0f, 1.0f, 1.0f, op,
-                           (*otp).boxTex[i], PICTURE_MODE_FIT, (float)(*otp).boxW[i], (float)(*otp).boxH[i]);
-        } else if (isActive && (ch == '\0' || ch == ' ')) {
-            float caretW = 1.5f;
-            float caretH = bs * 0.45f;
-            float cx = bx + (bs - caretW) * 0.5f;
-            float cy = by + (bs - caretH) * 0.5f;
-            Vk_fillRect(cmdBuffer, surfaceW, surfaceH, cx, cy, caretW, caretH, 1.0f, 1.0f, 1.0f, op);
-        }
+        if ((*otp).boxTex[i] < 0 || (*otp).boxW[i] <= 0 || (*otp).boxH[i] <= 0)
+            continue;
+        float backing = TextCore_backingScale();
+        if (backing <= 0.0f)
+            backing = 1.0f;
+        float qw = (float)(*otp).boxW[i] / backing;
+        float qh = (float)(*otp).boxH[i] / backing;
+        float qx = bx + (bs - qw) * 0.5f;
+        float qy = by + (bs - qh) * 0.5f;
+        Vk_drawTexture(cmdBuffer, surfaceW, surfaceH, qx, qy, qw, qh, 1.0f, 1.0f, 1.0f, op,
+                       (*otp).boxTex[i], PICTURE_MODE_FIT, (float)(*otp).boxW[i], (float)(*otp).boxH[i]);
+        drew = true;
     }
+    return drew;
+}
+
+// Stage 4: caret block in the active empty box.
+static bool otpPaintCaret(Panel *panel, void *renderer, void *cmdBuffer,
+                          float surfaceW, float surfaceH,
+                          float x, float y, float w, float h) {
+    InputOTP *otp = (InputOTP*) panel;
+    (void) renderer;
+    if (!otp || !cmdBuffer)
+        return false;
+    if (!(*otp).focused)
+        return false;
+    Container *c = &(*panel).base;
+    float op = Container_getOpacity(c);
+    if (op <= 0.0f)
+        return false;
+    int32_t len = 0;
+    float bs = 0.0f;
+    float startX = 0.0f;
+    float startY = 0.0f;
+    boxLayout(otp, x, y, w, h, &len, &bs, &startX, &startY);
+    float gap = (*otp).gap >= 0.0f ? (*otp).gap : INPUTOTP_DEFAULT_GAP;
+    size_t dlen = (*otp).digits ? strlen((*otp).digits) : 0;
+    int32_t i = (*otp).cursor;
+    if (i < 0 || i >= len)
+        return false;
+    char ch = (i < (int32_t)dlen) ? (*otp).digits[i] : '\0';
+    if (ch != '\0' && ch != ' ')
+        return false;
+    ensureBoxRaster(otp, i, ch);
+    if ((*otp).boxTex[i] >= 0 && (*otp).boxW[i] > 0 && (*otp).boxH[i] > 0)
+        return false;
+    float bx = startX + (float)i * (bs + gap);
+    float by = startY;
+    float caretW = 1.5f;
+    float caretH = bs * 0.45f;
+    float cx = bx + (bs - caretW) * 0.5f;
+    float cy = by + (bs - caretH) * 0.5f;
+    Vk_fillRect(cmdBuffer, surfaceW, surfaceH, cx, cy, caretW, caretH, 1.0f, 1.0f, 1.0f, op);
+    return true;
 }
 
 static InputOTP *allocOtp(int32_t length) {
@@ -206,7 +321,12 @@ static InputOTP *allocOtp(int32_t length) {
         (*otp).boxChar[i] = '\0';
     }
 
-    Panel_setRenderHandler(&(*otp).base, InputOTP_renderFn);
+    Panel *op = &(*otp).base;
+    Panel_setRenderHandler(op, nullptr);
+    Panel_setBackgroundFn(op, otpPaintBackground);
+    Panel_setTextFn(op, otpPaintText);
+    Panel_setBorderFn(op, otpPaintBorder);
+    Panel_setForegroundFn(op, otpPaintCaret);
     return otp;
 }
 
