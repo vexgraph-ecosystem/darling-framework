@@ -91,6 +91,10 @@
  *   - Input_eraseChar(inp)
  *   - Input_handlePointer(self, kind, localX, localY)
  *   - Input_handleKey(self, ev)
+ *   - inputPaintBackground(panel, ...) : Stage 0 field fill
+ *   - inputPaintText(panel, ...) : Stage 2 raster / placeholder / mask
+ *   - inputPaintBorder(panel, ...) : Stage 3 focused/idle stroke
+ *   - inputPaintCaret(panel, ...) : Stage 4 caret rect / caret view
  *
  * Setters:
  *   - Input_goTo(inp, index)
@@ -255,17 +259,24 @@ static bool ensureInputRaster(Input *inp, const char *displayText, bool isPlaceh
     return true;
 }
 
-static void Input_renderFn(Panel *panel, void *renderer, void *cmdBuffer, float surfaceW, float surfaceH,
-                           float x, float y, float w, float h) {
-    Input *inp = (Input*) panel;
-    (void) renderer;
-    if (!inp || w <= 0.0f || h <= 0.0f)
-        return;
-    float op = Container_getOpacity(&(*panel).base);
-    if (op <= 0.0f)
-        return;
+// Ordered part pipeline: background -> text -> border -> caret.
+// Border sits over content per the canonical order (edge pixels never
+// overlap padded text, so the reorder from the legacy
+// bg/border/text/caret sequence is pixel-identical).
 
-    // 1. Background fill
+// Stage 0: field fill (Panel color, dark fallback when transparent).
+static bool inputPaintBackground(Panel *panel, void *renderer, void *cmdBuffer,
+                                 float surfaceW, float surfaceH,
+                                 float x, float y, float w, float h) {
+    (void) renderer;
+    if (!panel || !cmdBuffer)
+        return false;
+    if (w <= 0.0f || h <= 0.0f)
+        return false;
+    Container *c = &(*panel).base;
+    float op = Container_getOpacity(c);
+    if (op <= 0.0f)
+        return false;
     uint32_t bg = Panel_getBackgroundColor(panel);
     if ((bg >> 24) == 0)
         bg = 0xFF18181Bu;
@@ -273,32 +284,36 @@ static void Input_renderFn(Panel *panel, void *renderer, void *cmdBuffer, float 
     float bgc = ((bg >> 8) & 0xFF) / 255.0f;
     float bb = (bg & 0xFF) / 255.0f;
     float ba = ((bg >> 24) & 0xFF) / 255.0f * op;
+    if (ba <= 0.0f)
+        return false;
     Vk_fillRect(cmdBuffer, surfaceW, surfaceH, x, y, w, h, br, bgc, bb, ba);
+    return true;
+}
 
-    // 2. Border stroke
-    uint32_t borderColor = (*inp).focused ? 0xFF3B82F6u : 0xFF3F3F46u;
-    float b_r = ((borderColor >> 16) & 0xFF) / 255.0f;
-    float b_g = ((borderColor >> 8) & 0xFF) / 255.0f;
-    float b_b = (borderColor & 0xFF) / 255.0f;
-    float b_a = ((borderColor >> 24) & 0xFF) / 255.0f * op;
-    Vk_fillRect(cmdBuffer, surfaceW, surfaceH, x, y, w, 1.0f, b_r, b_g, b_b, b_a);
-    Vk_fillRect(cmdBuffer, surfaceW, surfaceH, x, y + h - 1.0f, w, 1.0f, b_r, b_g, b_b, b_a);
-    Vk_fillRect(cmdBuffer, surfaceW, surfaceH, x, y, 1.0f, h, b_r, b_g, b_b, b_a);
-    Vk_fillRect(cmdBuffer, surfaceW, surfaceH, x + w - 1.0f, y, 1.0f, h, b_r, b_g, b_b, b_a);
-
-    // 3. Text content
+// Stage 2: raster / placeholder / password-mask text quad.
+static bool inputPaintText(Panel *panel, void *renderer, void *cmdBuffer,
+                           float surfaceW, float surfaceH,
+                           float x, float y, float w, float h) {
+    Input *inp = (Input*) panel;
+    (void) renderer;
+    if (!inp || !cmdBuffer)
+        return false;
+    if (w <= 0.0f || h <= 0.0f)
+        return false;
+    Container *c = &(*panel).base;
+    float op = Container_getOpacity(c);
+    if (op <= 0.0f)
+        return false;
     const char *displayText = (*inp).text;
     bool isPlace = false;
     if (!displayText || displayText[0] == '\0') {
         displayText = (*inp).placeholder;
         isPlace = true;
     }
-
     float padX = 8.0f;
     float innerW = w - padX * 2.0f;
     if (innerW < 10.0f)
         innerW = 10.0f;
-
     char maskBuf[256];
     if (displayText && (*inp).password && !isPlace) {
         size_t dlen = strlen(displayText);
@@ -308,46 +323,88 @@ static void Input_renderFn(Panel *panel, void *renderer, void *cmdBuffer, float 
         maskBuf[dlen] = '\0';
         displayText = maskBuf;
     }
+    if (!displayText || displayText[0] == '\0')
+        return false;
+    if (!ensureInputRaster(inp, displayText, isPlace, innerW))
+        return false;
+    if ((*inp).rasterTex < 0 || (*inp).rasterW <= 0 || (*inp).rasterH <= 0)
+        return false;
+    float backing = (*inp).rasterBacking > 0.0f ? (*inp).rasterBacking : 1.0f;
+    float qw = (float) (*inp).rasterW / backing;
+    float qh = (float) (*inp).rasterH / backing;
+    float qx = x + padX;
+    float qy = y + (h - qh) * 0.5f;
+    Vk_drawTexture(cmdBuffer, surfaceW, surfaceH, qx, qy, qw, qh, 1.0f, 1.0f, 1.0f, op,
+                   (*inp).rasterTex, PICTURE_MODE_FIT, (float) (*inp).rasterW, (float) (*inp).rasterH);
+    return true;
+}
 
-    if (displayText && displayText[0] != '\0') {
-        if (ensureInputRaster(inp, displayText, isPlace, innerW)) {
-            if ((*inp).rasterTex >= 0 && (*inp).rasterW > 0 && (*inp).rasterH > 0) {
-                float backing = (*inp).rasterBacking > 0.0f ? (*inp).rasterBacking : 1.0f;
-                float qw = (float) (*inp).rasterW / backing;
-                float qh = (float) (*inp).rasterH / backing;
-                float qx = x + padX;
-                float qy = y + (h - qh) * 0.5f;
-                Vk_drawTexture(cmdBuffer, surfaceW, surfaceH, qx, qy, qw, qh, 1.0f, 1.0f, 1.0f, op,
-                               (*inp).rasterTex, PICTURE_MODE_FIT, (float) (*inp).rasterW, (float) (*inp).rasterH);
-            }
-        }
+// Stage 3: focused/idle stroke over content.
+static bool inputPaintBorder(Panel *panel, void *renderer, void *cmdBuffer,
+                             float surfaceW, float surfaceH,
+                             float x, float y, float w, float h) {
+    Input *inp = (Input*) panel;
+    (void) renderer;
+    if (!inp || !cmdBuffer)
+        return false;
+    if (w <= 0.0f || h <= 0.0f)
+        return false;
+    Container *c = &(*panel).base;
+    float op = Container_getOpacity(c);
+    if (op <= 0.0f)
+        return false;
+    uint32_t borderColor = (*inp).focused ? 0xFF3B82F6u : 0xFF3F3F46u;
+    float b_r = ((borderColor >> 16) & 0xFF) / 255.0f;
+    float b_g = ((borderColor >> 8) & 0xFF) / 255.0f;
+    float b_b = (borderColor & 0xFF) / 255.0f;
+    float b_a = ((borderColor >> 24) & 0xFF) / 255.0f * op;
+    if (b_a <= 0.0f)
+        return false;
+    Vk_fillRect(cmdBuffer, surfaceW, surfaceH, x, y, w, 1.0f, b_r, b_g, b_b, b_a);
+    Vk_fillRect(cmdBuffer, surfaceW, surfaceH, x, y + h - 1.0f, w, 1.0f, b_r, b_g, b_b, b_a);
+    Vk_fillRect(cmdBuffer, surfaceW, surfaceH, x, y, 1.0f, h, b_r, b_g, b_b, b_a);
+    Vk_fillRect(cmdBuffer, surfaceW, surfaceH, x + w - 1.0f, y, 1.0f, h, b_r, b_g, b_b, b_a);
+    return true;
+}
+
+// Stage 4: caret rect (or borrowed caret view, placed by the owner).
+static bool inputPaintCaret(Panel *panel, void *renderer, void *cmdBuffer,
+                            float surfaceW, float surfaceH,
+                            float x, float y, float w, float h) {
+    Input *inp = (Input*) panel;
+    (void) renderer;
+    (void) w;
+    if (!inp || !cmdBuffer)
+        return false;
+    if (!(*inp).focused || !(*inp).caretShown)
+        return false;
+    Container *c = &(*panel).base;
+    float op = Container_getOpacity(c);
+    if (op <= 0.0f)
+        return false;
+    float padX = 8.0f;
+    float caretX = padX;
+    if ((*inp).glyphX && (*inp).cursor >= 0 && (*inp).cursor < (*inp).glyphN) {
+        caretX = padX + (*inp).glyphX[(*inp).cursor];
+    } else if ((*inp).measurer) {
+        caretX = padX + (*inp).measurer((*inp).measureCtx, (*inp).cursor);
+    } else {
+        float charW = (*inp).fontSize > 0.0f ? (*inp).fontSize * 0.55f : 8.0f;
+        caretX = padX + (float) (*inp).cursor * charW;
     }
-
-    // 4. Caret rendering
-    if ((*inp).focused && (*inp).caretShown) {
-        float caretX = padX;
-        if ((*inp).glyphX && (*inp).cursor >= 0 && (*inp).cursor < (*inp).glyphN) {
-            caretX = padX + (*inp).glyphX[(*inp).cursor];
-        } else if ((*inp).measurer) {
-            caretX = padX + (*inp).measurer((*inp).measureCtx, (*inp).cursor);
-        } else {
-            float charW = (*inp).fontSize > 0.0f ? (*inp).fontSize * 0.55f : 8.0f;
-            caretX = padX + (float) (*inp).cursor * charW;
-        }
-
-        uint32_t cColor = (*inp).caretColor ? (*inp).caretColor : 0xFFFFFFFFu;
-        float ca_r = ((cColor >> 16) & 0xFF) / 255.0f;
-        float ca_g = ((cColor >> 8) & 0xFF) / 255.0f;
-        float ca_b = (cColor & 0xFF) / 255.0f;
-        float ca_a = ((cColor >> 24) & 0xFF) / 255.0f * op * (*inp).caretOpacity;
-
-        float caretH = (*inp).fontSize > 0.0f ? (*inp).fontSize * 1.2f : 16.0f;
-        if (caretH > h - 4.0f)
-            caretH = h - 4.0f;
-        float caretY = y + (h - caretH) * 0.5f;
-
-        Vk_fillRect(cmdBuffer, surfaceW, surfaceH, x + caretX, caretY, 1.5f, caretH, ca_r, ca_g, ca_b, ca_a);
-    }
+    uint32_t cColor = (*inp).caretColor ? (*inp).caretColor : 0xFFFFFFFFu;
+    float ca_r = ((cColor >> 16) & 0xFF) / 255.0f;
+    float ca_g = ((cColor >> 8) & 0xFF) / 255.0f;
+    float ca_b = (cColor & 0xFF) / 255.0f;
+    float ca_a = ((cColor >> 24) & 0xFF) / 255.0f * op * (*inp).caretOpacity;
+    if (ca_a <= 0.0f)
+        return false;
+    float caretH = (*inp).fontSize > 0.0f ? (*inp).fontSize * 1.2f : 16.0f;
+    if (caretH > h - 4.0f)
+        caretH = h - 4.0f;
+    float caretY = y + (h - caretH) * 0.5f;
+    Vk_fillRect(cmdBuffer, surfaceW, surfaceH, x + caretX, caretY, 1.5f, caretH, ca_r, ca_g, ca_b, ca_a);
+    return true;
 }
 
 Input *Input_0(void) {
@@ -400,7 +457,12 @@ Input *Input_0(void) {
     (*inp).ctx = nullptr;
     (*inp).measurer = nullptr;
     (*inp).measureCtx = nullptr;
-    Panel_setRenderHandler(&(*inp).base, Input_renderFn);
+    Panel *ip = &(*inp).base;
+    Panel_setRenderHandler(ip, nullptr);
+    Panel_setBackgroundFn(ip, inputPaintBackground);
+    Panel_setTextFn(ip, inputPaintText);
+    Panel_setBorderFn(ip, inputPaintBorder);
+    Panel_setForegroundFn(ip, inputPaintCaret);
     return inp;
 }
 
