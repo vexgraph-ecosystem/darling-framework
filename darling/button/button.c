@@ -59,9 +59,12 @@
  * Core Functions:
  *   - Button_press(b)
  *   - Button_handlePointer(b, kind, localX, localY)
- *   - Button_renderFn(panel, rend, cmd, surfaceW, surfaceH, x, y, w, h) : Draw
- *     handler (registered via Panel_setRenderHandler in Button_0) — paints
- *     the state fill, border, and the cached native label quad
+ *   - buttonPaintBackground(panel, rend, cmd, ...) : Stage 0 state fill
+ *     (registered via Panel_setBackgroundFn in Button_0)
+ *   - buttonPaintText(panel, rend, cmd, ...) : Stage 2 label quad
+ *     (registered via Panel_setTextFn in Button_0)
+ *   - buttonPaintBorder(panel, rend, cmd, ...) : Stage 3 border stroke
+ *     (registered via Panel_setBorderFn in Button_0)
  *   - Button_free(b)
  *
  * Setters:
@@ -101,9 +104,17 @@
  * ============================================================================
  */
 
-// Draw handler body (defined below in CORE FUNCTIONS; forward-declared so
-// Button_0 can install it on the Panel base at construction time).
-static void Button_renderFn(Panel *panel, void *renderer, void *cmdBuffer, float surfaceW, float surfaceH,
+// Part bodies (defined below in CORE FUNCTIONS; forward-declared so
+// Button_0 can install them on the Panel base at construction time).
+// Ordered pipeline: background -> text -> border (image/foreground unused).
+static bool buttonPaintBackground(Panel *panel, void *renderer, void *cmdBuffer,
+                                  float surfaceW, float surfaceH,
+                                  float x, float y, float w, float h);
+static bool buttonPaintBorder(Panel *panel, void *renderer, void *cmdBuffer,
+                              float surfaceW, float surfaceH,
+                              float x, float y, float w, float h);
+static bool buttonPaintText(Panel *panel, void *renderer, void *cmdBuffer,
+                            float surfaceW, float surfaceH,
                             float x, float y, float w, float h);
 
 // CONSTRUCTORS
@@ -140,9 +151,13 @@ Button *Button_0(void) {
     (*b).rasterH = 0;
     (*b).rasterBacking = 1.0f;
     (*b).rasterDirty = true;
-    // Paint handler: installed so the board pass (paintChildIntoPass) can
-    // draw the button — state fill, border, and the native label quad.
-    Panel_setRenderHandler(&(*b).base, Button_renderFn);
+    // Part pipeline: background (state fill) -> text (label quad) -> border.
+    // The board/pane passes invoke stages via Panel_paintParts in order.
+    Panel *bp = &(*b).base;
+    Panel_setRenderHandler(bp, nullptr);
+    Panel_setBackgroundFn(bp, buttonPaintBackground);
+    Panel_setTextFn(bp, buttonPaintText);
+    Panel_setBorderFn(bp, buttonPaintBorder);
     return b;
 }
 
@@ -240,23 +255,21 @@ static bool buttonEnsureRaster(Button *b, float boundsW) {
     return true;
 }
 
-// Draw handler (the Panel_RenderFn registered in Button_0; board and pane
-// passes invoke it through Panel_getRenderHandler). Paints:
-//   1. state fill — pressed > hovered > idle; disabled dims via alpha;
-//   2. border stroke — borderWidth-thick Input-style 4-edge rects;
-//   3. the centered native label quad.
-// (radius is a reserved layout hint for the future SDF rounded-corner path;
-// the current painter draws square corners, like Input's field.)
-static void Button_renderFn(Panel *panel, void *renderer, void *cmdBuffer, float surfaceW, float surfaceH,
-                            float x, float y, float w, float h) {
+// Stage 0: state fill — pressed > hovered > idle; disabled dims via alpha.
+// Owns the background slot so Panel's solid fill never runs beneath it.
+static bool buttonPaintBackground(Panel *panel, void *renderer, void *cmdBuffer,
+                                  float surfaceW, float surfaceH,
+                                  float x, float y, float w, float h) {
     Button *b = (Button*) panel;
     (void) renderer;
-    if (!b || w <= 0.0f || h <= 0.0f)
-        return;
-    float op = Container_getOpacity(&(*panel).base);
+    if (!b || !cmdBuffer)
+        return false;
+    if (w <= 0.0f || h <= 0.0f)
+        return false;
+    Container *c = &(*panel).base;
+    float op = Container_getOpacity(c);
     if (op <= 0.0f)
-        return;
-
+        return false;
     uint32_t fill = (*b).bg;
     if ((*b).pressed)
         fill = (*b).bgPressed;
@@ -267,36 +280,74 @@ static void Button_renderFn(Panel *panel, void *renderer, void *cmdBuffer, float
     float fg = ((fill >> 8) & 0xFF) / 255.0f;
     float fb = (fill & 0xFF) / 255.0f;
     float fa = ((fill >> 24) & 0xFF) / 255.0f * op * alphaScale;
-    if (fa > 0.0f)
-        Vk_fillRect(cmdBuffer, surfaceW, surfaceH, x, y, w, h, fr, fg, fb, fa);
+    if (fa <= 0.0f)
+        return false;
+    Vk_fillRect(cmdBuffer, surfaceW, surfaceH, x, y, w, h, fr, fg, fb, fa);
+    return true;
+}
 
+// Stage 3: border stroke — borderWidth-thick 4-edge rects over content.
+// (radius is a reserved layout hint for the future border_quad shader;
+// the current painter draws square corners, like Input's field.)
+static bool buttonPaintBorder(Panel *panel, void *renderer, void *cmdBuffer,
+                              float surfaceW, float surfaceH,
+                              float x, float y, float w, float h) {
+    Button *b = (Button*) panel;
+    (void) renderer;
+    if (!b || !cmdBuffer)
+        return false;
+    if (w <= 0.0f || h <= 0.0f)
+        return false;
+    Container *c = &(*panel).base;
+    float op = Container_getOpacity(c);
+    if (op <= 0.0f)
+        return false;
     float btw = (*b).borderWidth > 0.0f ? (*b).borderWidth : 1.0f;
     uint32_t bc = (*b).borderColor;
     float br = ((bc >> 16) & 0xFF) / 255.0f;
     float bg2 = ((bc >> 8) & 0xFF) / 255.0f;
     float bb = (bc & 0xFF) / 255.0f;
     float ba = ((bc >> 24) & 0xFF) / 255.0f * op;
-    if (ba > 0.0f) {
-        Vk_fillRect(cmdBuffer, surfaceW, surfaceH, x, y, w, btw, br, bg2, bb, ba);
-        Vk_fillRect(cmdBuffer, surfaceW, surfaceH, x, y + h - btw, w, btw, br, bg2, bb, ba);
-        Vk_fillRect(cmdBuffer, surfaceW, surfaceH, x, y, btw, h, br, bg2, bb, ba);
-        Vk_fillRect(cmdBuffer, surfaceW, surfaceH, x + w - btw, y, btw, h, br, bg2, bb, ba);
-    }
+    if (ba <= 0.0f)
+        return false;
+    Vk_fillRect(cmdBuffer, surfaceW, surfaceH, x, y, w, btw, br, bg2, bb, ba);
+    Vk_fillRect(cmdBuffer, surfaceW, surfaceH, x, y + h - btw, w, btw, br, bg2, bb, ba);
+    Vk_fillRect(cmdBuffer, surfaceW, surfaceH, x, y, btw, h, br, bg2, bb, ba);
+    Vk_fillRect(cmdBuffer, surfaceW, surfaceH, x + w - btw, y, btw, h, br, bg2, bb, ba);
+    return true;
+}
 
+// Stage 2: centered native label quad (texture_quad shader).
+static bool buttonPaintText(Panel *panel, void *renderer, void *cmdBuffer,
+                            float surfaceW, float surfaceH,
+                            float x, float y, float w, float h) {
+    Button *b = (Button*) panel;
+    (void) renderer;
+    if (!b || !cmdBuffer)
+        return false;
+    if (w <= 0.0f || h <= 0.0f)
+        return false;
+    Container *c = &(*panel).base;
+    float op = Container_getOpacity(c);
+    if (op <= 0.0f)
+        return false;
     if (!(*b).label || (*b).label[0] == '\0')
-        return;
+        return false;
     float innerW = w - 8.0f;
     if (innerW < 10.0f)
         innerW = 10.0f;
-    if (buttonEnsureRaster(b, innerW) && (*b).rasterTex >= 0 && (*b).rasterW > 0 && (*b).rasterH > 0) {
-        float backing = (*b).rasterBacking > 0.0f ? (*b).rasterBacking : 1.0f;
-        float qw = (float) (*b).rasterW / backing;
-        float qh = (float) (*b).rasterH / backing;
-        float qx = x + (w - qw) * 0.5f;
-        float qy = y + (h - qh) * 0.5f;
-        Vk_drawTexture(cmdBuffer, surfaceW, surfaceH, qx, qy, qw, qh, 1.0f, 1.0f, 1.0f, op,
-                       (*b).rasterTex, PICTURE_MODE_FIT, (float) (*b).rasterW, (float) (*b).rasterH);
-    }
+    if (!buttonEnsureRaster(b, innerW))
+        return false;
+    if ((*b).rasterTex < 0 || (*b).rasterW <= 0 || (*b).rasterH <= 0)
+        return false;
+    float backing = (*b).rasterBacking > 0.0f ? (*b).rasterBacking : 1.0f;
+    float qw = (float) (*b).rasterW / backing;
+    float qh = (float) (*b).rasterH / backing;
+    float qx = x + (w - qw) * 0.5f;
+    float qy = y + (h - qh) * 0.5f;
+    Vk_drawTexture(cmdBuffer, surfaceW, surfaceH, qx, qy, qw, qh, 1.0f, 1.0f, 1.0f, op,
+                   (*b).rasterTex, PICTURE_MODE_FIT, (float) (*b).rasterW, (float) (*b).rasterH);
+    return true;
 }
 
 void Button_press(Button *b) {
