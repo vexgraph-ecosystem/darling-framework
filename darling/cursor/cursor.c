@@ -1,7 +1,23 @@
+#include "annotation/definition.h"
 #include "annotation/overview.h"
 #include "darling/cursor/cursor.h"
 #include "window/window.h"
 #include <stdlib.h>
+
+;;DEFINITION
+/**
+ * ============================================================================
+ * DEFINITION: Cursor
+ * ============================================================================
+ * Standard mouse cursor presentation API bridging darling to native OS window
+ * cursors: a style enum plus a reserved custom-data pointer, applied to an R1
+ * Window via Window_setCursorType. Eight predefined styles live in a static
+ * singleton table — Cursor_getPredefined returns a borrowed pointer and
+ * Cursor_free refuses to free it; heap-allocated instances are freed normally.
+ * Null-safe getters return CURSOR_DEFAULT. A thin R4-to-R1 seam with zero
+ * steady-state allocation.
+ * ============================================================================
+ */
 
 ;;OVERVIEW
 /**
