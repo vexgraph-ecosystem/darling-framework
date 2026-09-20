@@ -13,12 +13,32 @@
 #include "text/text_core.h"
 #include "vulkan/texture/texture.h"
 #include "vulkan/vk.h"
+#include "annotation/definition.h"
 #include "annotation/overview.h"
+
+;;DEFINITION
+/**
+ * ============================================================================
+ * DEFINITION: Textarea
+ * ============================================================================
+ * Multi-line text area shell: Panel layout plus an owned text buffer with
+ * visible-line count, word-wrap mode, and vertical scroll offset. Live
+ * editing (Pkg 4) is byte-wise caret-addressed insert/erase with enter,
+ * backspace, arrow navigation across line boundaries, and onChange(ctx)
+ * notification; caret-follow scroll clamps scrollY so the caret line stays in
+ * view (lineHeight is 1 unit — no font metrics yet, so scrollY is in lines).
+ * Typography and native raster styling (fontSize, textColor, align, spacing,
+ * selection, raster cache) live on the owner; the buffer is owned and freed
+ * in Textarea_free. A composite R4 field widget that CodeField wraps for its
+ * editor.
+ * ============================================================================
+ */
 
 ;;OVERVIEW
 /**
  * ============================================================================
- * CLASS: Textarea (inherits Panel, LEVEL L2 Behavior)
+ * CLASS: Textarea (inherits Panel)
+ * LEVEL: L2 — Behavior (multi-line text area)
  * ============================================================================
  * Multi-line text area shell: Panel layout plus an owned text buffer with
  * visible-line count, word-wrap mode, and vertical scroll offset.
