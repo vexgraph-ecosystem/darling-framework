@@ -3,7 +3,26 @@
 #include "darling/picture/picture.h"
 #include "nio/mem.h"
 #include "oop/type.h"
+#include "annotation/definition.h"
 #include "annotation/overview.h"
+
+;;DEFINITION
+/**
+ * ============================================================================
+ * DEFINITION: Canvas
+ * ============================================================================
+ * The flat 2D layout root: one canonical coordinate space the whole UI
+ * resolves into, with a fixed virtual resolution independent of the
+ * framebuffer and backing scale. A node placed at canvas (100, 60) stays
+ * there no matter how the window changes — only the projection moves. Canvas
+ * owns no tree: it is a pure projection/geometry handle the compositor owns
+ * and passes, computing the visible rect, the Y-down orthographic projection,
+ * root-node resolution, and window-to-canvas mapping (all dest-last) from the
+ * virtual size, mapping mode (STRETCH/FIT/PIXEL), and DPI scale. Per the
+ * Forward Rendering & Bounded Surface Law, the canvas bounds every surface it
+ * projects into.
+ * ============================================================================
+ */
 
 ;;OVERVIEW
 /**
