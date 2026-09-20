@@ -3,8 +3,31 @@
 #include "annotation/incomplete.h"
 #include "nio/mem.h"
 #include "oop/type.h"
+#include "annotation/definition.h"
 #include "annotation/overview.h"
 #include "vulkan/vk.h"
+
+;;DEFINITION
+/**
+ * ============================================================================
+ * DEFINITION: Panel
+ * ============================================================================
+ * The UI panel: Container layout + background color + the parent/child
+ * tree — the base class of Label/Picture/Scene and every R4 widget, since
+ * every node IS-A Panel with extra payload on top. It embeds Container as
+ * its first member (the Container-vs-Panel Law) and owns a List of child
+ * Panels; the VIEW model deep-copies structure but aliases shared payloads
+ * (image/filters) BY POINTER through the source slot, with dirty flags
+ * fanning out through the parent-ref set so every holder of a view
+ * re-renders. Rendering is an ordered five-stage part pipeline
+ * (background -> image -> text -> border -> foreground) with per-instance
+ * function-pointer slots — the setter is the @Override, nullptr restores
+ * the built-in default, and callers route through Panel_paintParts; the
+ * legacy renderHandler remains as a back-compat path. All state is
+ * arena-allocated (Memory_alloc) with symmetric getters/setters and
+ * dest-last layout facades forwarding to the embedded Container.
+ * ============================================================================
+ */
 
 ;;OVERVIEW
 /**
