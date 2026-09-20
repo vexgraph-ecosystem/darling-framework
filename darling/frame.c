@@ -2,8 +2,13 @@
 
 #include "annotation/definition.h"
 #include "annotation/overview.h"
+#include "darling/component.h"
 #include "darling/dialog/dialog.h"
 #include "darling/panel/panel.h"
+#include "darling/panel/list_container.h"
+#include "darling/panel/grid_container.h"
+#include "darling/panel/expandable_list_container.h"
+#include "darling/panel/scroll_container.h"
 #include "darling/compositor.h"
 #include "graphvex/graphics_loop.h"
 #include "event/bridge.h"
@@ -41,8 +46,6 @@
  * ============================================================================
  */
 
-
-
 ;;OVERVIEW
 /**
  * ============================================================================
@@ -78,6 +81,10 @@
  *   bool inLiveResize;                            // Drag-resize active
  *   bool isMinimized;                             // Window miniaturized
  *   bool isZoomed;                                // Window zoomed
+ *   bool inSyncResize;                            // Re-entrancy guard (one render+present per geometry event)
+ *   int drawableWidth;                            // Authoritative native-px footprint of the live
+ *   int drawableHeight;                           // content rect (resolved via convertRectToBacking
+ *                                                 // at geometry time; seam + present path agree)
  *   FrameFunction *functions;                     // Master-arena grown slot table
  *   uint32_t functionCount;                       // Live present callbacks
  *   uint32_t functionCapacity;                    // Doubling capacity
@@ -404,7 +411,7 @@ bool Darling_bridge(Frame *frame, Application *app) {
     if (!window)
         return false;
 
-    // 1. Initialize Vulkan/Metal compositor and board/pane flight
+    // 1. Initialize Vulkan/Metal compositor and board/layer flight
     Darling_initCompositor(frame);
 
     // 2. Attach UI event bridge to the root panel or content pane
@@ -560,12 +567,78 @@ void Frame_present(Frame *frame) {
         Frame_platformSyncTransaction(frame);
 }
 
-void Frame_resize(Frame *frame, int width, int height) {
-    if (frame == nullptr)
+static void relayoutSubtree(Panel *parent, float parentW, float parentH) {
+    if (!parent || parentW <= 0.0f || parentH <= 0.0f)
         return;
+
+    uint64_t ptype = Memory_type(parent);
+    if (ptype == TYPE_LIST_PANEL_SINGLETON) {
+        ListContainer_layout((ListContainer*) parent);
+    } else if (ptype == TYPE_GRID_PANEL_SINGLETON) {
+        GridContainer_layout((GridContainer*) parent);
+    } else if (ptype == TYPE_EXPANDABLE_LIST_CONTAINER_SINGLETON) {
+        ExpandableListContainer_layout((ExpandableListContainer*) parent);
+    } else if (ptype == TYPE_SCROLL_PANEL_SINGLETON) {
+        ScrollContainer_setViewportSize((ScrollContainer*) parent, parentW, parentH);
+    }
+
+    size_t childCount = Panel_childCount(parent);
+    for (size_t i = 0; i < childCount; i++) {
+        Panel *child = Panel_getChild(parent, i);
+        if (!child)
+            continue;
+
+        Vec4 rect;
+        Container_resolve(&(*child).base, 0.0f, 0.0f, parentW, parentH, &rect);
+        relayoutSubtree(child, rect.z, rect.w);
+    }
+}
+
+void Frame_relayoutChildren(Frame *frame) {
+    if (!frame)
+        return;
+    // Live fractional bounds when the platform seam has resolved them (the
+    // Single Rounding Currency Law): the rounded int cache lags the true
+    // window by up to half a point, and every parent-derived edge (center,
+    // percent, right/bottom anchors) would sit off the device grid by a
+    // wobbling sub-pixel amount. Edges pinned AT 0 or AT the parent edge
+    // stay exact either way — the middle drifts, which is why a live resize
+    // feels stable at the dragged edge and slinky elsewhere.
+    float w = (*frame).liveWidth > 0.0f ? (*frame).liveWidth : (float) (*frame).width;
+    float h = (*frame).liveHeight > 0.0f ? (*frame).liveHeight : (float) (*frame).height;
+    if (w <= 0.0f || h <= 0.0f)
+        return;
+
+    if ((*frame).contentPane != nullptr)
+        relayoutSubtree((*frame).contentPane, w, h);
+    if ((*frame).scenePane != nullptr)
+        relayoutSubtree((*frame).scenePane, w, h);
+    if ((*frame).rootPanel != nullptr && (*frame).rootPanel != (*frame).contentPane)
+        relayoutSubtree((*frame).rootPanel, w, h);
+}
+
+bool Frame_syncResize(Frame *frame, int width, int height) {
+    if (frame == nullptr || width <= 0 || height <= 0)
+        return false;
+
+    // Re-entrancy guard (one render+present per geometry event): a
+    // programmatic resize lands here, calls Window_setSize, and AppKit
+    // reflects it synchronously through setFrameSize: -> windowRefreshSize ->
+    // the resize hook -> back into THIS body. Without the guard the nested
+    // call plus both outer passes render+present up to three times for one
+    // resize. The outer pass finishes the job; nested calls stand down.
+    if ((*frame).inSyncResize)
+        return false;
+    (*frame).inSyncResize = true;
 
     (*frame).width = width;
     (*frame).height = height;
+
+    if ((*frame).window != nullptr) {
+        if (Window_width((*frame).window) != width || Window_height((*frame).window) != height) {
+            Window_setSize((*frame).window, width, height);
+        }
+    }
 
     for (uint32_t i = 0; i < (*frame).layerCount; ++i) {
         FrameLayer *layer = &(*frame).layers[i];
@@ -573,15 +646,37 @@ void Frame_resize(Frame *frame, int width, int height) {
         (*layer).height = (uint32_t) height;
     }
 
-    // Window Board Root Lock Law (law 49): force-update locked board roots to track
-    // the new window dimensions. Container_forceSize bypasses the lockedRoot guard.
+    // Force locked roots to track new window dimensions (live fractional
+    // bounds per the Single Rounding Currency Law — see relayoutChildren).
+    float liveW = (*frame).liveWidth > 0.0f ? (*frame).liveWidth : (float) width;
+    float liveH = (*frame).liveHeight > 0.0f ? (*frame).liveHeight : (float) height;
+    if ((*frame).rootComponent != nullptr) {
+        Component_setSize((*frame).rootComponent, liveW, liveH);
+    }
     if ((*frame).contentPane != nullptr)
-        Container_forceSize(&(*(*frame).contentPane).base, (float)width, (float)height);
+        Container_forceSize(&(*(*frame).contentPane).base, liveW, liveH);
     if ((*frame).scenePane != nullptr)
-        Container_forceSize(&(*(*frame).scenePane).base, (float)width, (float)height);
+        Container_forceSize(&(*(*frame).scenePane).base, liveW, liveH);
+    if ((*frame).rootPanel != nullptr && (*frame).rootPanel != (*frame).contentPane)
+        Container_forceSize(&(*(*frame).rootPanel).base, liveW, liveH);
 
+    // Edit layouts of the children & resolve anchors/locations
+    Frame_relayoutChildren(frame);
+
+    // Synchronize platform layer (CAMetalLayer) bounds and scale
+    Frame_platformSyncLayer(frame, width, height);
+
+    // Render frame callbacks (input resolution, FrameFunction callbacks)
     Frame_render(frame);
-    Frame_present(frame);
+
+    // Synchronously present to WindowServer
+    bool presented = Darling_syncPresent(frame);
+    (*frame).inSyncResize = false;
+    return presented;
+}
+
+void Frame_resize(Frame *frame, int width, int height) {
+    Frame_syncResize(frame, width, height);
 }
 
 // SETTERS
@@ -621,6 +716,15 @@ void Frame_setRootPanel(Frame *frame, Panel *panel) {
     if (frame == nullptr)
         return;
     (*frame).rootPanel = panel;
+}
+
+void Frame_setRootComponent(Frame *frame, Component *component) {
+    if (frame == nullptr)
+        return;
+    (*frame).rootComponent = component;
+    if (component != nullptr) {
+        Component_setSize(component, (float)(*frame).width, (float)(*frame).height);
+    }
 }
 
 void Frame_setContentPane(Frame *frame, Panel *panel) {
@@ -713,6 +817,12 @@ Panel *Frame_getRootPanel(const Frame *frame) {
     return (*frame).rootPanel;
 }
 
+Component *Frame_getRootComponent(const Frame *frame) {
+    if (frame == nullptr)
+        return nullptr;
+    return (*frame).rootComponent;
+}
+
 Panel *Frame_getContentPane(const Frame *frame) {
     if (frame == nullptr)
         return nullptr;
@@ -772,6 +882,18 @@ int Frame_getHeight(const Frame *frame) {
     if (frame == nullptr)
         return 0;
     return (*frame).height;
+}
+
+float Frame_getLiveWidth(const Frame *frame) {
+    if (frame == nullptr)
+        return 0.0f;
+    return (*frame).liveWidth;
+}
+
+float Frame_getLiveHeight(const Frame *frame) {
+    if (frame == nullptr)
+        return 0.0f;
+    return (*frame).liveHeight;
 }
 
 bool Frame_isInLiveResize(const Frame *frame) {

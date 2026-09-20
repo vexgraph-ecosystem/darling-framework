@@ -23,8 +23,6 @@
  * ============================================================================
  */
 
-
-
 ;;OVERVIEW
 /**
  * ============================================================================
@@ -32,6 +30,9 @@
  * LEVEL: L4 — Self-Management (Non-Apple platform Frame fallback)
  * ============================================================================
  * Stub implementation of platform hooks for non-Apple environments.
+ *
+ * STRUCT FIELDS: none — procedural stub (owns no struct; operates on the
+ * Frame owned by darling/frame.h).
  *
  * FUNCTION REGISTRY:
  * ----------------------------------------------------------------------------
@@ -56,6 +57,12 @@ void Frame_platformSyncTransaction(Frame *frame) {
 
 void Frame_platformReassertResizeHook(Frame *frame) {
     (void) frame;
+}
+
+void Frame_platformSyncLayer(Frame *frame, int width, int height) {
+    (void) frame;
+    (void) width;
+    (void) height;
 }
 
 #endif // !__APPLE__

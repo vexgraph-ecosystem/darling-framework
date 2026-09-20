@@ -10,12 +10,15 @@
 // Bridges darling UI panels and 3D scenes onto the OS-stable window and
 // Vulkan presentation pipeline.
 //
-// STACK LAW (front to back): content board Metal -> scene board Metal ->
-// legacy board Metal (clear-transparent glass). Every panel is a Vulkan
-// rect: boards paint their whole subtree into their own VkPane chain,
-// nested scenes own child panes. WindowServer composites the layer tree;
-// no IOSurface transport remains. Resize moves layers via anchors;
-// swapchains rebuild at settle only.
+// STACK LAW (front to back): seam canvas (the window's SINGLE on-screen
+// CAMetalLayer) -> retained offscreen boards — content board top, scene
+// board bottom. Every panel is a Vulkan rect: boards paint their whole
+// subtree into their own retained VkLayer flight target; scenes are
+// COMPOSITED into VkLayer targets the canvas samples as textured quads
+// (the Single-Seam Canvas Law). The seam pass composites the published
+// board images in z-order; no IOSurface transport remains. Resize moves
+// the images via origin/pivot/anchor math; the fixed buffer rebuilds once
+// per display change only.
 
 // Initialize the darling compositor for the given frame and register
 // frame rendering callbacks on the Vulkan presentation engine. The window
@@ -50,6 +53,9 @@ void Darling_renderFrame(void *cmdBuffer, int drawW, int drawH, void *userdata);
 // Hit-test query: returns true if (px, py) hits any visible child control/panel in p.
 // Returns false on empty or transparent areas to allow hit passthrough.
 bool Darling_hitTest(Panel *p, float px, float py);
+
+// Synchronous present pass for the given frame (renders and presents atomically).
+bool Darling_syncPresent(Frame *frame);
 
 #endif
 

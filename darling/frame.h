@@ -18,6 +18,7 @@ extern "C" {
 
 typedef struct Frame Frame;
 typedef struct Panel Panel;
+struct Component;
 typedef struct Application Application;
 typedef struct Dialog Dialog;
 
@@ -70,6 +71,7 @@ typedef struct Frame {
     Application *application;   // R1 host application manifest pointer (nullable)
     void *graphics;             // R3 GPU graphics context (VkHotContext / Device)
     Panel *rootPanel;           // Root UI component tree
+    struct Component *rootComponent; // Root Component tree (new Component + Graphics architecture)
     Panel *contentPane;         // Upper board root: UI canvas (borrowed, nullable)
     Panel *scenePane;           // Bottom board root: scene/backdrop (borrowed, nullable)
     char *title;                // Owned title string (strdup on set)
@@ -95,9 +97,20 @@ typedef struct Frame {
 
     int width;
     int height;
+    // LIVE fractional content size (the Single Rounding Currency Law): the
+    // WindowServer maps THESE bounds to device px; layout must resolve
+    // against them (not the rounded ints) or every parent-derived edge sits
+    // up to half a point off the device grid and toggles per drag step.
+    float liveWidth;
+    float liveHeight;
     bool inLiveResize;
     bool isMinimized;
     bool isZoomed;
+    bool inSyncResize;          // Re-entrancy guard: one render+present per geometry event
+    int drawableWidth;          // Authoritative native-px footprint of the live content
+    int drawableHeight;         // rect, resolved at geometry time by the platform seam
+                                // via AppKit convertRectToBacking (never re-derived
+                                // from rounded points — that double-round toggles ±1px)
 
     // --- Frame Function Slots (composable present callbacks, replaces onRender) ---
     FrameFunction *functions;        // Master-arena grown slot table (doubling)
@@ -129,6 +142,13 @@ void Frame_free(Frame *frame);
 void Frame_render(Frame *frame);
 void Frame_present(Frame *frame);
 void Frame_resize(Frame *frame, int width, int height);
+void Frame_relayoutChildren(Frame *frame);
+// Synchronized resize: new size -> locked roots -> relayout (anchors/pivots/
+// locations) -> platform layer sync -> render -> synchronous present. Returns
+// the synchronous present verdict (false = the present was skipped or dropped;
+// callers may re-arm demand). Re-entrant calls (the AppKit resize hook
+// reflecting a Window_setSize back into this body) stand down and return false.
+bool Frame_syncResize(Frame *frame, int width, int height);
 bool Frame_addLayer(Frame *frame, uint32_t width, uint32_t height, FrameLayer **outLayer);
 bool Frame_addFrameHandler(Frame *frame, Application *app);
 bool Frame_removeFrameHandler(Frame *frame, Application *app);
@@ -142,12 +162,14 @@ void Frame_platformAttach(Frame *frame);
 void Frame_platformDetach(Frame *frame);
 void Frame_platformSyncTransaction(Frame *frame);
 void Frame_platformReassertResizeHook(Frame *frame);
+void Frame_platformSyncLayer(Frame *frame, int width, int height);
 
 // Setters:
 void Frame_setWindow(Frame *frame, Window *window);
 void Frame_setApplication(Frame *frame, Application *app);
 void Frame_setGraphics(Frame *frame, void *graphics);
 void Frame_setRootPanel(Frame *frame, Panel *panel);
+void Frame_setRootComponent(Frame *frame, struct Component *component);
 // Board roots (non-strict: any Panel subtree in either; borrowed, nullable).
 // Content = upper board (UI canvas); scene = bottom board (backdrop/world).
 // A null scene pane clears the bottom layer transparent. The Window holds
@@ -230,6 +252,7 @@ Application *Frame_getApplication(const Frame *frame);
 Application *Frame_application(const Frame *frame);
 void *Frame_getGraphics(const Frame *frame);
 Panel *Frame_getRootPanel(const Frame *frame);
+struct Component *Frame_getRootComponent(const Frame *frame);
 Panel *Frame_getContentPane(const Frame *frame);
 Panel *Frame_getScenePane(const Frame *frame);
 uint32_t Frame_getLayerCount(const Frame *frame);
@@ -242,6 +265,17 @@ int Frame_getWidth(const Frame *frame);
 int Frame_getHeight(const Frame *frame);
 int Frame_width(const Frame *frame);
 int Frame_height(const Frame *frame);
+// Live fractional content bounds (the Single Rounding Currency Law).
+// Positive when the platform seam resolved the LIVE bounds this drag step;
+// 0.0f means "not resolved" — fall back to the rounded ints.
+float Frame_getLiveWidth(const Frame *frame);
+float Frame_getLiveHeight(const Frame *frame);
+// The ONE seam CAMetalLayer resolution (the Single Seam Identity Law):
+// resolves through the blur view's sublayers when visual effect is on, so
+// the Vulkan surface binding and the resize hook target the SAME layer.
+// nullptr = no seam attached. ARC handoff: the layer is owned by the layer
+// tree; the caller must not retain/release it.
+void *Frame_seamMetalLayer(Frame *frame);
 bool Frame_isInLiveResize(const Frame *frame);
 bool Frame_isMinimized(const Frame *frame);
 bool Frame_isZoomed(const Frame *frame);

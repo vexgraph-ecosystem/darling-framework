@@ -44,8 +44,6 @@ bool Dialog_requestClose(Dialog *dialog);
  * ============================================================================
  */
 
-
-
 ;;OVERVIEW
 /**
  * ============================================================================
@@ -69,6 +67,49 @@ bool Dialog_requestClose(Dialog *dialog);
  * live transaction, so ONLY our transaction moves the seam and WindowServer
  * never stretches an old drawable to an auto-moved frame.
  *
+ * STRUCT FIELDS (Mirroring darling/frame.h — the Frame the shim operates on):
+ * ----------------------------------------------------------------------------
+ *   Frame {                // Window frame (see darling/frame.h)
+ *     Window *window;      // R1 host window pointer
+ *     Application *application; // R1 host application manifest pointer (nullable)
+ *     void *graphics;      // R3 GPU graphics context (VkHotContext / Device)
+ *     Panel *rootPanel;    // Root UI component tree
+ *     struct Component *rootComponent; // Root Component tree (new Component + Graphics architecture)
+ *     Panel *contentPane;  // Upper board root: UI canvas (borrowed, nullable)
+ *     Panel *scenePane;    // Bottom board root: scene/backdrop (borrowed, nullable)
+ *     char *title;         // Owned title string (strdup on set)
+ *     bool visible;        // Visibility state flag
+ *     int chromeMode;      // FrameChromeMode (FRAME_DECORATED / BORDERLESS / NAKED)
+ *     FrameLayer layers[DARLING_FRAME_MAX_LAYERS]; // Stacked FBOs inside CAMetalLayer
+ *     uint32_t layerCount; // Active layer count
+ *     Dialog *childDialogs[DARLING_FRAME_MAX_DIALOGS]; // Managed child dialogs
+ *     uint32_t childDialogCount; // Active child dialog count
+ *     Dialog *ownerDialog; // Owning Dialog instance if embedded in a Dialog
+ *     struct Frame *parentFrame; // Parent frame if this frame is a child dialog (bidirectional tracking)
+ *     bool (*onQuitRequested)(struct Frame *frame, void *userData); // Quit-request callback
+ *     void *quitRequestedUserData; // User data for the quit-request callback
+ *     bool hasVisualEffect; // NSVisualEffectView vibrancy enabled
+ *     int visualEffectMaterial; // FrameVisualEffectMaterial
+ *     bool presentsWithTransaction; // CAMetalLayer presentsWithTransaction = YES
+ *     uint32_t presentedFrames; // Confirmed seam presents since attach (infancy gate)
+ *     uint32_t emptyPresents; // Consecutive empty seam presents (empty-cap guard)
+ *     uint64_t lastPublishGen; // Last observed VkLayer publish generation (probe re-arm)
+ *     int width;           // Window width in points
+ *     int height;          // Window height in points
+ *     bool inLiveResize;   // Live-resize drag in progress
+ *     bool isMinimized;    // Window minimized state
+ *     bool isZoomed;       // Window zoomed state
+ *     bool inSyncResize;   // Re-entrancy guard: one render+present per geometry event
+ *     int drawableWidth;   // Authoritative native-px footprint of the live content rect
+ *     int drawableHeight;  // (resolved via convertRectToBacking at geometry time)
+ *     FrameFunction *functions; // Master-arena grown slot table (doubling)
+ *     uint32_t functionCount; // Active frame-function slot count
+ *     uint32_t functionCapacity; // Frame-function slot capacity
+ *     KeyMap *keyMap;      // Master-arena KeyMap; lazily created on first bind
+ *     uint64_t lastRenderNanos; // Monotonic clock at last Frame_render (dt source)
+ *     void *nativeView;    // Pointer to platform NSView / CAMetalLayer container
+ *   }
+ *
  * FUNCTION REGISTRY:
  * ----------------------------------------------------------------------------
  * Core Functions:
@@ -84,12 +125,15 @@ bool Dialog_requestClose(Dialog *dialog);
   *     runs per drag step on thread 0 inside ONE explicit CATransaction
   *     (begin + setDisableActions:YES at top, commit after the forced
   *     present — the Single-Transaction Live Coordination Law): live OS
-  *     bounds read (never the truncated cache), drawableSize re-chase in
-  *     rounded native px (Native Pixel Law) + EXPLICIT seam.frame =
+  *     bounds read (never the truncated cache), drawableSize re-chase from
+  *     convertRectToBacking on the LIVE FRACTIONAL bounds — the WindowServer's
+  *     own device-pixel rule, never lround(lround(frac) x scale), which
+  *     double-rounds and toggles ±1px mid-drag (the Native Pixel Law + the
+  *     Continuous Real-Time Live Resize Law) + EXPLICIT seam.frame =
   *     contentView.bounds and seam.bounds = same rect (points, sticky manual
   *     geometry — the ONLY mover, AppKit autoresizing is off), live scale
   *     pinned via TextCore_setBackingScaleOverride(liveScale) so button /
-  *     label / input raster and attachLayers / attachPanes px math track
+  *     label / input raster and retained-layer px math track
   *     the dragged window (never mainScreen mid-drag), then ONE
   *     Frame_resize (Frame_render + Frame_present live inside it), then
   *     re-armed dirty + GraphicsLoop_modalTickForced so the window RENDERS
@@ -138,7 +182,8 @@ static CAMetalLayer *seamLayerOf(Frame *frame) {
         CALayer *host = [(NSView*) obj layer];
         if ([host isKindOfClass:[CAMetalLayer class]])
             return (CAMetalLayer*) host;
-        // Sublayer seam: named at attach so we never mistake a DIRECT pane
+        // Sublayer seam: named at attach so we never mistake an unrelated
+        // CAMetalLayer sublayer
         // for the canvas. Fall back to the first CAMetalLayer child.
         for (CALayer *sub in [host sublayers]) {
             if ([[sub name] isEqualToString:@"vexgraph.seam"])
@@ -152,132 +197,166 @@ static CAMetalLayer *seamLayerOf(Frame *frame) {
     return nullptr;
 }
 
+// The ONE seam-layer resolution for the whole stack (the Single Seam
+// Identity Law): the Vulkan surface binding (Frame_seamMetalLayer, consumed
+// by darlingSeamMetalLayer -> VkMac_createSurfaceForLayer) and the per-step
+// resize target (seamLayerOf) MUST resolve the same CAMetalLayer. Handing
+// MoltenVK the raw NSVisualEffectView makes it bind the blur view's own
+// backing layer instead of the seam sublayer — the surface's currentExtent
+// then never tracks drawableSize (frozen caps, pinned canvas, trailing
+// strip on every resize).
+void *Frame_seamMetalLayer(Frame *frame) {
+    return (__bridge void*) seamLayerOf(frame);
+}
+
+void Frame_platformSyncLayer(Frame *frame, int width, int height) {
+    if (frame == nullptr || (*frame).window == nullptr)
+        return;
+    static int s_syncTrace = -1;
+    if (s_syncTrace < 0)
+        s_syncTrace = getenv("ANTI_RESIZE_TRACE") != nullptr;
+    NSWindow *nsWindow = (__bridge NSWindow*) Window_nativeHandle((*frame).window);
+    if (nsWindow == nil) {
+        if (s_syncTrace) fprintf(stderr, "seam:sync no-window\n");
+        return;
+    }
+    CGFloat liveScale = [nsWindow backingScaleFactor];
+    if (liveScale <= 0.0)
+        liveScale = 1.0;
+
+    extern void TextCore_setBackingScaleOverride(float scale);
+    TextCore_setBackingScaleOverride((float) liveScale);
+
+    CAMetalLayer *seam = seamLayerOf(frame);
+    if (s_syncTrace)
+        fprintf(stderr, "seam:sync native=%s seam=%p scale=%.2f\n",
+                (*frame).nativeView ? "set" : "nil",
+                (__bridge void*) seam, (double) liveScale);
+    if (seam != nil) {
+        [seam setContentsScale:liveScale];
+        NSView *contentView = [nsWindow contentView];
+        if (contentView != nil) {
+            // Authoritative device footprint: the WindowServer maps the LIVE
+            // fractional bounds (never the lround'ed point cache) to device
+            // pixels with its own trailing-edge rule — convertRectToBacking is
+            // that mapping, so the drawable matches the on-screen footprint
+            // exactly. Deriving px from an already-rounded point size
+            // (lround(lround(frac) x scale)) double-rounds and toggles ±1px as
+            // a drag crosses a .5 boundary — the one-pixel live-resize jitter.
+            NSRect liveBounds = [contentView bounds];
+            NSRect backing = [contentView convertRectToBacking:liveBounds];
+            if (lround(backing.size.width) <= 0 || lround(backing.size.height) <= 0)
+                return;
+            int drawW = (int) lround(backing.size.width);
+            int drawH = (int) lround(backing.size.height);
+            (*frame).drawableWidth = drawW;
+            (*frame).drawableHeight = drawH;
+            // Publish the LIVE fractional bounds for the layout currency: the
+            // WindowServer maps THESE to the device px above, so every
+            // container must resolve against them (never the rounded ints —
+            // lround(800.5) = 801 puts every parent-derived edge half a point
+            // off the device grid, wobbling per drag step).
+            (*frame).liveWidth = (float) liveBounds.size.width;
+            (*frame).liveHeight = (float) liveBounds.size.height;
+            // Fixed-buffer model: the drawable is the display-sized buffer
+            // already allocated at attach, so this step only publishes the
+            // RENDER AREA (the live px region the pass scissors to) and moves
+            // the layer frame to the live bounds — the WindowServer's own
+            // fractional mapping. TopLeft gravity shows the buffer's top-left
+            // 1:1, so the visible pixels are exactly the live region: no
+            // scaling, no strip, no swapchain rebuild per step.
+            extern void Vk_seamSetExtent(int32_t widthPx, int32_t heightPx);
+            Vk_seamSetExtent(drawW, drawH);
+            // Keep the drawable in lockstep with the chain extent (the fixed
+            // monitor-sized buffer) — write only when it actually differs, so
+            // a drag step costs one property read, never a drawable churn.
+            extern void Vk_seamExtent(int32_t *outW, int32_t *outH);
+            int32_t chainW = 0;
+            int32_t chainH = 0;
+            Vk_seamExtent(&chainW, &chainH);
+            if (chainW > 0 && chainH > 0) {
+                CGSize cur = [seam drawableSize];
+                if (lround(cur.width) != (long) chainW || lround(cur.height) != (long) chainH)
+                    [seam setDrawableSize:CGSizeMake((CGFloat) chainW, (CGFloat) chainH)];
+            } else {
+                [seam setDrawableSize:CGSizeMake((CGFloat) drawW, (CGFloat) drawH)];
+            }
+            [seam setContentsGravity:kCAGravityTopLeft];
+            [seam setAnchorPoint:CGPointMake(0.0, 0.0)];
+            [seam setGeometryFlipped:YES];
+            if (s_syncTrace)
+                fprintf(stderr, "seam:sync bounds=%.1fx%.1f draw=%dx%d chain=%dx%d area=%dx%d\n",
+                        (double) liveBounds.size.width, (double) liveBounds.size.height,
+                        drawW, drawH, chainW, chainH, drawW, drawH);
+            // Layer frame = the BUFFER's own point size (chain px / scale),
+            // never the live bounds: Core Animation resolves the drawable into
+            // the layer's bounds × contentsScale, so a monitor-sized drawable
+            // in a window-sized layer is MAGNIFIED (the live-resize stretch).
+            // Matching the layer to the buffer keeps the mapping exactly 1:1;
+            // the window then crops via clipping (masksToBounds set at attach
+            // on the seam's parent), which is the fixed-buffer viewport.
+            // Fallback to the live bounds before the chain exists.
+            CGFloat seamW = chainW > 0 ? (CGFloat) chainW / liveScale : liveBounds.size.width;
+            CGFloat seamH = chainH > 0 ? (CGFloat) chainH / liveScale : liveBounds.size.height;
+            NSRect seamRect = NSMakeRect(0.0, 0.0, seamW, seamH);
+            [seam setFrame:seamRect];
+            [seam setBounds:seamRect];
+            [seam setPosition:CGPointMake(0.0, 0.0)];
+            return;
+        }
+        // No content view (degenerate/borderless): fall back to the layout
+        // points passed in — integral points times scale is exact, no jitter.
+        [seam setDrawableSize:CGSizeMake((CGFloat) lround((double) width * liveScale),
+                                         (CGFloat) lround((double) height * liveScale))];
+        (*frame).liveWidth = (float) width;
+        (*frame).liveHeight = (float) height;
+    }
+}
+
+static bool frameCocoaHookInstalled(Frame *frame) {
+    if (frame == nullptr || (*frame).window == nullptr)
+        return false;
+    return Window_getResizeRenderHook((*frame).window) != nullptr;
+}
+
 static void frameCocoaResizeHook(void *userdata) {
     Frame *frame = (Frame*) userdata;
     if (frame == nullptr || (*frame).window == nullptr)
         return;
 
-    // Live bounds straight from the OS (points, never the truncated cache):
-    // a Retina sub-point step is a whole native pixel and must fire the seam.
     NSWindow *nsWindow = (__bridge NSWindow*) Window_nativeHandle((*frame).window);
     if (nsWindow == nil)
         return;
-    NSRect liveContent = [nsWindow contentRectForFrameRect:[nsWindow frame]];
+    NSView *cv = [nsWindow contentView];
+    NSRect liveContent = cv != nil ? [cv bounds] : [nsWindow contentRectForFrameRect:[nsWindow frame]];
     if (liveContent.size.width <= 0.0 || liveContent.size.height <= 0.0)
         return;
-    CGFloat liveScale = [nsWindow backingScaleFactor];
-    if (liveScale <= 0.0)
-        liveScale = 1.0;
     int w = (int) lround(liveContent.size.width);
     int h = (int) lround(liveContent.size.height);
     if (w <= 0 || h <= 0)
         return;
 
-    // GEOMETRY PROBE (VEX_GEOMETRY_LOG=1): one line per drag step showing the
-    // window frame (points, screen coords), content view bounds, seam layer
-    // frame/anchorPoint/position/geometryFlipped BEFORE the native-pixel
-    // chase — plus the drawable extent after it. Directional drag artifacts
-    // (top/right vs bottom/left) localize to whichever line lags or drifts.
-    static int geomLog = -1;
-    if (geomLog < 0)
-        geomLog = getenv("VEX_GEOMETRY_LOG") != nullptr;
-    if (geomLog) {
-        NSWindow *gw = (__bridge NSWindow*) Window_nativeHandle((*frame).window);
-        NSRect wf = gw ? [gw frame] : NSZeroRect;
-        NSRect bf = gw ? [[gw contentView] bounds] : NSZeroRect;
-        CAMetalLayer *sl = seamLayerOf(frame);
-        if (sl != nil) {
-            NSRect lf = [sl frame];
-            CGPoint ap = [sl anchorPoint];
-            CGPoint pos = [sl position];
-            CGSize dw = [sl drawableSize];
-            fprintf(stderr, "geom pre: win=(%.0f,%.0f %.0fx%.0f) view=(%.0fx%.0f) layer=(%.0f,%.0f %.0fx%.0f) ap=(%.2f,%.2f) pos=(%.0f,%.0f) flip=%d scale=%.2f drawable=(%.0fx%.0f)\n",
-                   wf.origin.x, wf.origin.y, wf.size.width, wf.size.height,
-                   bf.size.width, bf.size.height,
-                   lf.origin.x, lf.origin.y, lf.size.width, lf.size.height,
-                   ap.x, ap.y, pos.x, pos.y, [sl isGeometryFlipped], [sl contentsScale],
-                   dw.width, dw.height);
-        }
-    }
-
-    // Single-transaction live step (the Single-Transaction Live
-    // Coordination Law): the WHOLE step — drawableSize chase + Frame_resize
-    // layout + forced present — lands in ONE explicit CATransaction with
-    // actions disabled, so the chase and the present commit atomically with
-    // the moving edge instead of in two transactions (chase outside,
-    // present-only inside) that let WindowServer stretch the old drawable
-    // to the new bounds until the next vsync. Never spans sendEvent:
-    // begin/commit both live inside this hook (the
-    // No-Transaction-Across-Event-Dispatch Law). The nested begin/commit
-    // pairs inside the present path coalesce into this outer commit.
-    // No wait added.
     [CATransaction begin];
     [CATransaction setDisableActions:YES];
 
-    // Native Pixel Law: chase drawableSize in rounded native hardware pixels
-    // from the live bounds + backing scale factor, BEFORE layout runs — the
-    // swapchain extent must match the screen every drag step (the
-    // Continuous Real-Time Live Resize Law). Sticky seam: the layer frame
-    // NEVER tracks the window natively (autoresizingMask kCALayerNotSizable
-    // at attach) — the hook sets frame + bounds explicitly from the live
-    // content bounds (points) inside this same transaction, so ONLY this
-    // transaction moves the seam. Points paint the CALayer frame, rounded
-    // px paint the drawable — never truncated. The live scale is pinned
-    // for raster + pane px math (button/label/input breathe fix).
-    //
-    // (externs are function-local per the panel_bridge.c seam pattern: no
-    // text_core.h pull into ObjC, no cross-module include.)
-    CAMetalLayer *seam = seamLayerOf(frame);
-    if (seam != nil) {
-        extern void TextCore_setBackingScaleOverride(float scale);
-        TextCore_setBackingScaleOverride((float) liveScale);
-        [seam setContentsScale:liveScale];
-        [seam setDrawableSize:CGSizeMake((CGFloat) lround(liveContent.size.width * liveScale),
-                                         (CGFloat) lround(liveContent.size.height * liveScale))];
-        NSView *contentView = [nsWindow contentView];
-        if (contentView != nil) {
-            NSRect liveBounds = NSMakeRect(0.0, 0.0, liveContent.size.width, liveContent.size.height);
-            // Per-step pin (not just at attach): AppKit/VFX can reset these
-            // behind our back, and a gravityResize seam stretches the old
-            // drawable to the new bounds for a frame — worst on top/right
-            // drags where the origin also moves. TopLeft never scales.
-            [seam setContentsGravity:kCAGravityTopLeft];
-            [seam setAnchorPoint:CGPointMake(0.0, 0.0)];
-            [seam setGeometryFlipped:YES];
-            [seam setFrame:liveBounds];
-            [seam setBounds:liveBounds];
-            [seam setPosition:CGPointMake(0.0, 0.0)];
-        }
-        if (geomLog)
-            fprintf(stderr, "geom post: win=(%dx%d) drawable=(%.0fx%.0f) scale=%.2f gravity=%s\n",
-                   w, h, seam.drawableSize.width, seam.drawableSize.height, seam.contentsScale,
-                   [[seam contentsGravity] isEqualToString:kCAGravityTopLeft] ? "TopLeft" : [[seam contentsGravity] UTF8String]);
-    }
+    // Sync the seam layer FIRST so drawableWidth/drawableHeight (resolved via
+    // convertRectToBacking on the live fractional bounds) are authoritative
+    // BEFORE Frame_syncResize → Darling_preFrame → Darling_attachPanelBoards
+    // reads them. Without this, the board attach falls back to
+    // lround(lround(frac) × scale) — the double-round ±1px jitter.
+    Frame_platformSyncLayer(frame, w, h);
 
-    // ONE attempt per step: Frame_resize already runs Frame_render +
-    // Frame_present (darling/frame.c), so this hook owns the whole live step
-    // and frameCocoaOnResized stands down while live (no double layout).
-    Frame_resize(frame, w, h);
-
-    // Aggressive live demand: re-arm the client dirty and run the FORCED
-    // modal tick NOW so this window renders at the NEW size and presents
-    // synchronously before the next drag step fires (the Continuous
-    // Real-Time Live Resize Law — reference the new size, wait for the
-    // render, then present). The forced path CANNOT skip on not-dirty or
-    // not-ready; minimized + Vk_ready + bounded GPU waits stay honored
-    // inside the present path, and the try-lock retries in ~1ms slices up
-    // to ~8ms before dropping (the Bounded Wait Law). A drop keeps dirty
-    // armed inside the loop (the Present-On-Demand Law), so the next step
-    // retries with fresher state; idle windows stay dirty-clean and rest.
-    // The GfxLoop's own steps are starved while AppKit's modal tracking
-    // loop owns thread 0, so the resize hook is the only live seam. No new
-    // thread, no unbounded wait — R3 owns the GPU bounds.
-    GraphicsLoop *loop = GraphicsLoop_default();
-    Window *win = (*frame).window;
-    GraphicsLoop_markDirty(loop, win);
-    GraphicsLoop_modalTickForced(win);
+    bool presented = Frame_syncResize(frame, w, h);
 
     [CATransaction commit];
+    [CATransaction flush];
+
+    // Drop ticket (the Present-On-Demand Law): if the synchronous present
+    // failed mid-drag (swapchain rebuild, minimized gate, device lost), re-arm
+    // the client so the next loop step or drag step retries with fresher state
+    // — a dropped step must never rest as a lagging frame.
+    if (!presented && (*frame).window != nullptr)
+        GraphicsLoop_markDirty(GraphicsLoop_default(), (*frame).window);
 }
 
 static void frameCocoaOnResized(void *self, Window *window, int width, int height) {
@@ -286,15 +365,25 @@ static void frameCocoaOnResized(void *self, Window *window, int width, int heigh
     if (frame == nullptr)
         return;
 
-    // Live steps belong to frameCocoaResizeHook (drawableSize chase first,
-    // then ONE Frame_resize + best-effort modalTick): laying out here too
-    // would run every drag step twice. Settle steps (not live) land here —
-    // clearing the live scale pin so raster resyncs to mainScreen.
     if (Window_isLiveResizing((*frame).window))
         return;
     extern void TextCore_clearBackingScaleOverride(void);
     TextCore_clearBackingScaleOverride();
-    Frame_resize(frame, width, height);
+
+    // Uniform deferral (one render+present per geometry event): when a resize
+    // render hook is installed it fires for this same geometry via
+    // windowRefreshSize — the hook is the single renderer and this handler
+    // only stands down. Shim-less windows (no hook) keep the direct path.
+    if (frameCocoaHookInstalled(frame))
+        return;
+
+    [CATransaction begin];
+    [CATransaction setDisableActions:YES];
+
+    Frame_syncResize(frame, width, height);
+
+    [CATransaction commit];
+    [CATransaction flush];
 }
 
 static void frameCocoaOnMinimized(void *self, Window *window) {
@@ -303,9 +392,10 @@ static void frameCocoaOnMinimized(void *self, Window *window) {
     if (frame == nullptr)
         return;
 
+    // Pure flag flip: the window is occluded inside the dock genie — no
+    // render, no present (Frame_present never presented anyway; the frame's
+    // isMinimized flag is the only state the genie path owns).
     (*frame).isMinimized = true;
-    Frame_render(frame);
-    Frame_present(frame);
 }
 
 static void frameCocoaOnRestored(void *self, Window *window) {
@@ -315,6 +405,26 @@ static void frameCocoaOnRestored(void *self, Window *window) {
         return;
 
     (*frame).isMinimized = false;
+    // Uniform deferral: the resize hook renders this geometry (windowRefreshSize
+    // fires it for the deminiaturize settle); only shim-less windows render here.
+    if (frameCocoaHookInstalled(frame))
+        return;
+
+    NSWindow *nsWindow = (__bridge NSWindow*) Window_nativeHandle((*frame).window);
+    if (nsWindow != nil) {
+        NSView *cv = [nsWindow contentView];
+        NSRect liveContent = cv != nil ? [cv bounds] : [nsWindow contentRectForFrameRect:[nsWindow frame]];
+        int w = (int) lround(liveContent.size.width);
+        int h = (int) lround(liveContent.size.height);
+        if (w > 0 && h > 0) {
+            [CATransaction begin];
+            [CATransaction setDisableActions:YES];
+            Frame_syncResize(frame, w, h);
+            [CATransaction commit];
+            [CATransaction flush];
+            return;
+        }
+    }
     Frame_render(frame);
     Frame_present(frame);
 }
@@ -325,7 +435,64 @@ static void frameCocoaOnZoom(void *self, Window *window) {
     if (frame == nullptr)
         return;
 
-    (*frame).isZoomed = !(*frame).isZoomed;
+    // Mirror the NATIVE zoom state (never a blind toggle — windowShouldZoom
+    // fires before the frame change and delegates may fire twice per zoom).
+    NSWindow *nsWindow = (__bridge NSWindow*) Window_nativeHandle((*frame).window);
+    if (nsWindow != nil)
+        (*frame).isZoomed = [nsWindow isZoomed];
+
+    // Uniform deferral: this event fires BEFORE AppKit moves the frame, so
+    // rendering here would present a stale-size frame. The resize hook renders
+    // every geometry step of the zoom animation and the settle; only shim-less
+    // windows keep the direct path.
+    if (frameCocoaHookInstalled(frame))
+        return;
+
+    if (nsWindow != nil) {
+        NSView *cv = [nsWindow contentView];
+        NSRect liveContent = cv != nil ? [cv bounds] : [nsWindow contentRectForFrameRect:[nsWindow frame]];
+        int w = (int) lround(liveContent.size.width);
+        int h = (int) lround(liveContent.size.height);
+        if (w > 0 && h > 0) {
+            [CATransaction begin];
+            [CATransaction setDisableActions:YES];
+            Frame_syncResize(frame, w, h);
+            [CATransaction commit];
+            [CATransaction flush];
+            return;
+        }
+    }
+    Frame_render(frame);
+    Frame_present(frame);
+}
+
+static void frameCocoaOnFullscreen(void *self, Window *window) {
+    (void) window;
+    Frame *frame = (Frame*) self;
+    if (frame == nullptr)
+        return;
+
+    // Uniform deferral: the fullscreen animation drives setFrameSize per step
+    // (each fires the resize hook with live bounds); this pre-transition event
+    // must not render a stale-size frame. Shim-less windows keep the direct path.
+    if (frameCocoaHookInstalled(frame))
+        return;
+
+    NSWindow *nsWindow = (__bridge NSWindow*) Window_nativeHandle((*frame).window);
+    if (nsWindow != nil) {
+        NSView *cv = [nsWindow contentView];
+        NSRect liveContent = cv != nil ? [cv bounds] : [nsWindow contentRectForFrameRect:[nsWindow frame]];
+        int w = (int) lround(liveContent.size.width);
+        int h = (int) lround(liveContent.size.height);
+        if (w > 0 && h > 0) {
+            [CATransaction begin];
+            [CATransaction setDisableActions:YES];
+            Frame_syncResize(frame, w, h);
+            [CATransaction commit];
+            [CATransaction flush];
+            return;
+        }
+    }
     Frame_render(frame);
     Frame_present(frame);
 }
@@ -401,6 +568,29 @@ void FrameCocoa_attach(Frame *frame) {
         NSRect bounds = [contentView bounds];
         CAMetalLayer *metalLayer = [CAMetalLayer layer];
         metalLayer.name = @"vexgraph.seam";
+        if (getenv("ANTI_RESIZE_TRACE") != nullptr)
+            fprintf(stderr, "seam:attach layer=%p vfx=%d\n", (__bridge void*) metalLayer,
+                    (*frame).hasVisualEffect ? 1 : 0);
+        // Fixed-buffer model (the single-seam plaster): the seam chain is
+        // allocated ONCE at the display's native pixel size, and the window is
+        // a top-left CROP of it (kCAGravityTopLeft = non-resizing gravity: the
+        // drawable is drawn 1:1 and clipped, never scaled). Window resizes then
+        // cost only a render area + layer frame per step — no swapchain
+        // rebuild, no strip, no scaling. Publish the max BEFORE Vulkan init so
+        // the first chain build uses it.
+        extern void Vk_seamSetMaxExtent(int32_t widthPx, int32_t heightPx);
+        NSScreen *scr = [nsWindow screen] ?: [NSScreen mainScreen];
+        CGFloat screenScale = scr != nil ? [scr backingScaleFactor] : 1.0;
+        if (screenScale <= 0.0)
+            screenScale = 1.0;
+        int32_t maxPxW = 0;
+        int32_t maxPxH = 0;
+        if (scr != nil) {
+            NSRect sframe = [scr frame];
+            maxPxW = (int32_t) lround(sframe.size.width * screenScale);
+            maxPxH = (int32_t) lround(sframe.size.height * screenScale);
+        }
+        Vk_seamSetMaxExtent(maxPxW, maxPxH);
         metalLayer.presentsWithTransaction = YES;
         metalLayer.contentsGravity = kCAGravityTopLeft;
         metalLayer.anchorPoint = CGPointMake(0.0, 0.0);
@@ -409,13 +599,15 @@ void FrameCocoa_attach(Frame *frame) {
         metalLayer.frame = bounds;
         // Sticky seam: AppKit MUST NOT move this layer in its own
         // transaction (two movers = slinky stretch). kCALayerNotSizable (0)
-        // disables native tracking; frameCocoaResizeHook sets frame + bounds
+        // disables native tracking; the resize hook sets frame + bounds
         // explicitly every drag step inside the single live transaction.
         metalLayer.autoresizingMask = kCALayerNotSizable;
         // Native Pixel Law: contentsScale mirrors the backing scale factor
         // and drawableSize is set in native hardware pixels at attach —
         // bounds (logical points) x scale. The resize hook re-chases both
-        // per drag step; the swapchain always matches the screen 1:1.
+        // per drag step via convertRectToBacking on the live fractional
+        // bounds (see Frame_platformSyncLayer); the swapchain always
+        // matches the screen 1:1.
         CGFloat backingScale = [nsWindow backingScaleFactor];
         if (backingScale <= 0.0)
             backingScale = 1.0;
@@ -438,12 +630,20 @@ void FrameCocoa_attach(Frame *frame) {
             // never touches the canvas geometry or drawable.
             [vfx setWantsLayer:YES];
             CALayer *blurLayer = [vfx layer];
+            // The seam layer is the monitor-sized plaster buffer (fixed-buffer
+            // model), so its PARENT must clip: the window's bounds are the
+            // viewport onto that buffer. Without this the buffer draws over
+            // the whole display area the view covers.
+            [blurLayer setMasksToBounds:YES];
             [blurLayer addSublayer:metalLayer];
             [contentView addSubview:vfx positioned:NSWindowBelow relativeTo:nil];
             (*frame).nativeView = (__bridge_retained void*) vfx;
         } else {
             [contentView setWantsLayer:YES];
             if (contentView.layer != nil) {
+                // Clip: the seam is a monitor-sized buffer; the content view's
+                // bounds are the window's viewport onto it (pane of glass).
+                [contentView.layer setMasksToBounds:YES];
                 [contentView.layer insertSublayer:metalLayer atIndex:0];
             } else {
                 [contentView setLayer:metalLayer];
@@ -461,6 +661,7 @@ void FrameCocoa_attach(Frame *frame) {
             WindowEvent_setOnMinimized(ev, frameCocoaOnMinimized);
             WindowEvent_setOnRestored(ev, frameCocoaOnRestored);
             WindowEvent_setOnZoomFilled(ev, frameCocoaOnZoom);
+            WindowEvent_setOnFullscreen(ev, frameCocoaOnFullscreen);
             WindowEvent_setOnQuitRequested(ev, frameCocoaOnQuitRequested);
             WindowEvent_setOnFocusGained(ev, frameCocoaOnFocusGained);
             WindowEvent_setOnPressed(ev, frameCocoaOnPressed);

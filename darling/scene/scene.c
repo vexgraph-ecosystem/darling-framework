@@ -16,9 +16,9 @@
  * never re-renders on resize. Scene2D and Scene3D are dispatch tags with no
  * extra payload, embedding Scene as their first member. The present mode
  * selects the destination: COMPOSITED keeps a retained offscreen target
- * sampled by the canvas, DIRECT owns a CAMetalLayer + VkPane swapchain, and
- * INLINE draws directly into the parent board render pass. Scene hosts the
- * 2D/3D scene-graph content of the R4 stack.
+ * sampled by the canvas (the Single-Seam Canvas Law — one on-screen
+ * CAMetalLayer total), and INLINE draws directly into the parent board render
+ * pass. Scene hosts the 2D/3D scene-graph content of the R4 stack.
  * ============================================================================
  */
 
@@ -37,7 +37,7 @@
  *   Scene:                 // The scene root (Panel + mapping + present mode)
  *     Panel base;          // Inherited layout/bounds/tree state (see panel.h)
  *     int32_t mode;        // SCENE_MODE_STRETCH/FIT/PIXEL mapping mode
- *     int32_t presentMode; // SCENE_PRESENT_COMPOSITED/DIRECT destination
+ *     int32_t presentMode; // SCENE_PRESENT_COMPOSITED/INLINE destination
  *   Scene2D:               // 2D dispatch tag, no extra payload
  *     Scene base;          // Embedded scene root
  *   Scene3D:               // 3D dispatch tag, no extra payload
@@ -148,7 +148,7 @@ int Scene_getPresentMode(const Scene *s) {
 }
 
 void Scene_setPresentMode(Scene *s, int presentMode) {
-    if (!s || (presentMode != SCENE_PRESENT_COMPOSITED && presentMode != SCENE_PRESENT_DIRECT && presentMode != SCENE_PRESENT_INLINE))
+    if (!s || (presentMode != SCENE_PRESENT_COMPOSITED && presentMode != SCENE_PRESENT_INLINE))
         return;
     (*s).presentMode = presentMode;
     Container_markDirty(sceneLayout(s));
