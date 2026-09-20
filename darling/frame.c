@@ -1,5 +1,6 @@
 #include "darling/frame.h"
 
+#include "annotation/definition.h"
 #include "annotation/overview.h"
 #include "darling/dialog/dialog.h"
 #include "darling/panel/panel.h"
@@ -14,6 +15,33 @@
 #include <stdlib.h>
 #include <string.h>
 #include <time.h>
+
+;;DEFINITION
+/**
+ * ============================================================================
+ * DEFINITION: Frame
+ * ============================================================================
+ * Host frame encapsulating an R1 Window, R3 Graphics device context, root
+ * UI Panel, and a stack of VkImage / Framebuffer layers hosted on a
+ * CAMetalLayer configured with presentsWithTransaction = YES for
+ * synchronized WindowServer rendering during live resize, minimize, and
+ * zoom events — the bridge between hotcwap's Window and graphvex's
+ * Graphics. Board roots (contentPane upper, scenePane lower) are borrowed
+ * and nullable; the Window Board Root Lock Law enforces lockedRoot +
+ * top-left geometry on set, and the compositor resolves both roots from
+ * the Frame alone (the Window Decoupling Law — the Window holds zero
+ * Panels). Layer slots are a fixed array (DARLING_FRAME_MAX_LAYERS);
+ * FrameFunction present callbacks live in a master-arena grown slot table
+ * (doubling) that fires in registration order on every Frame_render; the
+ * KeyMap is lazily created in the master arena on first bind. The
+ * inSyncResize flag is a re-entrancy guard (one render+present per
+ * geometry event), presentedFrames drives the compositor infancy gate,
+ * emptyPresents caps consecutive empty seam presents, and lastPublishGen
+ * re-arms present demand on fresh VkLayer publishes.
+ * ============================================================================
+ */
+
+
 
 ;;OVERVIEW
 /**
