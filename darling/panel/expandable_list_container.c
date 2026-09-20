@@ -1,5 +1,6 @@
 #include "darling/panel/expandable_list_container.h"
 
+#include "annotation/definition.h"
 #include "annotation/overview.h"
 #include "darling/field/checkbox.h"
 #include "darling/label/label.h"
@@ -11,6 +12,31 @@
 #include <stddef.h>
 #include <stdint.h>
 #include <string.h>
+
+;;DEFINITION
+/**
+ * ============================================================================
+ * DEFINITION: ExpandableListContainer
+ * ============================================================================
+ * Node-oriented tree list built on data-oriented flat storage: the tree
+ * ("expandable items with containers inside") lives as a flat pre-order
+ * array of behaviorless ExpandableNode slot records — the single source of
+ * truth. Each node owns a borrowed header row Panel (chevron + text label,
+ * plus a Checkbox part in checklist mode) and a borrowed collapsible
+ * child-holder Panel positioned as the row's sibling; parent/child ranges
+ * are plain index numbers, so expansion flips a bool and re-runs the
+ * recursive layout over the array — it never chases pointers. The nodes
+ * array is arena-grown by doubling (Memory_alloc, zero steady-state
+ * allocation in layout); the container is detach-only and never frees
+ * row/childPanel views — the arena owns panels. Per the Container-vs-Panel
+ * Law it embeds Panel as its first member and inherits the layout/tree/
+ * background state; indentation shifts the child container right by
+ * indentSpacing per level, with depthLevelValue = depth * indentSpacing
+ * riding on the slot for inspection. Part verbs (part_row, part_chevron,
+ * part_label, part_checkbox, part_childPanel) expose the borrowed views
+ * without piercing internals; getChildren is dest-last.
+ * ============================================================================
+ */
 
 ;;OVERVIEW
 /**
