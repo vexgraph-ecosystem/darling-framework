@@ -1,7 +1,25 @@
 #include "io/bake.h"
 #include <stdio.h>
 #include <string.h>
+#include "annotation/definition.h"
 #include "annotation/overview.h"
+
+;;DEFINITION
+/**
+ * ============================================================================
+ * DEFINITION: Bake
+ * ============================================================================
+ * Offline asset compilation pipeline: converts raw source assets (glTF, OBJ,
+ * PNG) into the zero-copy binary .anti format that io/mmap maps directly
+ * into RAM. The AntiAssetHeader is a fixed zero-copy file header (magic
+ * "ANTI", version, asset kind, payload length) so a mapped file can be read
+ * in place without parsing.
+ *
+ * Today the pipeline bakes a hardcoded test mesh — three interleaved
+ * BakedVertex records — via Scene_bake, establishing the on-disk format
+ * contract that the mmap substrate consumes.
+ * ============================================================================
+ */
 
 ;;OVERVIEW
 /**
