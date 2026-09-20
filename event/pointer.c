@@ -1,12 +1,32 @@
 #include "event/pointer.h"
 
 #include "darling/panel/panel.h"
+#include "annotation/definition.h"
 #include "annotation/overview.h"
 #include "nio/mem.h"
 #include "oop/type.h"
 
 #include <stdbool.h>
 #include <stdint.h>
+
+;;DEFINITION
+/**
+ * ============================================================================
+ * DEFINITION: PointerEvent
+ * ============================================================================
+ * Transient pointer message for mouse/touch/stylus input: the hit target
+ * panel, position in target-local points, button, normalized pressure, and
+ * kind (DOWN/MOVE/UP/DRAG/HOVER/ENTER/LEAVE/CANCEL). Not a node and never
+ * attachable — central wiring delivers it through the Panel tree, where
+ * consume() short-circuits the bubble walk.
+ *
+ * The phase field (0 capture, 1 target, 2 bubble) records where in the
+ * delivery walk the event currently sits. Arena-allocated through
+ * Memory_alloc with the TYPE_POINTER_EVENT_SINGLETON type id; target and
+ * related are borrowed Panel references. nanos is a plain settable timestamp
+ * (clock wiring is behavior phase).
+ * ============================================================================
+ */
 
 ;;OVERVIEW
 /**
