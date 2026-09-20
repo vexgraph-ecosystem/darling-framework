@@ -5,7 +5,27 @@
 
 #include "nio/mem.h"
 #include "oop/type.h"
+#include "annotation/definition.h"
 #include "annotation/overview.h"
+
+;;DEFINITION
+/**
+ * ============================================================================
+ * DEFINITION: Surface
+ * ============================================================================
+ * A scissored, double-buffered stamp of the master canvas — a mini-swapchain
+ * per panel. Producers paint the back buffer and flip one atomic word while
+ * the compositor stamps only the front, so a mid-paint stamp can never tear.
+ * Because each panel owns its resolution, UI and scene stamp at different
+ * scales onto the same master — seamless scaling by construction (v1 stamps
+ * 1:1; scaled stamps arrive via Buffer_sample). The struct is arena-allocated
+ * (Memory_alloc) with a ColorBuffer pair; the producer side (back/flip) runs
+ * on draw threads while the compositor side (front/composite) runs on thread
+ * 0, with the atomic front word as the only shared state. All accessors
+ * null-guard and return safe defaults per the Cold-Strict, Hot-Minimal
+ * Validation Law.
+ * ============================================================================
+ */
 
 ;;OVERVIEW
 /**
