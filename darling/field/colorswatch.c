@@ -1,9 +1,24 @@
 #include "darling/field/colorswatch.h"
 
 #include "annotation/incomplete.h"
+#include "annotation/definition.h"
 #include "annotation/overview.h"
 #include "nio/mem.h"
 #include "oop/type.h"
+
+;;DEFINITION
+/**
+ * ============================================================================
+ * DEFINITION: ColorSwatch
+ * ============================================================================
+ * Fixed palette grid holding up to 16 packed colors with a single selection.
+ * Embeds a Panel for layout and hierarchy; the palette array is inline
+ * (COLORSWATCH_CAPACITY 16) so the struct carries zero owned heap. addColor is
+ * a shell stub (;;INCOMPLETE) that lands with the picker popup; selection is a
+ * plain index (-1 = none) with symmetric getters/setters and an onSelect(ctx)
+ * callback. Complements ColorPicker in the R4 color-editing pair.
+ * ============================================================================
+ */
 
 ;;OVERVIEW
 /**
