@@ -1,8 +1,22 @@
 #include "darling/dialog/optiondialog.h"
 
+#include "annotation/definition.h"
 #include "annotation/overview.h"
 #include <stdlib.h>
 #include <string.h>
+
+;;DEFINITION
+/**
+ * ============================================================================
+ * DEFINITION: OptionDialog
+ * ============================================================================
+ * Modal dialog for options and prompts: an owned message string, a
+ * buttonFlags bitfield selecting OK/Cancel/Yes/No/Retry, and an asynchronous
+ * onSelect handler dispatched with the chosen OptionResult before the dialog
+ * closes. select() records the result, fires the callback, and closes the
+ * Dialog base. A concrete Dialog subclass in the R4 modal family.
+ * ============================================================================
+ */
 
 ;;OVERVIEW
 /**
