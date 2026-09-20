@@ -1,9 +1,25 @@
 #include "darling/field/colorpicker.h"
 
 #include "annotation/incomplete.h"
+#include "annotation/definition.h"
 #include "annotation/overview.h"
 #include "nio/mem.h"
 #include "oop/type.h"
+
+;;DEFINITION
+/**
+ * ============================================================================
+ * DEFINITION: ColorPicker
+ * ============================================================================
+ * Packed color well with an HSV editing mirror and a change callback. Embeds
+ * a Panel for layout and hierarchy; the struct is arena-allocated with zero
+ * owned heap. The h/s/v fields mirror the packed color for editing, and
+ * showAlpha/showHex gate the readout; HSV packing itself is a shell stub
+ * (;;INCOMPLETE) that lands with the render pass. Sits beside ColorSwatch as
+ * the R4 color-editing pair — the swatch holds a palette grid, the picker
+ * edits one color.
+ * ============================================================================
+ */
 
 ;;OVERVIEW
 /**
