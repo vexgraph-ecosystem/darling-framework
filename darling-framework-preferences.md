@@ -14,7 +14,7 @@
 | Law Title | Scope | Enforcement |
 | :--- | :--- | :--- |
 | **Window Board Root Lock Law (Dimension Override Law)** | R4 UI Toolkit | Mandatory for `darling-framework` |
-| **Pane-of-Glass Law** | R4 UI Toolkit | Mandatory for `darling-framework` |
+| **Single-Seam Canvas Law** | R4 UI Toolkit | Mandatory for `darling-framework` |
 | **Sub-Part Field Segregation Law & the `Class_part_verb` Law** | R4 UI Toolkit | Mandatory for `darling-framework` |
 | **Living Darling Docs Law (Zero Drift Between Code and `_docs/darling.md`)** | R4 UI Toolkit | Mandatory for `darling-framework` |
 | **Panel Gravity Law** | R4 UI Toolkit | Mandatory for `darling-framework` |
@@ -56,22 +56,26 @@ A root board pane is not a freely positioned child — it IS the window. Every c
 
 ---
 
-### Pane-of-Glass Law
+### Single-Seam Canvas Law
 
-A scene child renders either as a COMPOSITED layer (retained offscreen render
-targets — the `VkLayer` registry in graphvex — collaged into the canvas by the
-composite pass; the default, one `CAMetalLayer` total) or a DIRECT pane (its
-own `CAMetalLayer` + dedicated per-pane Vulkan swapchain — `VkPane` registry
-in graphvex, `PanelCocoa_newMetal` in darling — every panel is a Vulkan rect).
-DIRECT is the managed exception (the Conflict Triage Law) for full-window or
-latency-locked scenes that must not pay the composite copy. The flight
-machinery — registry, stable slot index, dual flight slots, acquire/render
-semaphores, bounded 100ms fences, dirty bit — is shared verbatim between both
-modes; only the destination differs: a presentable swapchain image (DIRECT)
-vs a compositable color image the canvas samples (COMPOSITED). A layer/pane's
-pixel size is FIXED at register/resize time —
-`VkPane_resize`/`VkLayer_resize` is a no-op when the requested size is
-unchanged, so fixed targets never rebuild.
+One window, one blur view, exactly ONE on-screen `CAMetalLayer`: the seam
+canvas, owned by the Frame (R4). The seam pass composites the two retained
+offscreen board images — content top, scene bottom (the Window Compositing
+Layer Order Law) — and presents on demand (the Present-On-Demand Law). Every
+scene child is a COMPOSITED layer: a retained offscreen render target in the
+`VkLayer` registry (graphvex), rendered on demand by the present loop and
+collaged into its board as a sampled quad. There is no DIRECT mode: no
+per-scene `CAMetalLayer`, no per-pane swapchain, and no `VkPane` registry —
+that machinery is retired (the Conflict Triage Law managed exception ended
+when the composite copy became the universal path). The flight machinery —
+registry, stable slot index, dual flight slots, acquire/render semaphores,
+bounded 100ms fences, dirty bit — is shared verbatim with the retired pane
+mode; only the destination differs: a compositable color image the canvas
+samples instead of a swapchain image. A layer's pixel size is FIXED at
+register/resize time — `VkLayer_resize` is a no-op when the requested size
+is unchanged, so fixed targets never rebuild; the window crops the
+monitor-sized fixed-buffer seam via non-resizing gravity (the fixed-buffer
+plaster).
 
 ---
 
@@ -172,10 +176,13 @@ broken intermediate state.
 
 ### Panel Gravity Law
 
-Each Metal pane layer gets its `contentsGravity` and
-`anchorPoint` set from the panel's `selfAnchor`. This keeps the rendered pixel
-content pinned to the correct corner during live window resize (before the next
-frame is ready). The mapping is:
+The seam canvas layer's `contentsGravity` and `anchorPoint` are pinned from
+the window's crop contract: the fixed-buffer seam (monitor-sized drawable)
+is drawn 1:1 and cropped top-left, so the canvas carries `kCAGravityTopLeft`
+with `anchorPoint (0,0)` — non-resizing gravity that keeps the LAST rendered
+frame pinned during a live window resize, before the next frame is ready.
+The mapping table below is the canonical currency for any future layer
+attach (boards are retained offscreen `VkLayer` targets and gravity-free):
 
 ```
 TOP_LEFT     → kCAGravityTopLeft    / anchorPoint (0,0)
@@ -189,10 +196,9 @@ BOTTOM_CENTER→ kCAGravityBottom     / anchorPoint (0.5,1)
 BOTTOM_RIGHT → kCAGravityBottomRight/ anchorPoint (1,1)
 ```
 
-The `CAMetalLayer` hosting a Vulkan swapchain has `geometryFlipped = YES` so
+The seam `CAMetalLayer` has `geometryFlipped = YES` so
 that Vulkan's top-down coordinate space maps correctly onto CoreAnimation's
-bottom-up space. Every pane layer in the stack carries it for the
-same reason.
+bottom-up space.
 
 ---
 
@@ -211,7 +217,7 @@ Integration Law) — never inside the Kernel.
 A Window is a **dumb surface + callback bridge**: it carries no presentation
 logic of its own — only the `CAMetalLayer` frames, the input adapters, and a
 set of exported C functions (the bridge) that graphvex calls to present with
-transaction, resize panes, attach boards, and read render generation. The
+transaction, resize boards, attach panels, and read render generation. The
 window never renders, never ticks, and never schedules; it answers the
 bridge and gets out of the way.
 
