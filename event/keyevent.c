@@ -1,12 +1,32 @@
 #include "event/keyevent.h"
 
 #include "darling/panel/panel.h"
+#include "annotation/definition.h"
 #include "annotation/overview.h"
 #include "nio/mem.h"
 #include "oop/type.h"
 
 #include <stdbool.h>
 #include <stdint.h>
+
+;;DEFINITION
+/**
+ * ============================================================================
+ * DEFINITION: UIKeyEvent
+ * ============================================================================
+ * Transient key message in the darling UI domain: platform key code, decoded
+ * codepoint, modifier bitmask, and press/repeat flags. Not a node and never
+ * attachable — central wiring delivers it through the Panel tree, where
+ * consume() short-circuits the bubble walk.
+ *
+ * The split from vexspoke's raw KeyHandler vtable is deliberate: hardware
+ * mechanism lives in vexspoke (polling, slots, dispatch), GUI-domain event
+ * data lives here as UIKeyEvent. Arena-allocated through Memory_alloc with
+ * the TYPE_KEY_EVENT_SINGLETON type id; the target is a borrowed Panel
+ * reference. nanos is a plain settable timestamp (clock wiring is behavior
+ * phase).
+ * ============================================================================
+ */
 
 ;;OVERVIEW
 /**
