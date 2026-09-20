@@ -1,3 +1,4 @@
+#include "annotation/definition.h"
 #include "annotation/overview.h"
 #include "label.h"
 #include "vulkan/vk.h"
@@ -10,6 +11,25 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+
+;;DEFINITION
+/**
+ * ============================================================================
+ * DEFINITION: Label
+ * ============================================================================
+ * Lightweight retained-mode UI text view for sharp, single-styled typography,
+ * inheriting Panel -> Container. Label renders through a dual path — native
+ * CoreText line rasterization into a textured quad (sharp) with a multi-pass
+ * SDF fallback — and keeps selection coordinates per glyph: the same CoreText
+ * shaper that paints supplies one pen offset per UTF-8 byte, so proportional
+ * type maps 1:1 to the highlight overlay. The raster is text-only stable:
+ * selection edits markDirty only and the render handler paints the live span
+ * per frame over the stable quad, never re-rastering. Text and fontFamily are
+ * copied into the arena when owned (ownsText/ownsFontFamily); glyphX is a
+ * per-byte pen-offset table with a uniform fallback when absent. Sibling
+ * RichLabel keeps the SDF atlas path for styled runs.
+ * ============================================================================
+ */
 
 ;;OVERVIEW
 /**
