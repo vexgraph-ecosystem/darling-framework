@@ -1,3 +1,4 @@
+#include "annotation/definition.h"
 #include "annotation/overview.h"
 #include "darling/compositor.h"
 #include "darling/frame.h"
@@ -28,6 +29,37 @@
 // presents run the full resize sequence every tick with demand-gating off —
 // infancy is not steady state, so a phantom first-present success must not
 // latch the loop into on-demand rest on unconfirmed glass.
+
+;;DEFINITION
+/**
+ * ============================================================================
+ * DEFINITION: Compositor
+ * ============================================================================
+ * Retained-mode UI compositor connecting Darling UI nodes and Vulkan scene
+ * viewports into the host window and presentation loop. Every panel is a
+ * Vulkan rect: boards (scene/content) own retained OFFSCREEN VkLayer
+ * targets and paint their whole subtree into them; scenes reach the screen
+ * through one of two Present-On-Demand Law destinations — COMPOSITED
+ * (default) owns a retained offscreen VkLayer flight target the canvas
+ * samples as a textured quad at the anchor rect, DIRECT owns a child pane
+ * (CAMetalLayer + swapchain). The Frame seam CAMetalLayer is the window's
+ * SINGLE on-screen layer: the seam pass composites the published board
+ * images in z-order (scene bottom, content top) at full drawable extent
+ * and presents on demand (the Pane-of-Glass Law / Window Compositing Layer
+ * Order Law, managed exception per the Conflict Triage Law) — no IOSurface
+ * transport remains. Loop1 (board collage) runs on the frame thread and
+ * samples every published board on every present (demand gates board
+ * RE-RENDER, never sampling); Loop2 (workers) renders retained items into
+ * flight targets when dirty and fence-idle, publishing for the next
+ * composite. An infancy demand gate runs the full resize sequence every
+ * tick until 3 consecutive confirmed presents, then settles into on-demand
+ * rest. This file is procedural — no owned struct — and registers its
+ * demand probe into graphvex's GfxLoop (the Conflict Triage Law downward
+ * seam: the loop lives in R3, darling registers into it).
+ * ============================================================================
+ */
+
+
 
 ;;OVERVIEW
 /**
