@@ -5,8 +5,31 @@
 #include <string.h>
 
 #include "panel_cocoa.h"
+#include "annotation/definition.h"
 #include "annotation/overview.h"
 #include "annotation/intention.h"
+
+;;DEFINITION
+/**
+ * ============================================================================
+ * DEFINITION: PanelCocoa
+ * ============================================================================
+ * Metal pane compositor with two backing kinds. PANE (PanelCocoa_newMetal) is
+ * a CAMetalLayer plus a VkPane swapchain — the "pane of glass" for DIRECT
+ * scenes, own chain, own presents, layer parented into AppKit at a fixed
+ * pixel size that is never rebuilt on window resize (the Pane-of-Glass Law
+ * managed exception). BOARD (PanelCocoa_newBoard) is the two named
+ * full-window layers — scene (bottom) / content (top) — as RETAINED
+ * OFFSCREEN targets: a fixed-pixel-size VkLayer dual-flight chain, never a
+ * CALayer, never parented into the window tree; the Frame's single on-screen
+ * CAMetalLayer (the seam canvas) composites the published board images in
+ * z-order per the Window Compositing Layer Order Law. Boards never present —
+ * Darling_layerRender paints each board's subtree into its offscreen target
+ * on VkLayer_visit, and the canvas samples the published flight image. A
+ * dynamically sized registry (linear scan) maps Panel * -> PanelCocoa * so
+ * the darling Panel handle stays the only handle darling code holds.
+ * ============================================================================
+ */
 
 ;;OVERVIEW
 /**
