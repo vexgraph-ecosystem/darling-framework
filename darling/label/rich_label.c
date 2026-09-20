@@ -2,9 +2,28 @@
 #include "vulkan/vk.h"
 #include "nio/mem.h"
 #include "oop/type.h"
+#include "annotation/definition.h"
 #include "annotation/overview.h"
 #include "input/key.h"
 #include <string.h>
+
+;;DEFINITION
+/**
+ * ============================================================================
+ * DEFINITION: RichLabel
+ * ============================================================================
+ * Retained-mode rich-text view: a Panel hosting an owned RichText layout model
+ * with an inherited wrap mode, rendered through the SDF atlas path. Selection
+ * uses a fixed drag anchor (browser-like): pointer-down pins the anchor, drag
+ * moves only the active edge, so dragging left then right past the anchor
+ * selects exactly [anchor, active] — never a rolling union; the shared
+ * TextSelect part commits a nonzero range on pointer-up and persists the
+ * highlight and getSelectedText. RichLabel never shows a caret — labels are
+ * non-editable surfaces (carets belong to Input). The text model is owned by
+ * the label; glyph quads carry charIndex/advance so pointer hits map to
+ * source byte indices.
+ * ============================================================================
+ */
 
 ;;OVERVIEW
 /**
