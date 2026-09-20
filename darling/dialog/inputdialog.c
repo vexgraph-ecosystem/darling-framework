@@ -1,8 +1,22 @@
 #include "darling/dialog/inputdialog.h"
 
+#include "annotation/definition.h"
 #include "annotation/overview.h"
 #include <stdlib.h>
 #include <string.h>
+
+;;DEFINITION
+/**
+ * ============================================================================
+ * DEFINITION: InputDialog
+ * ============================================================================
+ * Modal dialog for single-line text input: a descriptive prompt label, an
+ * owned text value, an owned placeholder, and a submit callback that receives
+ * the typed string before the dialog closes. All strings are strdup-owned and
+ * freed in InputDialog_free ahead of Dialog_destroy. A concrete Dialog
+ * subclass in the R4 modal family.
+ * ============================================================================
+ */
 
 ;;OVERVIEW
 /**
