@@ -1,9 +1,25 @@
 #include "darling/field/scrollbar.h"
 
+#include "annotation/definition.h"
 #include "annotation/overview.h"
 #include "event/pointer.h"
 #include "nio/mem.h"
 #include "oop/type.h"
+
+;;DEFINITION
+/**
+ * ============================================================================
+ * DEFINITION: ScrollBar
+ * ============================================================================
+ * Track+thumb scroller with two switchable thumb laws: gesture mode maps drag
+ * deltas to value deltas scaled by track length (position-independent,
+ * eyes-free); point mode jumps the value to the exact clicked fraction.
+ * Value-mapping math lives in pure static helpers over scalars so it stays
+ * testable without a window; no input-ring wiring yet. The struct is
+ * arena-allocated with zero owned heap and no callbacks. A leaf R4 field
+ * widget with symmetric getters/setters.
+ * ============================================================================
+ */
 
 ;;OVERVIEW
 /**
