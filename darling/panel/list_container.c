@@ -1,5 +1,6 @@
 #include "darling/panel/list_container.h"
 
+#include "annotation/definition.h"
 #include "annotation/overview.h"
 #include "darling/panel/panel.h"
 #include "nio/mem.h"
@@ -9,6 +10,25 @@
 #include <stdbool.h>
 #include <stddef.h>
 #include <stdint.h>
+
+;;DEFINITION
+/**
+ * ============================================================================
+ * DEFINITION: ListContainer
+ * ============================================================================
+ * A vertical (or horizontal) stack owning ordered children where index IS
+ * the API: append/insert/get/remove by index — text bubbles, chat logs,
+ * file rows, settings groups. Children stay ordinary Panels in the
+ * embedded base's child list (Panel_addContainer / Panel_getChild /
+ * Panel_removeChild) — there is no second child list. Detach-only: the
+ * list never frees children; every mutation re-runs the layout pass, which
+ * stacks children along the axis with spacing and, on the cross axis,
+ * either wraps the widest child or stretches children to the list's own
+ * cross size when fillCross is set. Per the Container-vs-Panel Law it
+ * embeds Panel as its first member; it is also the row container that
+ * MarkdownPanel builds its document rows into.
+ * ============================================================================
+ */
 
 ;;OVERVIEW
 /**
