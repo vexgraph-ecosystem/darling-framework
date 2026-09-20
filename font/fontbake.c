@@ -15,7 +15,27 @@
 #include "font/font.h"
 #include "font/font_bake.h"
 #include "io/vexhome.h"
+#include "annotation/definition.h"
 #include "annotation/overview.h"
+
+;;DEFINITION
+/**
+ * ============================================================================
+ * DEFINITION: Fontbake
+ * ============================================================================
+ * Headless baked-font installer CLI (main harness, no struct): bakes OS
+ * fonts into the VexHome fonts store without a window or GPU — the atlas and
+ * dictionary are pure CPU data and texture uploads happen later at runtime.
+ * Commands cover install missing + stale (normal setup/refresh), --force
+ * rebake, --list, --verify Fam (reload a baked entry and probe glyphs with
+ * no GPU), --emoji cascade check, and named-family bakes.
+ *
+ * The harness is procedural: it drives the FontBake_* install API with a
+ * progress callback, verifies glyph presence/absence through Font_getGlyph,
+ * and ensures the home directory exists via VexHome_ensure before any store
+ * access.
+ * ============================================================================
+ */
 
 ;;OVERVIEW
 /**
