@@ -5,12 +5,28 @@
 #include "annotation/incomplete.h"
 #include "nio/mem.h"
 #include "oop/type.h"
+#include "annotation/definition.h"
 #include "annotation/overview.h"
+
+;;DEFINITION
+/**
+ * ============================================================================
+ * DEFINITION: Select
+ * ============================================================================
+ * Dropdown select shell: Panel layout plus an owned C-string item list,
+ * selected index, popup-open flag, filter text, and a pick callback slot.
+ * The item list and filter are owned (List of char*); ctx is borrowed.
+ * addItem/clear are shell stubs (;;INCOMPLETE) that land with the caret
+ * walker. A leaf R4 field widget with symmetric getters/setters and zero
+ * steady-state allocation.
+ * ============================================================================
+ */
 
 ;;OVERVIEW
 /**
  * ============================================================================
- * CLASS: Select (inherits Panel, LEVEL L2 Behavior)
+ * CLASS: Select (inherits Panel)
+ * LEVEL: L2 — Behavior (dropdown select shell)
  * ============================================================================
  * Dropdown select shell: Panel layout plus an owned C-string item list,
  * selected index, popup-open flag, filter text, and a pick callback slot.
