@@ -2,10 +2,26 @@
 
 #include <math.h>
 
+#include "annotation/definition.h"
 #include "annotation/overview.h"
 #include "event/pointer.h"
 #include "nio/mem.h"
 #include "oop/type.h"
+
+;;DEFINITION
+/**
+ * ============================================================================
+ * DEFINITION: Knob
+ * ============================================================================
+ * Rotary value dial mapping a clamped value over an angular sweep. Embeds a
+ * Panel for layout and hierarchy; the struct is arena-allocated with zero
+ * owned heap. Pointer DOWN/DRAG maps the local angle to a normalized t,
+ * clamps to [0,1], scales into [min,max], and fires the borrowed
+ * onChange(ctx) callback only when the value actually changes. A leaf R4
+ * field widget with symmetric getters/setters and zero steady-state
+ * allocation.
+ * ============================================================================
+ */
 
 ;;OVERVIEW
 /**
