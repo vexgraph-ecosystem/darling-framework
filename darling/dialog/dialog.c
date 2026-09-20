@@ -1,5 +1,6 @@
 #include "darling/dialog/dialog.h"
 
+#include "annotation/definition.h"
 #include "annotation/overview.h"
 #include "darling/frame.h"
 #include "darling/panel/panel.h"
@@ -9,6 +10,23 @@
 
 #include <stdlib.h>
 #include <string.h>
+
+;;DEFINITION
+/**
+ * ============================================================================
+ * DEFINITION: Dialog
+ * ============================================================================
+ * Modal dialog shell inheriting Frame and gluing R1 (host window) to R3 (GPU
+ * graphics context) through stacked FrameLayer FBOs inside a CAMetalLayer.
+ * Owns its title (strdup), borrows its content Panel, and enforces modality
+ * threefold while held: the handler OS key gate closes (Window_setKeyEnabled
+ * false), the pair is glued (Window_attachChild, handler below, dialog on
+ * top), and the event bridge retargets to the dialog content with the prior
+ * wiring saved and restored on close. Modal implies focus capture exactly
+ * like clinging; a held dialog is not minimizable. Base class for
+ * OptionDialog, InputDialog, FileDialog, and ColorDialog.
+ * ============================================================================
+ */
 
 ;;OVERVIEW
 /**
