@@ -14,12 +14,32 @@
 #include "text/text_core.h"
 #include "vulkan/texture/texture.h"
 #include "vulkan/vk.h"
+#include "annotation/definition.h"
 #include "annotation/overview.h"
+
+;;DEFINITION
+/**
+ * ============================================================================
+ * DEFINITION: Input
+ * ============================================================================
+ * Single-line text input shell: Panel layout plus an owned text buffer bounded
+ * by cap, with change/submit callback slots. The text and placeholder buffers
+ * are owned (cap-bounded, setText truncates); font, caretView, and ctx are
+ * borrowed views. The caret is its own part — a view over typing state
+ * (BLINK/SOLID/GLIDE) that never measures text itself; the owner places the
+ * target via caret_setTarget and ticks it on Thread 0 next to layout, marking
+ * only the Input child dirty. Typography and native raster styling (fontSize,
+ * textColor, align, selection, raster cache) live on the owner; editing is
+ * byte-wise UTF-8 surgery with cap truncation, blink restart, and onChange
+ * firing. Zero steady-state allocation in tick/render paths.
+ * ============================================================================
+ */
 
 ;;OVERVIEW
 /**
  * ============================================================================
- * CLASS: Input (inherits Panel, LEVEL L2 Behavior)
+ * CLASS: Input (inherits Panel)
+ * LEVEL: L2 — Behavior (single-line text input)
  * ============================================================================
  * Single-line text input shell: Panel layout plus an owned text buffer
  * bounded by cap, with change/submit callback slots for later wiring.
