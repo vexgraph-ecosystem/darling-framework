@@ -2,6 +2,7 @@
 
 #include "darling/panel/panel.h"
 #include "annotation/incomplete.h"
+#include "annotation/definition.h"
 #include "annotation/overview.h"
 #include "nio/mem.h"
 #include "oop/type.h"
@@ -9,6 +10,24 @@
 #include <stdbool.h>
 #include <stddef.h>
 #include <stdint.h>
+
+;;DEFINITION
+/**
+ * ============================================================================
+ * DEFINITION: SectionContainer
+ * ============================================================================
+ * Container whose children are sections with exactly one current index:
+ * only the current section is live (attached with a surface), and hidden
+ * sections detach — zero layers, zero surfaces (hidden = zero). Children
+ * are ordinary Panels in the embedded base's child list; next/prev advance
+ * the index with optional wrap-around, and an optional change callback
+ * (borrowed ctx) fires on selection change. Full show/hide of section
+ * children is deferred (;;INCOMPLETE) — the shell clamps/wraps the index
+ * only. Per the Container-vs-Panel Law it embeds Panel as its first member
+ * and inherits the layout/tree/background state; constructors cover
+ * detached and parent-attached forms.
+ * ============================================================================
+ */
 
 ;;OVERVIEW
 /**
