@@ -12,17 +12,101 @@
 #include "text/text_core.h"
 #include "vulkan/texture/texture.h"
 #include "vulkan/vk.h"
+#include "annotation/definition.h"
 #include "annotation/overview.h"
+
+;;DEFINITION
+/**
+ * ============================================================================
+ * DEFINITION: InputOTP
+ * ============================================================================
+ * One-time passcode segmented digit boxes: Panel layout plus an owned digit
+ * buffer of fixed length. Draws N outlined boxes with an active-box focus
+ * ring, centered digit or dot (password mode), auto-advance on keystroke,
+ * paste auto-split, backspace retreat, and an onComplete callback. Per-box
+ * raster textures are cached in fixed arrays (INPUTOTP_MAX_BOXES 16) and
+ * re-baked only when the box character changes; the digit buffer is owned and
+ * freed in InputOTP_free. Pointer and key events drive the state machine;
+ * symmetric getters/setters cover every field.
+ * ============================================================================
+ */
 
 ;;OVERVIEW
 /**
  * ============================================================================
- * CLASS: InputOTP (inherits Panel, LEVEL L2 Behavior)
+ * CLASS: InputOTP (inherits Panel)
+ * LEVEL: L2 — Behavior (one-time passcode input)
  * ============================================================================
  * One-time passcode segmented digit boxes.
  * Draws N outlined boxes with active box focus ring, centered digit or dot
  * (password mode), auto-advance on keystroke, paste auto-split, backspace
  * retreat, and onComplete callback.
+ *
+ * STRUCT FIELDS (Mirroring darling/field/inputotp.h):
+ * ----------------------------------------------------------------------------
+ *   Panel base;                  // Inherited layout, bounds, hierarchy state
+ *   char *digits;                // Owned digit buffer (fixed length)
+ *   int32_t length;              // Number of boxes (1..INPUTOTP_MAX_BOXES)
+ *   float boxSize;               // Box edge length in px
+ *   float gap;                   // Gap between boxes in px
+ *   int32_t cursor;              // Active box index
+ *   bool focused;                // Focus-request flag
+ *   bool password;               // Mask digits as dots
+ *   float fontSize;              // Digit font size in points
+ *   uint32_t textColor;          // Digit color, packed 0xAARRGGBB
+ *   uint32_t boxBackground;      // Box fill color, packed 0xAARRGGBB
+ *   uint32_t boxBorderColor;     // Idle box border color, packed 0xAARRGGBB
+ *   uint32_t boxActiveBorder;    // Active box border color, packed 0xAARRGGBB
+ *   InputOTP_CompleteFn onComplete; // Completion callback; nullptr means none
+ *   void *ctx;                   // Callback context pointer
+ *   --- Raster cache per box ---
+ *   int32_t boxTex[INPUTOTP_MAX_BOXES]; // Per-box texture handle (-1 = none)
+ *   int32_t boxW[INPUTOTP_MAX_BOXES];   // Per-box raster width in px
+ *   int32_t boxH[INPUTOTP_MAX_BOXES];   // Per-box raster height in px
+ *   char boxChar[INPUTOTP_MAX_BOXES];   // Per-box cached character
+ *
+ * FUNCTION REGISTRY:
+ * ----------------------------------------------------------------------------
+ * Constructors:
+ *   - InputOTP_1(length)
+ *   - InputOTP_2(parent, length)
+ *   - InputOTP_1_parent(parent)
+ *
+ * Core Functions:
+ *   - InputOTP_pushDigit(otp, digit)
+ *   - InputOTP_handlePointer(self, kind, localX, localY)
+ *   - InputOTP_handleKey(self, ev)
+ *   - InputOTP_free(otp)
+ *
+ * Setters:
+ *   - InputOTP_setDigits(otp, digits)
+ *   - InputOTP_setBoxSize(otp, size)
+ *   - InputOTP_setGap(otp, gap)
+ *   - InputOTP_setCursor(otp, cursor)
+ *   - InputOTP_setPassword(otp, password)
+ *   - InputOTP_setFontSize(otp, size)
+ *   - InputOTP_setTextColor(otp, color)
+ *   - InputOTP_setBoxBackground(otp, color)
+ *   - InputOTP_setBoxBorderColor(otp, color)
+ *   - InputOTP_setBoxActiveBorder(otp, color)
+ *   - InputOTP_setOnComplete(otp, fn)
+ *   - InputOTP_setCtx(otp, ctx)
+ *
+ * Getters:
+ *   - InputOTP_getDigits(otp)
+ *   - InputOTP_getLength(otp)
+ *   - InputOTP_getBoxSize(otp)
+ *   - InputOTP_getGap(otp)
+ *   - InputOTP_getCursor(otp)
+ *   - InputOTP_isFocused(otp)
+ *   - InputOTP_isPassword(otp)
+ *   - InputOTP_getFontSize(otp)
+ *   - InputOTP_getTextColor(otp)
+ *   - InputOTP_getBoxBackground(otp)
+ *   - InputOTP_getBoxBorderColor(otp)
+ *   - InputOTP_getBoxActiveBorder(otp)
+ *   - InputOTP_getOnComplete(otp)
+ *   - InputOTP_getCtx(otp)
  * ============================================================================
  */
 
