@@ -1,12 +1,29 @@
 #include "event/tree.h"
 
 #include "darling/panel/panel.h"
+#include "annotation/definition.h"
 #include "annotation/overview.h"
 #include "nio/mem.h"
 #include "oop/type.h"
 
 #include <stdbool.h>
 #include <stdint.h>
+
+;;DEFINITION
+/**
+ * ============================================================================
+ * DEFINITION: TreeEvent
+ * ============================================================================
+ * Transient tree-structure message for child add/remove: the parent panel,
+ * the child panel, and the added/removed direction. Not a node and never
+ * attachable — central wiring delivers it through the Panel tree, where
+ * consume() short-circuits the bubble walk.
+ *
+ * Arena-allocated through Memory_alloc with the TYPE_TREE_EVENT_SINGLETON
+ * type id; parent and child are borrowed Panel references, never owned.
+ * nanos is a plain settable timestamp (clock wiring is behavior phase).
+ * ============================================================================
+ */
 
 ;;OVERVIEW
 /**
