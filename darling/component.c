@@ -3,7 +3,30 @@
 #include "../c23/darling-type.h"
 #include "nio/mem.h"
 #include "oop/type.h"
+#include "annotation/definition.h"
 #include "annotation/overview.h"
+
+;;DEFINITION
+/**
+ * ============================================================================
+ * DEFINITION: Component
+ * ============================================================================
+ * The renderable leaf of the new darling architecture: geometry +
+ * presentation state + an ABSOLUTE rect recomputed eagerly on every geometry
+ * setter, so a renderer consumes ((*self).absX..absH) directly — no resolve
+ * phase, no parent-size threading, no stale reads. A Component is a leaf on
+ * its own: NO children, NO tree, NO dirty flag (eager abs replaces the
+ * dirty+resolve pass); containment is optional by construction — an element
+ * that does not want to be added is exactly a Component without a Container.
+ * The eager abs cascade is O(1) per leaf: setters recompute this component's
+ * abs immediately against the parent's abs box (stored via
+ * Component_setParentAbs), and setters never layout, so the whole tree cost
+ * equals one interleaved resolve pass. The anchor+pivot system mirrors
+ * Container's exactly for a value-identical migration.
+ * ============================================================================
+ */
+
+
 
 ;;OVERVIEW
 /**
