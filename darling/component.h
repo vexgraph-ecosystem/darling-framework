@@ -49,7 +49,8 @@ typedef void (*Component_RenderFn)(struct Component *self, void *graphics,
 
 typedef struct Component {
     // --- Geometry (parent units; placement varies with anchor) ---
-    float x, y, w, h;           // placement + size; x/y = edge inset on right/bottom anchors
+    float x, y, w, h;           // placement + size; x/y direction governed by origin
+    uint8_t origin;             // COMPONENT_ORIGIN_* 0..3
     uint8_t anchor;             // COMPONENT_ANCHOR_* 0..8
     int32_t pivot;              // COMPONENT_PIVOT_* 0..4
     float minW, minH;           // size constraints (0 = unset)
@@ -69,6 +70,9 @@ typedef struct Component {
     int32_t z;                  // z-order
     uint8_t visible;            // visibility gate for render/hitTest
     struct Component *parent;   // borrowed view, nullptr = root; NEVER owned
+    struct Component **children; // child components owned or attached
+    uint32_t childCount;
+    uint32_t childCapacity;
     // --- Eager absolute rect (recomputed on every geometry setter) ---
     float absX, absY;           // absolute left/top in the rendering space
     float absW, absH;           // absolute extent
@@ -79,6 +83,12 @@ typedef struct Component {
     Component_RenderFn foregroundRender; // stage 1
     void *renderUserdata;       // opaque arg handed to both hooks
 } Component;
+
+// Origin: the parent container's coordinate zero-point and axis direction (4 corners).
+#define COMPONENT_ORIGIN_TOP_LEFT      0
+#define COMPONENT_ORIGIN_TOP_RIGHT     1
+#define COMPONENT_ORIGIN_BOTTOM_LEFT   2
+#define COMPONENT_ORIGIN_BOTTOM_RIGHT  3
 
 // Anchor: where on the parent the element tracks during resize (9-grid).
 // Values mirror CONTAINER_ANCHOR_* exactly for a value-identical migration.
@@ -92,8 +102,8 @@ typedef struct Component {
 #define COMPONENT_ANCHOR_BOTTOM_CENTER 7
 #define COMPONENT_ANCHOR_BOTTOM_RIGHT  8
 
-// Pivot: the element's reference point for placement (5 points). Applied to
-// the placement point only when the anchor is TOP_LEFT (Container parity).
+// Pivot: the element's reference point for placement (5 points: 4 corners + center).
+// Decoupled: specifies which point on the child docks to the parent's anchor point.
 #define COMPONENT_PIVOT_TOP_LEFT      0
 #define COMPONENT_PIVOT_TOP_RIGHT     1
 #define COMPONENT_PIVOT_BOTTOM_LEFT   2
@@ -132,6 +142,7 @@ void Component_setLocation(Component *self, float x, float y);
 void Component_setSize(Component *self, float w, float h);          // clamps [min, max]
 void Component_setMinSize(Component *self, float w, float h);       // re-clamps current size
 void Component_setMaxSize(Component *self, float w, float h);       // re-clamps current size
+void Component_setOrigin(Component *self, int origin);
 void Component_setAnchor(Component *self, int anchor);
 void Component_setPivot(Component *self, int pivot);
 void Component_setCenter(Component *self);                          // pivot CENTER (no percent)
@@ -146,6 +157,10 @@ void Component_setOpacity(Component *self, float opacity);          // clamped 0
 void Component_setZ(Component *self, int z);
 void Component_setVisible(Component *self, bool visible);
 void Component_setParent(Component *self, Component *parent);       // borrowed view
+bool Component_addChild(Component *self, Component *child);
+bool Component_removeChild(Component *self, Component *child);
+uint32_t Component_getChildCount(const Component *self);
+Component *Component_getChild(const Component *self, uint32_t index);
 void Component_setBackgroundRender(Component *self, Component_RenderFn fn);
 void Component_setForegroundRender(Component *self, Component_RenderFn fn);
 void Component_setRenderUserdata(Component *self, void *userdata);
@@ -161,6 +176,7 @@ float Component_getAbsW(const Component *self);
 float Component_getAbsH(const Component *self);
 void Component_getAbsRect(const Component *self, Vec4 *outRect);    // dest-last
 void Component_getParentAbsRect(const Component *self, Vec4 *outRect);
+int Component_getOrigin(const Component *self);
 int Component_getAnchor(const Component *self);
 int Component_getPivot(const Component *self);
 float Component_getMinWidth(const Component *self);

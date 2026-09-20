@@ -24,8 +24,6 @@
  * ============================================================================
  */
 
-
-
 ;;OVERVIEW
 /**
  * ============================================================================
@@ -395,19 +393,20 @@ void Container_resolve(Container *c, float parentX, float parentY,
     float x = (*c).x;
     float y = (*c).y;
 
-    // Anchor: find the absolute position on the parent bounds
-    float px = 0.0f;
-    float py = 0.0f;
+    // Anchor: find the absolute position on the parent bounds (9-grid)
+    // and self-anchor on scaled size (p - s)
+    float px = 0.0f, py = 0.0f;
+    float sx = 0.0f, sy = 0.0f;
     switch (Container_getAnchor(c)) {
-        case CONTAINER_ANCHOR_TOP_CENTER:    px = parentW * 0.5f; break;
-        case CONTAINER_ANCHOR_TOP_RIGHT:     px = parentW;        break;
-        case CONTAINER_ANCHOR_MIDDLE_LEFT:   py = parentH * 0.5f; break;
-        case CONTAINER_ANCHOR_MIDDLE_CENTER: px = parentW * 0.5f; py = parentH * 0.5f; break;
-        case CONTAINER_ANCHOR_MIDDLE_RIGHT:  px = parentW;        py = parentH * 0.5f; break;
-        case CONTAINER_ANCHOR_BOTTOM_LEFT:   py = parentH;        break;
-        case CONTAINER_ANCHOR_BOTTOM_CENTER: px = parentW * 0.5f; py = parentH;        break;
-        case CONTAINER_ANCHOR_BOTTOM_RIGHT:  px = parentW;        py = parentH;        break;
-        default: break; // TOP_LEFT
+        case CONTAINER_ANCHOR_TOP_CENTER:    px = parentW * 0.5f; sx = sw * 0.5f; break;
+        case CONTAINER_ANCHOR_TOP_RIGHT:     px = parentW;        sx = sw;        break;
+        case CONTAINER_ANCHOR_MIDDLE_LEFT:   py = parentH * 0.5f; sy = sh * 0.5f; break;
+        case CONTAINER_ANCHOR_MIDDLE_CENTER: px = parentW * 0.5f; py = parentH * 0.5f; sx = sw * 0.5f; sy = sh * 0.5f; break;
+        case CONTAINER_ANCHOR_MIDDLE_RIGHT:  px = parentW;        py = parentH * 0.5f; sx = sw;        sy = sh * 0.5f; break;
+        case CONTAINER_ANCHOR_BOTTOM_LEFT:   py = parentH;        sy = sh;        break;
+        case CONTAINER_ANCHOR_BOTTOM_CENTER: px = parentW * 0.5f; py = parentH;        sx = sw * 0.5f; sy = sh;        break;
+        case CONTAINER_ANCHOR_BOTTOM_RIGHT:  px = parentW;        py = parentH;        sx = sw;        sy = sh;        break;
+        default: break; // TOP_LEFT: px=0, py=0, sx=0, sy=0
     }
 
     // Margin direction based on anchor (pushes inward from the anchor edge)
@@ -419,8 +418,8 @@ void Container_resolve(Container *c, float parentX, float parentY,
     if (a == CONTAINER_ANCHOR_BOTTOM_LEFT || a == CONTAINER_ANCHOR_BOTTOM_CENTER || a == CONTAINER_ANCHOR_BOTTOM_RIGHT)
         marginY = -y; // bottom-anchored margins pull up
 
-    float screenX = parentX + px + marginX;
-    float screenY = parentY + py + marginY;
+    float screenX = parentX + (px - sx) + marginX;
+    float screenY = parentY + (py - sy) + marginY;
 
     // Phase 1 margin law: final = location + margin, applied at resolve time.
     // Stored location is never rewritten; zero margins resolve bit-identically.
@@ -433,7 +432,8 @@ void Container_resolve(Container *c, float parentX, float parentY,
     if (Container_hasPercentY(c))
         screenY = parentY + (*c).percentY * parentH;
 
-    // Pivot shift: the pivot point lands at the resolved target.
+    // Pivot shift: if anchor is TOP_LEFT, pivot shifts the placement point.
+    // (Used in Container_setCenter and custom pivot positioning).
     float offX = 0.0f;
     float offY = 0.0f;
     switch (Container_getPivot(c)) {
@@ -444,8 +444,10 @@ void Container_resolve(Container *c, float parentX, float parentY,
         default:
             break; // TOP_LEFT
     }
-    screenX -= offX;
-    screenY -= offY;
+    if (a == CONTAINER_ANCHOR_TOP_LEFT) {
+        screenX -= offX;
+        screenY -= offY;
+    }
 
     Vec4_set(outRect, screenX, screenY, sw, sh);
 }
