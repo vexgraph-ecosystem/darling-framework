@@ -8,6 +8,7 @@
 #include <math.h>
 
 #include "frame_cocoa.h"
+#include "annotation/definition.h"
 #include "annotation/overview.h"
 #include "graphvex/graphics_loop.h"
 #include "window/window.h"
@@ -16,6 +17,34 @@
 void Dialog_focus(Dialog *dialog);
 void Dialog_bringToFront(Dialog *dialog);
 bool Dialog_requestClose(Dialog *dialog);
+
+;;DEFINITION
+/**
+ * ============================================================================
+ * DEFINITION: FrameCocoa
+ * ============================================================================
+ * Native macOS AppKit bridge establishing the window rendering hierarchy
+ * NSWindow -> NSVisualEffectView -> CAMetalLayer, where the seam layer is the
+ * window's SINGLE on-screen CAMetalLayer (the Window Compositing Layer Order
+ * Law managed exception per the Conflict Triage Law): the seam pass composites
+ * the retained board images and presents on demand. presentsWithTransaction =
+ * YES aligns drawables atomically with the macOS WindowServer during live
+ * resize, minimize, zoom, and restore, and the Native Pixel Law contract
+ * (contentsScale mirrors the backing scale, drawableSize in native hardware
+ * pixels) is re-chased on every resized step. The layer frame is STICKY manual
+ * geometry (autoresizingMask kCALayerNotSizable): only the resize hook's
+ * single explicit CATransaction moves the seam (the Single-Transaction Live
+ * Coordination Law), never spanning sendEvent (the
+ * No-Transaction-Across-Event-Dispatch Law), so WindowServer never stretches
+ * an old drawable to an auto-moved frame; a dropped present keeps dirty armed
+ * inside the loop per the Present-On-Demand Law. No new thread, no wait — the
+ * hook is the only live seam while AppKit's modal tracking loop owns thread 0.
+ * FrameCocoa is the platform glue for the darling Frame class (darling/frame.h)
+ * and composes with PanelCocoa's retained offscreen boards and the GfxLoop.
+ * ============================================================================
+ */
+
+
 
 ;;OVERVIEW
 /**
