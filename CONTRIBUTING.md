@@ -37,13 +37,14 @@ This boilerplate is **not** an accident, nor is it a misunderstanding of idiomat
 
 ---
 
-## 3. Supreme Living Document: `preferences.md`
+## 3. Supreme Living Document: `preferences.md` & Repo-Local Preferences
 
 All architectural rules and style invariants are governed by the central constitution:
 
 - **[preferences.md](https://github.com/vexgraph-dev/vexspoke/blob/main/preferences.md)** (tracked in `vexspoke`, accessible locally at `../../preferences.md`)
+- **[darling-framework-preferences.md](darling-framework-preferences.md)** (repo-local mirror binding darling-framework)
 
-Whenever preferences or conventions evolve, `preferences.md` is updated and committed locally in the same cycle (Zero Drift Law).
+Whenever preferences or conventions evolve, `preferences.md` and `darling-framework-preferences.md` are updated and committed locally in the same cycle (the Living Preferences Law / Zero Drift).
 
 ---
 
@@ -51,8 +52,8 @@ Whenever preferences or conventions evolve, `preferences.md` is updated and comm
 
 | Invariant | Specification |
 | :--- | :--- |
-| **Living Darling Docs (Rule 30)** | [`_docs/darling.md`](_docs/darling.md) is a load-bearing blueprint (1699+ lines). Any addition, removal, or change to a widget's fields, constructors, or methods must update `_docs/darling.md` in the exact same commit. |
-| **Symmetric Getter/Setter Completeness (Rule 24)** | Every state-bearing struct field provides explicit `Class_get*` and `Class_set*` functions. No manual member piercing. |
-| **Sub-Part Field Segregation (Rule 29)** | Widgets owning sub-objects (carets, scrollbars) expose them only via `Class_part_*` verbs. Struct fields are segregated under explicit part banners. |
+| **Living Darling Docs** | [`_docs/darling.md`](_docs/darling.md) is a load-bearing blueprint (1699+ lines). Any addition, removal, or change to a widget's fields, constructors, or methods must update `_docs/darling.md` in the exact same commit (per the Living Darling Docs Law). |
+| **Symmetric Getter/Setter Completeness** | Every state-bearing struct field provides explicit `Class_get*` and `Class_set*` functions. No manual member piercing (per the Symmetric Getter/Setter Completeness Law). |
+| **Sub-Part Field Segregation** | Widgets owning sub-objects (carets, scrollbars) expose them only via `Class_part_*` verbs. Struct fields are segregated under explicit part banners (per the Sub-Part Field Segregation Law). |
 | **Two-Layer Compositing Split** | Scene panels render to the Vulkan swapchain background; content panels composite individual `IOSurface`-backed `CALayer`s via the WindowServer bridge. |
 | **Zero Steady-State Allocation** | One arena carved from the OS. Zero `malloc`/`calloc` calls during layout passes, paint runs, or cursor hit-tests. |
