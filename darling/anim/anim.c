@@ -4,6 +4,7 @@
 #include <stdlib.h>
 #include <string.h>
 
+#include "annotation/definition.h"
 #include "annotation/overview.h"
 #include "../../c23/darling-type.h"
 #include "darling/button/button.h"
@@ -11,6 +12,24 @@
 #include "darling/panel/panel.h"
 #include "nio/mem.h"
 #include "oop/type.h"
+
+;;DEFINITION
+/**
+ * ============================================================================
+ * DEFINITION: Anim
+ * ============================================================================
+ * Keyframed 2D animation data plus a Thread-0 player: five per-section key
+ * lists (location, size, scale, font size, alpha), each key stamped with a
+ * timestamp and one flat easing token (ANIM_EASE_OUT, ANIM_BOUNCE_OUT, ...).
+ * An Anim is data, not a node — playback binds a BORROWED Anim to a Container
+ * via Container_animate and advances on Thread 0 through Anim_tick(dt) next
+ * to layout, so one pop preset animates fifty toasts and Anim_free is called
+ * only when the preset is retired. Easing follows the sketch-as-spec law: IN
+ * launches, OUT lands, IN_OUT is the merged continuous hill, EXPO applies
+ * pow(x,2) twice. Key lists grow on the heap at edit time; tick playback
+ * advances elapsed with zero steady-state allocation.
+ * ============================================================================
+ */
 
 ;;OVERVIEW
 /**
