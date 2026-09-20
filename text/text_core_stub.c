@@ -5,7 +5,27 @@
 
 #include "annotation/draft.h"
 #include "annotation/intention.h"
+#include "annotation/definition.h"
 #include "annotation/overview.h"
+
+;;DEFINITION
+/**
+ * ============================================================================
+ * DEFINITION: Text_core_stub
+ * ============================================================================
+ * The non-Apple fallback for the text/text_core.h native raster seam: no
+ * native raster and no native shaper exist off Apple, so Label falls back to
+ * the SDF atlas path. Raster calls fail closed (return false, never partial),
+ * TextCore_lineOffsets always returns -1 so the caller keeps its uniform
+ * fallback, and the backing-scale override contract mirrors objc/text_core.m
+ * (pinned > 0, else 1.0) so the seam stays source-compatible across
+ * platforms. Copy/paste routes through in-memory buffers (a headless test
+ * seam plus a global fallback) so unit tests never touch an OS board. The
+ * live Apple counterpart is objc/text_core.m (CoreText line raster shim);
+ * this file exists only so the seam compiles and behaves safely everywhere
+ * else.
+ * ============================================================================
+ */
 
 ;;OVERVIEW
 /**
