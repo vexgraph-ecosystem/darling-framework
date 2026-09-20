@@ -3,9 +3,25 @@
 #include <string.h>
 
 #include "annotation/incomplete.h"
+#include "annotation/definition.h"
 #include "annotation/overview.h"
 #include "nio/mem.h"
 #include "oop/type.h"
+
+;;DEFINITION
+/**
+ * ============================================================================
+ * DEFINITION: FileDialog
+ * ============================================================================
+ * Modal file browser inheriting Dialog: holds a fixed path buffer (512), an
+ * extension filter (64), hidden-file visibility, a scanned entry list, a
+ * selected index, and open/cancel hooks. Path and filter writes truncate into
+ * the fixed buffers; the struct is arena-allocated via
+ * Memory_alloc(TYPE_FILEDIALOG_SINGLETON). Directory scanning
+ * (FileDialog_refresh/choose) is stubbed ;;INCOMPLETE until the io pass
+ * lands. A concrete Dialog subclass in the R4 modal family.
+ * ============================================================================
+ */
 
 ;;OVERVIEW
 /**
