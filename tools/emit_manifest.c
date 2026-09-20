@@ -1,3 +1,4 @@
+#include "annotation/definition.h"
 #include "annotation/overview.h"
 
 #include <stdint.h>
@@ -61,6 +62,25 @@
 #include "event/gesture.h"
 #include "darling/cursor/cursor.h"
 
+;;DEFINITION
+/**
+ * ============================================================================
+ * DEFINITION: EmitManifest
+ * ============================================================================
+ * Build-time tool (never linked into libdarling): prints one complete module
+ * manifest JSON whose type_ids rows state every darling class as
+ * {name, value, parent, size} — name/value from c23/darling-type.h macros,
+ * parent from the shared c23/darling_parents.h chain (the same array
+ * c23/add.c registers, so the swap contract can never disagree with the live
+ * chain), size from sizeof(struct) (compiler-computed, cannot drift). Output
+ * feeds Hot_manifest JSONs and parses with hotcwap's HotManifest_parse; every
+ * stated row activates the swap gate. The EmitRow table is the single
+ * extension point: new classes extend the registry, the parent table, AND
+ * this table together — the _Static_assert turns a forgotten row into a
+ * compile error instead of silent contract drift.
+ * ============================================================================
+ */
+
 ;;OVERVIEW
 /**
  * ============================================================================
@@ -77,6 +97,8 @@
  * HotManifest_parse; every stated row activates the swap gate.
  *
  * Usage: emit_darling_manifest [name] [version]  (defaults: darling 0.0.0)
+ *
+ * STRUCT FIELDS: none — procedural tool (no owned struct).
  *
  * PRIVATE HELPERS (kept file-local pure-data only, each with full fields):
  * ----------------------------------------------------------------------------
