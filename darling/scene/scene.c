@@ -2,7 +2,25 @@
 
 #include "nio/mem.h"
 #include "oop/type.h"
+#include "annotation/definition.h"
 #include "annotation/overview.h"
+
+;;DEFINITION
+/**
+ * ============================================================================
+ * DEFINITION: Scene
+ * ============================================================================
+ * The scene root: Panel hierarchy state plus a virtual-size mapping mode,
+ * embedding Panel so the scene's virtual size IS its Container w/h — the
+ * present pass scales it into whatever the window occupies, so the scene
+ * never re-renders on resize. Scene2D and Scene3D are dispatch tags with no
+ * extra payload, embedding Scene as their first member. The present mode
+ * selects the destination: COMPOSITED keeps a retained offscreen target
+ * sampled by the canvas, DIRECT owns a CAMetalLayer + VkPane swapchain, and
+ * INLINE draws directly into the parent board render pass. Scene hosts the
+ * 2D/3D scene-graph content of the R4 stack.
+ * ============================================================================
+ */
 
 ;;OVERVIEW
 /**
