@@ -3,12 +3,28 @@
 #include "annotation/incomplete.h"
 #include "nio/mem.h"
 #include "oop/type.h"
+#include "annotation/definition.h"
 #include "annotation/overview.h"
+
+;;DEFINITION
+/**
+ * ============================================================================
+ * DEFINITION: DatePicker
+ * ============================================================================
+ * Calendar date picker shell: Panel layout plus an epoch-millis value, the
+ * visible year and month, and a pick callback slot. Epoch millis keeps the
+ * node dependency-light — no datetime include. The struct owns no heap; ctx
+ * is borrowed and onPick is a borrowed callback slot. setToday is a shell
+ * stub (;;INCOMPLETE) that lands with the clock walker. A leaf R4 field
+ * widget with symmetric getters/setters and zero steady-state allocation.
+ * ============================================================================
+ */
 
 ;;OVERVIEW
 /**
  * ============================================================================
- * CLASS: DatePicker (inherits Panel, LEVEL L2 Behavior)
+ * CLASS: DatePicker (inherits Panel)
+ * LEVEL: L2 — Behavior (calendar date picker shell)
  * ============================================================================
  * Calendar date picker shell: Panel layout plus an epoch-millis value, the
  * visible year and month, and a pick callback slot. No owned heap.
