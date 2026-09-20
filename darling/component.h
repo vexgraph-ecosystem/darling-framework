@@ -45,7 +45,8 @@
 // DEFERRED (opt-in retained subtree): a node flagged via Component_setDeferred
 // stops painting its subtree inline; the render pass bakes it once into an
 // offscreen retain target (ceil(absW*scale) x ceil(absH*scale) native px,
-// alpha-first ARGB8) whenever the mapped size, the view scale, or the
+// RGBA8 — byte0=red..byte3=alpha per the Strict 0xRRGGBBAA Color Law)
+// whenever the mapped size, the view scale, or the
 // process-wide generation counter drift, then blits the retained tile with
 // Graphics_drawImage — one subtree paint per mutation instead of per frame.
 // The bake paints through a bake view that shifts the origin to the node's
@@ -58,7 +59,7 @@ struct Component;
 
 // Forward declarations of graphvex artifact types held by the deferred
 // retain (full structs live in graphvex `buffer/buffer.h` / `image/image.h`).
-struct Image;   // alpha-first ARGB8 CPU shadow (retained artifact)
+struct Image;   // RGBA8 CPU shadow (retained artifact)
 struct Buffer;  // multi-channel raster target (retained paint surface)
 
 // ComponentView — pure-data render context handed to Component_render and
@@ -100,8 +101,8 @@ typedef struct Component {
     float paddingR, paddingB;
     // --- Presentation state ---
     float borderWidth;          // 0 = no border
-    uint32_t borderColor;       // 0xAARRGGBB
-    uint32_t backgroundColor;   // 0xAARRGGBB (consumed by render hooks)
+    uint32_t borderColor;       // 0xRRGGBBAA
+    uint32_t backgroundColor;   // 0xRRGGBBAA (consumed by render hooks)
     float radius;               // corner radius (0 = square)
     int radiusMode;             // COMPONENT_CORNER_ARC (0) / COMPONENT_CORNER_SUPERELLIPSE (1)
     float opacity;              // 0..1 alpha multiplier (1 = opaque)
@@ -122,7 +123,7 @@ typedef struct Component {
     void *renderUserdata;       // opaque arg handed to both hooks
     // --- Deferred render (opt-in retained subtree) ---
     uint8_t deferred;           // opt-in: bake the subtree into a retained target on drift, then blit
-    struct Image *retainImage;  // owned alpha-first ARGB8 artifact blitted by the render pass (null = none)
+    struct Image *retainImage;  // owned RGBA8 artifact blitted by the render pass (null = none)
     struct Buffer *retainBuffer;// owned raster target painted during bake (framebuffer-swap sub-pass)
     uint32_t retainW;           // ceil(absW * viewScaleX), native px, at last bake
     uint32_t retainH;           // ceil(absH * viewScaleY), native px, at last bake

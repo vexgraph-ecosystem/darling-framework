@@ -169,7 +169,7 @@
 *     a clean board CLEAN-SKIPs next tick instead of re-arming forever.
  *     COMPONENT SEAM BRANCH (Phase 1): a frame with a Component root takes
  *     an early path — bind the swapchain cmd buffer to the unified Graphics
- *     Vk row (VkGraphics_bindFrame), stage the root's 0xAARRGGBB background
+ *     Vk row (VkGraphics_bindFrame), stage the root's 0xRRGGBBAA background
  *     as the clear color, walk the retained tree via Component_render with
  *     one ComponentView {graphics, kx, ky}, latch lastComponentGen. Rests
  *     (skips the whole record) on idle + already-presented + unchanged gen.

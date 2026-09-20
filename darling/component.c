@@ -48,8 +48,9 @@
  * board/panel paint.
  * OPT-IN DEFERRED SUBTREES: a node flagged with Component_setDeferred stops
  * painting its subtree per frame — the render pass bakes it once into a
- * retained alpha-first ARGB8 tile (ceil(absW*scale) x ceil(absH*scale)
- * native px) whenever its mapped size, the view scale, or the generation
+ * retained RGBA8 tile (ceil(absW*scale) x ceil(absH*scale)
+ * native px, byte0=red..byte3=alpha per the Strict 0xRRGGBBAA Color Law)
+ * whenever its mapped size, the view scale, or the generation
  * counter drifts, then blits the tile with Graphics_drawImage. The bake
  * swaps the Raster row's framebuffer (RasterGraphics_setFramebuffer),
  * paints the subtree through a bake view shifted to the node's abs origin,
@@ -97,8 +98,8 @@
  *   float paddingL, paddingT; // Inward content insets (content box = abs + padding)
  *   float paddingR, paddingB;
  *   float borderWidth;     // 0 = no border
- *   uint32_t borderColor;  // 0xAARRGGBB
- *   uint32_t backgroundColor; // 0xAARRGGBB (consumed by render hooks)
+ *   uint32_t borderColor;  // 0xRRGGBBAA
+ *   uint32_t backgroundColor; // 0xRRGGBBAA (consumed by render hooks)
  *   float radius;          // Corner radius (0 = square)
  *   int radiusMode;        // COMPONENT_CORNER_ARC (0) / COMPONENT_CORNER_SUPERELLIPSE (1)
  *   float opacity;         // 0..1 alpha multiplier (1 = opaque)
@@ -116,7 +117,7 @@
  *   Component_RenderFn foregroundRender; // Stage 1 render hook
  *   void *renderUserdata;  // Opaque arg handed to both hooks
  *   uint8_t deferred;      // Opt-in retained subtree: bake on drift, then blit
- *   struct Image *retainImage;    // Owned alpha-first ARGB8 artifact blitted by the render pass
+ *   struct Image *retainImage;    // Owned RGBA8 artifact blitted by the render pass
  *   struct Buffer *retainBuffer;  // Owned raster target painted during bake (framebuffer sub-pass)
  *   uint32_t retainW;      // ceil(absW * viewScaleX), native px, at last bake
  *   uint32_t retainH;      // ceil(absH * viewScaleY), native px, at last bake
@@ -510,7 +511,7 @@ bool Component_bake(Component *self, const ComponentView *view) {
         return true;
 
     // Rebuild the target pair (cold path, rare): free the old artifacts and
-    // allocate the ceil-mapped raster target + its ARGB8 image shadow.
+    // allocate the ceil-mapped raster target + its RGBA8 image shadow.
     if ((*self).retainBuffer)
         Buffer_free((*self).retainBuffer);
     if ((*self).retainImage)
@@ -555,8 +556,9 @@ bool Component_bake(Component *self, const ComponentView *view) {
     RasterGraphics_setFramebuffer(savedFb, savedW, savedH);
     Graphics_clip(nullptr); // ;;INTENTION("bake leaves clip disabled: nothing on the seam uses clip today")
 
-    // Read back the painted target into the alpha-first ARGB8 shadow:
-    // Buffer channels 0=A 1=R 2=G 3=B, image bytes [A,R,G,B].
+    // Read back the painted target into the RGBA8 shadow:
+    // Buffer channels 0=R 1=G 2=B 3=A (ColorBuffer RGBA), image bytes
+    // [R,G,B,A] per the Strict 0xRRGGBBAA Color Law.
     uint8_t *shadow = (*img).rgba;
     if (shadow) {
         for (uint32_t y = 0; y < rh; ++y) {
