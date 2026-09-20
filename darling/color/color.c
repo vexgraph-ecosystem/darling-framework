@@ -1,10 +1,27 @@
 #include "darling/color/color.h"
 
+#include "annotation/definition.h"
 #include "annotation/overview.h"
 #include <math.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+
+;;DEFINITION
+/**
+ * ============================================================================
+ * DEFINITION: Color
+ * ============================================================================
+ * Unified color class holding canonical normalized float RGBA components
+ * [0.0, 1.0], with bidirectional, value-preserving conversions across ARGB32,
+ * RGBA32, HSV, HSL, and hexadecimal string encodings. Constructors
+ * heap-allocate via calloc while Color_init and the from* factories write
+ * dest-last into caller-owned storage; every entry path clamps components
+ * into [0.0, 1.0]. Static constants (white, black, red, ...) return stack
+ * Color values. A leaf R4 value type consumed by buttons, dialogs, swatches,
+ * and pickers across the UI stack.
+ * ============================================================================
+ */
 
 ;;OVERVIEW
 /**
