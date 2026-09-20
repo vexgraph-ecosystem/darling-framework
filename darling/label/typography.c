@@ -2,9 +2,26 @@
 
 #include <string.h>
 
+#include "annotation/definition.h"
 #include "annotation/overview.h"
 #include "nio/mem.h"
 #include "oop/type.h"
+
+;;DEFINITION
+/**
+ * ============================================================================
+ * DEFINITION: Typography
+ * ============================================================================
+ * Role-styled display text node embedding Panel: an owned UTF-8 string plus
+ * an optional font descriptor, rendered with a packed 0xAARRGGBB color under
+ * one of five typographic roles (H1, H2, H3, Body, Caption). The node is
+ * arena-allocated (TYPE_TYPOGRAPHY_SINGLETON) and copies its string into the
+ * arena on set, so it never borrows caller text; the font is a borrowed
+ * descriptor. Every setter marks the embedded Container dirty for the next
+ * layout pass. Like Kbd, Typography is a pure display node in the label
+ * family — no core logic, only presentation state.
+ * ============================================================================
+ */
 
 ;;OVERVIEW
 /**
