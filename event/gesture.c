@@ -1,12 +1,30 @@
 #include "event/gesture.h"
 
 #include "darling/panel/panel.h"
+#include "annotation/definition.h"
 #include "annotation/overview.h"
 #include "nio/mem.h"
 #include "oop/type.h"
 
 #include <stdbool.h>
 #include <stdint.h>
+
+;;DEFINITION
+/**
+ * ============================================================================
+ * DEFINITION: GestureEvent
+ * ============================================================================
+ * Transient gesture message for tap, double-tap, long-press, pinch, and
+ * swipe: the target panel, gesture centroid in target-local points, pinch
+ * scale, rotation in radians, and active touch count. Not a node and never
+ * attachable — central wiring delivers it through the Panel tree, where
+ * consume() short-circuits the bubble walk.
+ *
+ * Arena-allocated through Memory_alloc with the TYPE_GESTURE_EVENT_SINGLETON
+ * type id; the target is a borrowed Panel reference, never owned. nanos is a
+ * plain settable timestamp (clock wiring is behavior phase).
+ * ============================================================================
+ */
 
 ;;OVERVIEW
 /**
