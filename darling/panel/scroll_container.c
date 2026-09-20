@@ -2,11 +2,35 @@
 
 #include "darling/field/scrollbar.h"
 #include "darling/panel/panel.h"
+#include "annotation/definition.h"
 #include "annotation/overview.h"
 #include "nio/mem.h"
 #include "oop/type.h"
 
 #include <math.h>
+
+;;DEFINITION
+/**
+ * ============================================================================
+ * DEFINITION: ScrollContainer
+ * ============================================================================
+ * Viewport over an oversized content panel with start/end offsets, inset
+ * padding on both scroll ends, child clipping, an owned vertical ScrollBar,
+ * touchscreen feel (fling momentum + slippery friction + overscroll
+ * rubber-band), and a content-panel forwarding part. The offset pair is the
+ * single source of truth: the bar writes the offset via syncFromBar,
+ * setOffset writes back to the bar via syncToBar, and tick integrates fling
+ * velocity into the offset every frame on Thread 0 (a cheap no-op at rest).
+ * Content attach is detach-only and never frees; the bar is an owned,
+ * replaceable view that is never freed. NOTE: the content-panel part
+ * (panel_setSize, panel_setBackgroundColor, panel_setRadius + symmetric
+ * getters) forwards to the content Panel and owns NO fields of its own —
+ * new stored panel state is a smell; the forwarders no-op on empty
+ * viewports and re-clamp the offset after resizes. Per the Container-vs-
+ * Panel Law it embeds Panel as its first member; frozen GridContainer
+ * header rows/cols are honored by the viewport.
+ * ============================================================================
+ */
 
 ;;OVERVIEW
 /**
