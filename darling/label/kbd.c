@@ -2,9 +2,26 @@
 
 #include <string.h>
 
+#include "annotation/definition.h"
 #include "annotation/overview.h"
 #include "nio/mem.h"
 #include "oop/type.h"
+
+;;DEFINITION
+/**
+ * ============================================================================
+ * DEFINITION: Kbd
+ * ============================================================================
+ * Keyboard-shortcut chip: a pure display leaf embedding Panel, carrying an
+ * owned key string and packed 0xAARRGGBB chip colors. The node is
+ * arena-allocated (TYPE_KBD_SINGLETON) and the key string is copied into the
+ * arena on set (TYPE_ARRAY), so the chip owns its payload and never borrows
+ * caller text. Every setter marks the embedded Container dirty so the next
+ * layout pass repaints the chip; there is no core logic — Kbd is a
+ * display-only node in the label family, sibling to Typography, that renders
+ * whatever the Panel pipeline paints.
+ * ============================================================================
+ */
 
 ;;OVERVIEW
 /**
