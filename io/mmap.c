@@ -3,7 +3,25 @@
 #include <sys/mman.h>
 #include <sys/stat.h>
 #include <unistd.h>
+#include "annotation/definition.h"
 #include "annotation/overview.h"
+
+;;DEFINITION
+/**
+ * ============================================================================
+ * DEFINITION: MemoryMap
+ * ============================================================================
+ * Zero-copy read-only memory-mapped file utility: allocates address space
+ * without physical RAM, paging blocks in from disk purely on demand via
+ * CPU/GPU page faults. MemoryMap_open maps a file PROT_READ/MAP_PRIVATE and
+ * closes the descriptor immediately — POSIX mmap retains its own inode
+ * reference — returning a valid struct only on success.
+ *
+ * MemoryMap_close unmaps the region and resets the handle to its invalid
+ * state. The handle is a plain value struct (data, size, valid) with no
+ * arena or heap ownership of its own; the mapping is the OS resource.
+ * ============================================================================
+ */
 
 ;;OVERVIEW
 /**
