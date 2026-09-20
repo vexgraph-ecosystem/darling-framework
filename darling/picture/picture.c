@@ -1,9 +1,26 @@
+#include "annotation/definition.h"
 #include "annotation/overview.h"
 #include "darling/picture/picture.h"
 #include "nio/mem.h"
 #include "oop/type.h"
 #include "vulkan/vk.h"
 #include "vulkan/texture/texture.h"
+
+;;DEFINITION
+/**
+ * ============================================================================
+ * DEFINITION: Picture
+ * ============================================================================
+ * Retained-mode off-heap picture node inheriting Panel -> Container: hosts an
+ * Image asset descriptor or a bindless Vulkan texture, with optional UV
+ * cropping, explicit pixel dimension overrides, and a scaling/fill mode (FIT,
+ * ZOOM_FILL, ...). The node renders through the Stage 1 image hook (texture
+ * quad, amber placeholder when unbound) and can own its GPU texture
+ * (ownsTexture) or borrow a caller-bound textureId. Layout anchors
+ * hierarchically through the embedded Panel/Container; Picture_load binds a
+ * VFS-loaded texture and Picture_cycleMode advances the mode seamlessly.
+ * ============================================================================
+ */
 
 ;;OVERVIEW
 /**
