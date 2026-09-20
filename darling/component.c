@@ -1,5 +1,6 @@
 #include "darling/component.h"
 
+#include <math.h>
 #include <string.h>
 
 #include "../c23/darling-type.h"
@@ -21,14 +22,24 @@
  * presentation state + an ABSOLUTE rect recomputed eagerly on every geometry
  * setter, so a renderer consumes ((*self).absX..absH) directly — no resolve
  * phase, no parent-size threading, no stale reads. A Component is a leaf on
- * its own: NO children, NO tree, NO dirty flag (eager abs replaces the
- * dirty+resolve pass); containment is optional by construction — an element
- * that does not want to be added is exactly a Component without a Container.
+ * its own: containment is optional by construction — an element that does
+ * not want to be added is exactly a Component without a Container. It DOES
+ * own an optional children list (the tree form): the parent cascades its
+ * CONTENT box (abs inset by padding — padding insets children) into each
+ * child eagerly, and Component_render walks the tree in order.
  * The eager abs cascade is O(1) per leaf: setters recompute this component's
  * abs immediately against the parent's abs box (stored via
  * Component_setParentAbs), and setters never layout, so the whole tree cost
  * equals one interleaved resolve pass. The anchor+pivot system mirrors
  * Container's exactly for a value-identical migration.
+ * Component_render takes a ComponentView — the active unified Graphics row
+ * plus the point-to-native-pixel scale of the current present — instead of a
+ * bare pointer, so the seam renders the tree directly in device pixels and
+ * the same view flows to every node and hook. A process-wide generation
+ * counter (Component_gen) bumps on every recompute and every visual/content
+ * mutation; the compositor latches it per frame to re-arm present demand
+ * (the Present-On-Demand Law) when a component tree changes without a
+ * board/panel paint.
  * ============================================================================
  */
 
@@ -42,10 +53,13 @@
  * presentation state + an ABSOLUTE rect computed eagerly on every geometry
  * setter, so a renderer consumes ((*self).absX..absH) directly — no resolve
  * phase, no parent-size threading, no stale reads. A Component is a leaf on
- * its own: NO children, NO tree, NO dirty flag (eager abs replaces the
- * dirty+resolve pass). Containment is optional by construction: an element
- * that does not want to be added is exactly a Component without a
- * Container — the two classes are different things by design.
+ * its own: containment is optional by construction — an element that does
+ * not want to be added is exactly a Component without a Container — but it
+ * DOES own an optional children list (the tree form), cascades its content
+ * box (abs inset by padding) into each child eagerly, and renders the whole
+ * tree in order under one ComponentView (unified Graphics row + device
+ * scale). The generation counter (Component_gen) re-arms the compositor's
+ * present demand on any component mutation.
  *
  * ;;INTENTION("eager abs cascade per the Present-On-Demand Law: geometry
  * setters recompute abs immediately; parent containers cascade via
@@ -93,11 +107,13 @@
  * Core Functions:
  *   - Component_recompute(self)
  *   - Component_setParentAbs(self, px, py, pw, ph)
- *   - Component_render(self, graphics)
+ *   - Component_render(self, view)
+ *   - Component_viewMap(view, ax, ay, aw, ah, outX, outY, outW, outH)
  *   - Component_hitTest(self, pointX, pointY)
  *   - Component_getContentRect(self, outX, outY, outW, outH)
  *   - Component_addChild(self, child)
  *   - Component_removeChild(self, child)
+ *   - Component_gen(void)
  *
  * Setters:
  *   - Component_setX/Y(self, v)
@@ -148,6 +164,43 @@
  */
 
 // darling/component.c — immediate on-demand rendering leaf (new architecture).
+
+// FILE-LOCAL STATE & HELPERS
+
+// s_componentGen — the process-wide Component generation counter. Every
+// geometry recompute and every visual/content mutation (padding, hooks,
+// visibility, membership) bumps it once. The compositor's probe compares
+// Component_gen() against the frame's latched lastComponentGen to re-arm
+// present demand (the Present-On-Demand Law) when a component tree changed
+// without a board/panel paint.
+static uint64_t s_componentGen = 0u;
+
+static void touchGen(void) {
+    s_componentGen++;
+}
+
+// The eager content box: abs rect inset by padding (clamped >= 0). Children
+// cascade against THIS box, never the raw abs box, so padding insets child
+// placement (the padding-insets-children decision).
+static void contentBox(const Component *self, float *outX, float *outY,
+                       float *outW, float *outH) {
+    float cx = (*self).absX + (*self).paddingL;
+    float cy = (*self).absY + (*self).paddingT;
+    float cw = (*self).absW - (*self).paddingL - (*self).paddingR;
+    float ch = (*self).absH - (*self).paddingT - (*self).paddingB;
+    if (cw < 0.0f)
+        cw = 0.0f;
+    if (ch < 0.0f)
+        ch = 0.0f;
+    if (outX)
+        *outX = cx;
+    if (outY)
+        *outY = cy;
+    if (outW)
+        *outW = cw;
+    if (outH)
+        *outH = ch;
+}
 
 // CONSTRUCTORS
 
@@ -205,6 +258,7 @@ Component *Component_0(void) {
 void Component_recompute(Component *self) {
     if (!self)
         return;
+    touchGen();
 
     float sw = (*self).w;
     float sh = (*self).h;
@@ -276,11 +330,14 @@ void Component_recompute(Component *self) {
     (*self).absW = sw;
     (*self).absH = sh;
 
-    // Eager Cascade Law: cascade new abs dimensions to all children immediately
+    // Eager Cascade Law: cascade the CONTENT box (abs inset by padding —
+    // padding insets children) to all children immediately
+    float contentX = 0.0f, contentY = 0.0f, contentW = 0.0f, contentH = 0.0f;
+    contentBox(self, &contentX, &contentY, &contentW, &contentH);
     for (uint32_t i = 0; i < (*self).childCount; ++i) {
         Component *child = (*self).children[i];
         if (child) {
-            Component_setParentAbs(child, screenX, screenY, sw, sh);
+            Component_setParentAbs(child, contentX, contentY, contentW, contentH);
         }
     }
 }
@@ -295,48 +352,51 @@ void Component_setParentAbs(Component *self, float px, float py, float pw, float
     Component_recompute(self);
 }
 
-bool Component_render(Component *self, void *graphics) {
+bool Component_render(Component *self, const ComponentView *view) {
     if (!self || !(*self).visible)
         return false;
-    (void) graphics;
     bool ran = false;
 
-    // 1. Native background fill through unified Graphics seam
+    // 1. Native background fill through unified Graphics seam (device-mapped)
     if ((*self).backgroundColor != COMPONENT_COLOR_CLEAR && (*self).opacity > 0.0f
         && (*self).absW > 0.0f && (*self).absH > 0.0f) {
-        Rectangle rect = {(*self).absX, (*self).absY, (*self).absW, (*self).absH};
+        Rectangle rect;
+        Component_viewMap(view, (*self).absX, (*self).absY, (*self).absW, (*self).absH,
+                          &rect.x, &rect.y, &rect.width, &rect.height);
         Brush brush = {(*self).backgroundColor, (*self).opacity, 0u};
         Graphics_fillRect(&rect, &brush);
         ran = true;
     }
 
-    // 2. Background custom hook
+    // 2. Background custom hook (receives the view; maps its own rects)
     if ((*self).backgroundRender) {
-        (*self).backgroundRender(self, graphics, (*self).renderUserdata);
+        (*self).backgroundRender(self, view, (*self).renderUserdata);
         ran = true;
     }
 
-    // 3. Render children in order
+    // 3. Render children in order (same view; abs live in the same point space)
     for (uint32_t i = 0; i < (*self).childCount; ++i) {
         Component *child = (*self).children[i];
         if (child && (*child).visible) {
-            if (Component_render(child, graphics))
+            if (Component_render(child, view))
                 ran = true;
         }
     }
 
-    // 4. Native border stroke through unified Graphics seam
+    // 4. Native border stroke through unified Graphics seam (device-mapped)
     if ((*self).borderWidth > 0.0f && (*self).borderColor != COMPONENT_COLOR_CLEAR
         && (*self).absW > 0.0f && (*self).absH > 0.0f) {
-        Rectangle rect = {(*self).absX, (*self).absY, (*self).absW, (*self).absH};
+        Rectangle rect;
+        Component_viewMap(view, (*self).absX, (*self).absY, (*self).absW, (*self).absH,
+                          &rect.x, &rect.y, &rect.width, &rect.height);
         Stroke stroke = {(*self).borderWidth, 0.0f, STROKE_CAP_BUTT, STROKE_JOIN_MITER, (*self).borderColor, 0u};
         Graphics_drawRect(&rect, &stroke);
         ran = true;
     }
 
-    // 5. Foreground custom hook
+    // 5. Foreground custom hook (receives the view)
     if ((*self).foregroundRender) {
-        (*self).foregroundRender(self, graphics, (*self).renderUserdata);
+        (*self).foregroundRender(self, view, (*self).renderUserdata);
         ran = true;
     }
     return ran;
@@ -351,25 +411,54 @@ bool Component_hitTest(const Component *self, float pointX, float pointY) {
 
 void Component_getContentRect(const Component *self, float *outX, float *outY,
                               float *outW, float *outH) {
-    float cx = 0.0f, cy = 0.0f, cw = 0.0f, ch = 0.0f;
-    if (self) {
-        cx = (*self).absX + (*self).paddingL;
-        cy = (*self).absY + (*self).paddingT;
-        cw = (*self).absW - (*self).paddingL - (*self).paddingR;
-        ch = (*self).absH - (*self).paddingT - (*self).paddingB;
-        if (cw < 0.0f)
-            cw = 0.0f;
-        if (ch < 0.0f)
-            ch = 0.0f;
+    if (!self) {
+        if (outX)
+            *outX = 0.0f;
+        if (outY)
+            *outY = 0.0f;
+        if (outW)
+            *outW = 0.0f;
+        if (outH)
+            *outH = 0.0f;
+        return;
+    }
+    contentBox(self, outX, outY, outW, outH);
+}
+
+void Component_viewMap(const ComponentView *view, float ax, float ay, float aw, float ah,
+                       float *outX, float *outY, float *outW, float *outH) {
+    float x0 = ax;
+    float y0 = ay;
+    float w = aw;
+    float h = ah;
+    if (view) {
+        // Provably gapless device mapping: floor leading edges, ceil trailing
+        // edges, so adjacent cells never leave a pixel gap and never overlap
+        // across a boundary — the seam's single rounding currency (no drift
+        // vs Board surfaces). A null view maps identity (point space).
+        x0 = floorf(ax * (*view).scaleX);
+        y0 = floorf(ay * (*view).scaleY);
+        float x1 = ceilf((ax + aw) * (*view).scaleX);
+        float y1 = ceilf((ay + ah) * (*view).scaleY);
+        w = x1 - x0;
+        h = y1 - y0;
+        if (w < 0.0f)
+            w = 0.0f;
+        if (h < 0.0f)
+            h = 0.0f;
     }
     if (outX)
-        *outX = cx;
+        *outX = x0;
     if (outY)
-        *outY = cy;
+        *outY = y0;
     if (outW)
-        *outW = cw;
+        *outW = w;
     if (outH)
-        *outH = ch;
+        *outH = h;
+}
+
+uint64_t Component_gen(void) {
+    return s_componentGen;
 }
 
 // SETTERS
@@ -510,30 +599,37 @@ void Component_setPadding(Component *self, float l, float t, float r, float b) {
     (*self).paddingT = pt;
     (*self).paddingR = pr;
     (*self).paddingB = pb;
+    // Padding insets children: re-cascade the content box to every child
+    // immediately (recompute bumps the generation counter).
+    Component_recompute(self);
 }
 
 void Component_setBorderWidth(Component *self, float w) {
     if (!self)
         return;
     (*self).borderWidth = w < 0.0f ? 0.0f : w;
+    touchGen();
 }
 
 void Component_setBorderColor(Component *self, uint32_t color) {
     if (!self)
         return;
     (*self).borderColor = color;
+    touchGen();
 }
 
 void Component_setBackgroundColor(Component *self, uint32_t color) {
     if (!self)
         return;
     (*self).backgroundColor = color;
+    touchGen();
 }
 
 void Component_setRadius(Component *self, float r) {
     if (!self)
         return;
     (*self).radius = r < 0.0f ? 0.0f : r;
+    touchGen();
 }
 
 void Component_setRadiusMode(Component *self, int mode) {
@@ -542,30 +638,35 @@ void Component_setRadiusMode(Component *self, int mode) {
     if (mode != COMPONENT_CORNER_ARC && mode != COMPONENT_CORNER_SUPERELLIPSE)
         return;
     (*self).radiusMode = mode;
+    touchGen();
 }
 
 void Component_setOpacity(Component *self, float opacity) {
     if (!self)
         return;
     (*self).opacity = opacity < 0.0f ? 0.0f : (opacity > 1.0f ? 1.0f : opacity);
+    touchGen();
 }
 
 void Component_setZ(Component *self, int z) {
     if (!self)
         return;
     (*self).z = z;
+    touchGen();
 }
 
 void Component_setVisible(Component *self, bool visible) {
     if (!self)
         return;
     (*self).visible = visible ? 1 : 0;
+    touchGen();
 }
 
 void Component_setParent(Component *self, Component *parent) {
     if (!self)
         return;
     (*self).parent = parent;
+    touchGen();
 }
 
 bool Component_addChild(Component *self, Component *child) {
@@ -592,9 +693,13 @@ bool Component_addChild(Component *self, Component *child) {
 
     (*self).children[(*self).childCount++] = child;
     (*child).parent = self;
+    touchGen();
 
-    // Eager Cascade: update child abs immediately with parent's abs box
-    Component_setParentAbs(child, (*self).absX, (*self).absY, (*self).absW, (*self).absH);
+    // Eager Cascade: update child abs immediately with the parent's CONTENT
+    // box (abs inset by padding — padding insets children)
+    float contentX = 0.0f, contentY = 0.0f, contentW = 0.0f, contentH = 0.0f;
+    contentBox(self, &contentX, &contentY, &contentW, &contentH);
+    Component_setParentAbs(child, contentX, contentY, contentW, contentH);
     return true;
 }
 
@@ -619,6 +724,7 @@ bool Component_removeChild(Component *self, Component *child) {
     if ((*child).parent == self) {
         (*child).parent = nullptr;
     }
+    touchGen();
     return true;
 }
 
@@ -626,18 +732,21 @@ void Component_setBackgroundRender(Component *self, Component_RenderFn fn) {
     if (!self)
         return;
     (*self).backgroundRender = fn;
+    touchGen();
 }
 
 void Component_setForegroundRender(Component *self, Component_RenderFn fn) {
     if (!self)
         return;
     (*self).foregroundRender = fn;
+    touchGen();
 }
 
 void Component_setRenderUserdata(Component *self, void *userdata) {
     if (!self)
         return;
     (*self).renderUserdata = userdata;
+    touchGen();
 }
 
 // GETTERS

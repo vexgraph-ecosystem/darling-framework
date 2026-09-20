@@ -42,7 +42,10 @@
  * inSyncResize flag is a re-entrancy guard (one render+present per
  * geometry event), presentedFrames drives the compositor infancy gate,
  * emptyPresents caps consecutive empty seam presents, and lastPublishGen
- * re-arms present demand on fresh VkLayer publishes.
+ * re-arms present demand on fresh VkLayer publishes. lastComponentGen
+ * latches the Component generation counter (Component_gen) so the
+ * component seam re-arms demand when a component tree mutates without a
+ * board/panel paint.
  * ============================================================================
  */
 
@@ -70,12 +73,11 @@
  *   uint32_t childDialogCount;                    // Active child dialog count
  *   Dialog *ownerDialog;                          // Owning Dialog if embedded in a Dialog
  *   Frame *parentFrame;                           // Parent frame if this is a child dialog
- *   bool hasVisualEffect;                         // NSVisualEffectView vibrancy
- *   int visualEffectMaterial;                     // FrameVisualEffectMaterial
- *   bool presentsWithTransaction;                 // Atomic presentation flag
+  *   bool presentsWithTransaction;                 // Atomic presentation flag
  *   uint32_t presentedFrames;                       // Confirmed seam presents (infancy gate)
  *   uint32_t emptyPresents;                         // Consecutive empty seam presents (empty-cap guard)
  *   uint64_t lastPublishGen;                        // Last observed VkLayer publish generation (probe re-arm)
+ *   uint64_t lastComponentGen;                      // Last observed Component generation (component seam demand latch)
  *   int width;                                    // Pixel width
  *   int height;                                   // Pixel height
  *   bool inLiveResize;                            // Drag-resize active
@@ -143,9 +145,8 @@
  *   - Frame_setApplication(frame, app)
  *   - Frame_setGraphics(frame, graphics)
  *   - Frame_setRootPanel(frame, panel)
- *   - Frame_setContentPane(frame, panel)
+  *   - Frame_setContentPane(frame, panel)
  *   - Frame_setScenePane(frame, panel)
- *   - Frame_setVisualEffect(frame, enable, material)
  *   - Frame_setPresentsWithTransaction(frame, presentsWithTransaction)
  *   - Frame_setNativeView(frame, nativeView)
  *   - Frame_setOnQuitRequested(frame, onQuitRequested, userData)
@@ -164,8 +165,7 @@
  *   - Frame_setNaked(frame, naked)
  *   - Frame_setBorderless(frame, borderless)
  *   - Frame_setFloatingTrafficLights(frame, floating)
- *   - Frame_macos_setTrafficLightVisible(frame, visible)  : macOS cluster toggle
- *   - Frame_setBlur(frame, blur)
+  *   - Frame_macos_setTrafficLightVisible(frame, visible)  : macOS cluster toggle
  *   - Frame_setOpacity(frame, opacity)
  *   - Frame_setTransparent(frame, transparent)
  *   - Frame_setTransparentBackground(frame, transparent)
@@ -195,9 +195,7 @@
  *   - Frame_getScenePane(const frame)
  *   - Frame_getTitle(const frame) / Frame_title(const frame)
  *   - Frame_getLayerCount(const frame)
- *   - Frame_getLayer(frame, index)
- *   - Frame_hasVisualEffect(const frame)
- *   - Frame_getVisualEffectMaterial(const frame)
+  *   - Frame_getLayer(frame, index)
  *   - Frame_isPresentsWithTransaction(const frame)
  *   - Frame_getSize(const frame, outWidth, outHeight)
  *   - Frame_getWidth(const frame) / Frame_width(const frame)
@@ -263,13 +261,12 @@ bool Frame_init(Window *win, void *graphics, Frame *frame) {
     (*frame).contentPane = nullptr;
     (*frame).scenePane = nullptr;
     (*frame).onQuitRequested = nullptr;
-    (*frame).quitRequestedUserData = nullptr;
-    (*frame).hasVisualEffect = false;
-    (*frame).visualEffectMaterial = FRAME_MATERIAL_HUD_WINDOW;
+        (*frame).quitRequestedUserData = nullptr;
     (*frame).presentsWithTransaction = true;
     (*frame).presentedFrames = 0;
     (*frame).emptyPresents = 0;
     (*frame).lastPublishGen = 0;
+    (*frame).lastComponentGen = 0;
     (*frame).chromeMode = FRAME_DECORATED;
     (*frame).width = win ? Window_width(win) : 800;
     (*frame).height = win ? Window_height(win) : 600;
@@ -763,13 +760,6 @@ void Frame_setScenePane(Frame *frame, Panel *panel) {
     }
 }
 
-void Frame_setVisualEffect(Frame *frame, bool enable, int material) {
-    if (frame == nullptr)
-        return;
-    (*frame).hasVisualEffect = enable;
-    (*frame).visualEffectMaterial = material;
-}
-
 void Frame_setPresentsWithTransaction(Frame *frame, bool presentsWithTransaction) {
     if (frame == nullptr)
         return;
@@ -845,18 +835,6 @@ FrameLayer *Frame_getLayer(Frame *frame, uint32_t index) {
     if (frame == nullptr || index >= (*frame).layerCount)
         return nullptr;
     return &(*frame).layers[index];
-}
-
-bool Frame_hasVisualEffect(const Frame *frame) {
-    if (frame == nullptr)
-        return false;
-    return (*frame).hasVisualEffect;
-}
-
-int Frame_getVisualEffectMaterial(const Frame *frame) {
-    if (frame == nullptr)
-        return 0;
-    return (*frame).visualEffectMaterial;
 }
 
 bool Frame_isPresentsWithTransaction(const Frame *frame) {
@@ -1027,12 +1005,6 @@ void Frame_macos_setTrafficLightVisible(Frame *frame, bool visible) {
     Window_macOS_setTrafficLightButtonVisible((*frame).window, WINDOW_TRAFFIC_LIGHT_CLOSE, visible);
     Window_macOS_setTrafficLightButtonVisible((*frame).window, WINDOW_TRAFFIC_LIGHT_MINIMIZE, visible);
     Window_macOS_setTrafficLightButtonVisible((*frame).window, WINDOW_TRAFFIC_LIGHT_ZOOM, visible);
-}
-
-void Frame_setBlur(Frame *frame, float blur) {
-    if (frame == nullptr || (*frame).window == nullptr)
-        return;
-    Window_setBlur((*frame).window, blur);
 }
 
 void Frame_setOpacity(Frame *frame, float opacity) {

@@ -1,5 +1,6 @@
 #include "annotation/definition.h"
 #include "annotation/overview.h"
+#include "darling/component.h"
 #include "darling/compositor.h"
 #include "darling/frame.h"
 #include "darling/container.h"
@@ -7,12 +8,14 @@
 #include "darling/scene/scene.h"
 #include "darling/field/input.h"
 #include "event/dispatch.h"
+#include "graphics/graphics.h"
 #include "graphvex/graphics_loop.h"
 #include "nio/mem.h"
 #include "oop/type.h"
 #include "time/nanotime.h"
 #include "vulkan/sdf_gpu.h"
 #include "vulkan/vk.h"
+#include "vulkan/vk_graphics.h"
 #include "vulkan/vk_iosurface.h"
 #include "vulkan/vk_layer.h"
 #include "vulkan/vk_scene.h"
@@ -143,8 +146,10 @@
   *     focused Input's caret blink and re-arms present demand on
   *     tree/layer/live-resize dirt (VkLayer_hasDemand covers retained
   *     boards + COMPOSITED scenes) or a publish-generation delta
-  *     (VkLayer_publishGeneration vs the frame's lastPublishGen — a fresh
-  *     publish summons its composite) — probe free, present gated on demand.
+*     (VkLayer_publishGeneration vs the frame's lastPublishGen — a fresh
+ *     publish summons its composite) — probe free, present gated on demand.
+ *     Also re-arms on a Component generation delta (Component_gen vs the
+ *     frame's lastComponentGen) when the frame owns a Component root.
   *   - Darling_renderFrame(cmdBuffer, drawW, drawH, userdata=Frame*)
   *     (Loop1 seam collage, composite != render: winW/winH resolve from the
   *     Frame's live points first (Window cached size is fallback only) so
@@ -161,8 +166,14 @@
    *     samples identically to a full-extent quad. Unpublished boards
    *     (published<0) no-op inside VkLayer_composite. A successful board
    *     composite clears that board's tree dirt (scene and content alike) so
-   *     a clean board CLEAN-SKIPs next tick instead of re-arming forever.
-   *     LIVE DRAG skips the collage: allocations are frozen, so both boards
+*     a clean board CLEAN-SKIPs next tick instead of re-arming forever.
+ *     COMPONENT SEAM BRANCH (Phase 1): a frame with a Component root takes
+ *     an early path — bind the swapchain cmd buffer to the unified Graphics
+ *     Vk row (VkGraphics_bindFrame), stage the root's 0xAARRGGBB background
+ *     as the clear color, walk the retained tree via Component_render with
+ *     one ComponentView {graphics, kx, ky}, latch lastComponentGen. Rests
+ *     (skips the whole record) on idle + already-presented + unchanged gen.
+ *     LIVE DRAG skips the collage: allocations are frozen, so both boards
    *     paint inline at AFTER layout straight into the seam image through
    *     the shared board painter (the live direct pass — no sampling, no
    *     lag, no stretch; shrink drags pixel-perfect, grow drags pin
@@ -182,10 +193,13 @@
    *     the client dirty so the drag presents at cadence, idle ticks rest);
    *     live points resolve from the Frame first (the frame hook already ran
    *     Frame_resize with live OS points) with the cached Window size as
-   *     fallback only. LIVE DRAG takes the freeze branch: AFTER-size layout
+   *     fallback only. LIVE DRAG takes the freeze branch and returns:
+   *     AFTER-size fractional layout + geometry-time render-area publish
+   *     (Vk_seamSetExtent from the passed drawable px — never re-derived)
    *     + clear-color refresh only — attach, resize, layer work, and
    *     VkLayer_visit are all skipped so no target is created, destroyed,
-   *     or re-rendered mid-drag. Settled ticks run the full path
+   *     or re-rendered mid-drag and no fence wait ever blocks thread 0.
+   *     Settled ticks run the full path
    *     (Container_setSize + layer attaches in step with the border per
    *     the Native Pixel Law + the Window Board Root Lock Law; board VkLayers
    *     attach with the live drawable px directly; VkLayer_visit publishes
@@ -763,11 +777,29 @@ void Darling_preFrame(Window *window, int drawW, int drawH, void *userdata) {
     // Moving edge is a demand ticket (the Present-On-Demand Law): while live,
     // force the client dirty every tick so the loop keeps presenting at drag
     // cadence; idle ticks rest untouched. Atomic store only — no layout, no
-    // driver call, no allocation. Visit-then-composite order below is
-    // unchanged: VkLayer_visit publishes dirty boards + COMPOSITED scenes
-    // BEFORE the seam pass samples them.
+    // driver call, no allocation.
     if (live)
         GraphicsLoop_markDirty(GraphicsLoop_default(), window);
+    // LIVE FREEZE (the event size is the only size): layout both board roots
+    // at the fractional AFTER bounds, publish the geometry-time render area,
+    // refresh the clear color — then return. No attach, no resize, no visit:
+    // retained flight targets stay frozen all drag (rebuilding one per step
+    // blocks thread 0 in fence waits and fails when the present flight never
+    // drains, leaving stale dims behind). The seam pass paints both boards
+    // inline at AFTER layout through the live direct pass; the settle tick
+    // (live false) resumes the full path below and rebuilds once.
+    if (live) {
+        if (contentPanel)
+            Container_forceSize(&(*contentPanel).base, rootW, rootH);
+        if (scenePanel)
+            Container_forceSize(&(*scenePanel).base, rootW, rootH);
+        if (drawW > 0 && drawH > 0) {
+            extern void Vk_seamSetExtent(int32_t widthPx, int32_t heightPx);
+            Vk_seamSetExtent((int32_t) drawW, (int32_t) drawH);
+        }
+        refreshClearColor(scenePanel, root, contentPanel);
+        return;
+    }
     if (contentPanel)
         Container_forceSize(&(*contentPanel).base, rootW, rootH);
     if (scenePanel)
@@ -884,6 +916,49 @@ void Darling_renderFrame(void *cmdBuffer, int drawW, int drawH, void *userdata) 
     // currencies here would double-shift every parent-derived edge.
     float resolveW = liveW > 0.0f ? liveW : (float) winW;
     float resolveH = liveH > 0.0f ? liveH : (float) winH;
+
+    // COMPONENT SEAM (Phase 1, the Canvas Planes Law): a frame with a
+    // Component root (Frame_setRootComponent) renders the retained tree
+    // DIRECTLY into the swapchain image in device pixels — no boards, no
+    // IOSurface round-trip. The unified Graphics row (Vk backend, selected
+    // in Darling_initCompositor) records on the same (cmdBuffer, drawW,
+    // drawH) pass the panel seams use; every node maps its eager abs rect
+    // through Component_viewMap (floor/ceil gapless rounding, the Single
+    // Rounding Currency Law). Demand rests exactly like the board path:
+    // idle + already-presented + unchanged tree -> REST, no re-record of an
+    // identical image; live resize and content change always record (chase
+    // drawableSize). The generation latch (lastComponentGen) is updated only
+    // after a successful record, so a failed pass re-arms next tick.
+    if (Frame_getRootComponent(rframe) != nullptr) {
+        bool componentLive = Window_isLiveResizing(window);
+        GraphicsClient *cclient = GraphicsLoop_findClient(GraphicsLoop_default(), window);
+        bool neverPresented = (cclient == nullptr) || !(*cclient).hasPresented;
+        bool contentChange = Component_gen() != (*rframe).lastComponentGen;
+        if (!componentLive && !neverPresented && !contentChange) {
+            // Idle rest: the presented image is current — skip the record
+            // (the Present-On-Demand Law). Non-empty so the loop never
+            // treats the rest as a blank frame.
+            s_seamNonEmpty = true;
+            return;
+        }
+        if (VkGraphics_bindFrame(cmdBuffer, (uint32_t) drawW, (uint32_t) drawH) == false)
+            return; // drop-degrade per the Bounded Wait Law: device dead, skip
+        Component *rootComponent = Frame_getRootComponent(rframe);
+        uint32_t bg = Component_getBackgroundColor(rootComponent);
+        if (((bg >> 24) & 0xFFu) != 0u)
+            Vk_setClearColor((float) ((bg >> 16) & 0xFFu) / 255.0f,
+                             (float) ((bg >> 8) & 0xFFu) / 255.0f,
+                             (float) (bg & 0xFFu) / 255.0f,
+                             (float) ((bg >> 24) & 0xFFu) / 255.0f);
+        // One view for the whole tree: the active Graphics row + the live
+        // point->px scale (kx/ky from the Single Rounding Currency Law).
+        ComponentView view = {(void*) Graphics_getCurrent(), kx, ky};
+        Component_render(rootComponent, &view);
+        Graphics_end();
+        (*rframe).lastComponentGen = Component_gen();
+        s_seamNonEmpty = true;
+        return;
+    }
 
     Panel *root = Frame_getRootPanel(rframe);
 
@@ -1120,8 +1195,22 @@ static bool darlingPresentResizeSequence(void *window, void *userdata) {
         float liveScale = TextCore_backingScale();
         if (liveScale <= 0.0f)
             liveScale = 1.0f;
-        pxW = (int) lround((double) winW * (double) liveScale);
-        pxH = (int) lround((double) winH * (double) liveScale);
+        // Single rounding of the fractional event size (the Single Rounding
+        // Currency Law): winW/winH are already lround'ed points, so scaling
+        // them re-rounds and toggles ±1px at .5 boundaries. Round once from
+        // the live fractional bounds instead.
+        float fw = 0.0f;
+        float fh = 0.0f;
+        if (hframe != nullptr) {
+            fw = Frame_getLiveWidth(hframe);
+            fh = Frame_getLiveHeight(hframe);
+        }
+        if (fw <= 0.0f)
+            fw = (float) winW;
+        if (fh <= 0.0f)
+            fh = (float) winH;
+        pxW = (int) lround((double) fw * (double) liveScale);
+        pxH = (int) lround((double) fh * (double) liveScale);
     }
     Darling_preFrame(w, pxW, pxH, userdata);
     Window_workerPresentBegin();
@@ -1203,6 +1292,14 @@ static void darlingGfxFrameFn(void *window, double dt, void *userdata) {
     if (Panel_isTreeDirty(Frame_getContentPane(hframe)))
         demand = true;
     if (Panel_isTreeDirty(Frame_getScenePane(hframe)))
+        demand = true;
+    // Component re-arm: a component tree mutated since the last latch is
+    // itself demand (the probe reads, the render pass latches — the
+    // Present-On-Demand Law). Global gen means a change in one component
+    // window marks its siblings dirty once; the render pass's lazy latch
+    // collapses that to a single extra present.
+    Component *rootComponent = Frame_getRootComponent(hframe);
+    if (rootComponent && Component_gen() != (*hframe).lastComponentGen)
         demand = true;
     GraphicsClient *client = GraphicsLoop_findClient(GraphicsLoop_default(), window);
     if (client && !(*client).hasPresented)
@@ -1369,6 +1466,16 @@ void Darling_initCompositor(Frame *frame) {
 
     Vk_setPreFrameRenderer((VkPreFrameFn)Darling_preFrame, frame);
     Vk_setFrameRenderer(Darling_renderFrame, frame);
+
+    // Component seam backend (Phase 1): select the unified Graphics row on
+    // the Vk backend so Component_render (via Frame_setRootComponent) records
+    // into the swapchain pass — the one on-screen seam (the Canvas Planes
+    // Law). Safe with zero Component roots anywhere: the legacy Panel/board
+    // seam keeps painting untouched. The row is process-lifetime; do not
+    // re-create it on rebuilds, or the registration is handed to a fresh
+    // object while old row state (bound frames) leaks.
+    VkGraphics_0();
+    Graphics_setGraphics(GRAPHICS_BACKEND_VULKAN);
 
     // Layer hook: COMPOSITED scene targets render through here — a retained
     // offscreen target whose pixels the canvas samples.

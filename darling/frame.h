@@ -35,15 +35,6 @@ typedef enum FrameChromeMode {
 #define FRAME_NAKED                   2
 #define FRAME_BORDERLESS              1
 
-typedef enum FrameVisualEffectMaterial {
-    FRAME_MATERIAL_HUD_WINDOW = 0,
-    FRAME_MATERIAL_SIDEBAR = 1,
-    FRAME_MATERIAL_SELECTION = 2,
-    FRAME_MATERIAL_MENU = 3,
-    FRAME_MATERIAL_POPOVER = 4,
-    FRAME_MATERIAL_FULLSCREEN_UI = 5
-} FrameVisualEffectMaterial;
-
 // SLOT RECORD: FrameLayer (owned by Frame)
 typedef struct FrameLayer {
     uint32_t id;
@@ -88,12 +79,11 @@ typedef struct Frame {
     bool (*onQuitRequested)(struct Frame *frame, void *userData);
     void *quitRequestedUserData;
 
-    bool hasVisualEffect;       // NSVisualEffectView vibrancy enabled
-    int visualEffectMaterial;   // FrameVisualEffectMaterial
-    bool presentsWithTransaction; // CAMetalLayer presentsWithTransaction = YES
+        bool presentsWithTransaction; // CAMetalLayer presentsWithTransaction = YES
     uint32_t presentedFrames;     // Confirmed seam presents since attach (infancy gate)
     uint32_t emptyPresents;       // Consecutive empty seam presents (empty-cap guard)
     uint64_t lastPublishGen;      // Last observed VkLayer publish generation (probe re-arm)
+    uint64_t lastComponentGen;    // Last observed Component generation (component seam demand latch)
 
     int width;
     int height;
@@ -185,7 +175,6 @@ void Frame_setScenePane(Frame *frame, Panel *panel);
 // Caller must ensure the pointer is a live panel-derived type.
 #define Frame_setContentPanel(frame, p) Frame_setContentPane((frame), (Panel*)(p))
 #define Frame_setScenePanel(frame, p)   Frame_setScenePane((frame), (Panel*)(p))
-void Frame_setVisualEffect(Frame *frame, bool enable, int material);
 void Frame_setPresentsWithTransaction(Frame *frame, bool presentsWithTransaction);
 void Frame_setNativeView(Frame *frame, void *nativeView);
 
@@ -224,7 +213,6 @@ void Frame_setFloatingTrafficLights(Frame *frame, bool floating);
 // macOS-only convenience: show/hide all three traffic lights (close, minimize,
 // zoom) at once — forwards to Window_macOS_setTrafficLightButtonVisible.
 void Frame_macos_setTrafficLightVisible(Frame *frame, bool visible);
-void Frame_setBlur(Frame *frame, float blur);
 void Frame_setOpacity(Frame *frame, float opacity);
 void Frame_setTransparent(Frame *frame, bool transparent);
 void Frame_setTransparentBackground(Frame *frame, bool transparent);
@@ -257,8 +245,6 @@ Panel *Frame_getContentPane(const Frame *frame);
 Panel *Frame_getScenePane(const Frame *frame);
 uint32_t Frame_getLayerCount(const Frame *frame);
 FrameLayer *Frame_getLayer(Frame *frame, uint32_t index);
-bool Frame_hasVisualEffect(const Frame *frame);
-int Frame_getVisualEffectMaterial(const Frame *frame);
 bool Frame_isPresentsWithTransaction(const Frame *frame);
 void Frame_getSize(const Frame *frame, int *outWidth, int *outHeight);
 int Frame_getWidth(const Frame *frame);
@@ -271,7 +257,7 @@ int Frame_height(const Frame *frame);
 float Frame_getLiveWidth(const Frame *frame);
 float Frame_getLiveHeight(const Frame *frame);
 // The ONE seam CAMetalLayer resolution (the Single Seam Identity Law):
-// resolves through the blur view's sublayers when visual effect is on, so
+// resolves through the NSVisualEffectView's backing layer sublayers, so
 // the Vulkan surface binding and the resize hook target the SAME layer.
 // nullptr = no seam attached. ARC handoff: the layer is owned by the layer
 // tree; the caller must not retain/release it.

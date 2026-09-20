@@ -14,12 +14,15 @@
 // (*self).absW, (*self).absH) straight to the Graphics seam — no resolve
 // phase, no parent-size threading through paint calls, no stale reads.
 //
-// A Component is a leaf on its own: it has NO children, NO tree, and renders
-// while detached from any container (absolute placement resolves against the
-// (0,0,0,0) root box). Containment is optional BY CONSTRUCTION — an element
-// that does not want to be added is precisely a Component without a
-// Container. Container (the future tree holder) will own Components as
-// children; this class never grows a children array.
+// A Component is a leaf on its own: it renders while detached from any
+// container (absolute placement resolves against the (0,0,0,0) root box),
+// and containment is optional BY CONSTRUCTION — an element that does not
+// want to be added is precisely a Component without a Container. The class
+// DOES own an optional children list (Component_addChild — the tree form):
+// the parent cascades its abs box into each child eagerly (children resolve
+// against the CONTENT box, i.e. abs inset by padding — padding insets
+// children), and Component_render walks the tree in order, handing every
+// node the same ComponentView (active Graphics row + point-to-pixel scale).
 //
 // THE EAGER ABS CASCADE (documented invariant):
 //   1. Every geometry setter (setX/setY/setWidth/setHeight/setLocation/
@@ -41,10 +44,22 @@
 
 struct Component;
 
-// Render hook: requested to draw this component about its absolute rect into
-// the opaque graphics context. backgroundRender runs before
-// foregroundRender. Hooks read ((*self).absX..absH) — always current.
-typedef void (*Component_RenderFn)(struct Component *self, void *graphics,
+// ComponentView — pure-data render context handed to Component_render and
+// every render hook: the active unified Graphics row (never null on the live
+// seam path) plus the point-to-native-pixel scale of the current present
+// (scaleX = drawW / liveW — the seam's single device mapping). Hooks map
+// their eager abs rects through Component_viewMap before drawing.
+typedef struct ComponentView {
+    void *graphics;   // the active Graphics_* row (Graphics_getCurrent())
+    float scaleX;     // points -> native px (drawW / liveW)
+    float scaleY;     // points -> native px (drawH / liveH)
+} ComponentView;
+
+// Render hook: requested to draw this component about its absolute rect.
+// backgroundRender runs before foregroundRender. Hooks read
+// ((*self).absX..absH) — always current — and map into the device pixel
+// space via Component_viewMap(view, ...) before Graphics_seam calls.
+typedef void (*Component_RenderFn)(struct Component *self, const ComponentView *view,
                                    void *userdata);
 
 typedef struct Component {
@@ -122,16 +137,21 @@ Component *Component_0(void);
 
 // Core Functions:
 //   - Component_recompute(self)                : recompute abs from stored parent abs
-//   - Component_setParentAbs(self, px, py, pw, ph) : parent reports its abs box (cascade entry)
-//   - Component_render(self, graphics)         : on-demand: bg then fg hooks (visible only)
+//   - Component_setParentAbs(self, px, py, pw, ph) : parent reports its content box (cascade entry)
+//   - Component_render(self, view)             : on-demand: native bg, hooks, children, border (visible only)
+//   - Component_viewMap(view, ax, ay, aw, ah, *oX, *oY, *oW, *oH) : points -> native px (provably gapless)
 //   - Component_hitTest(self, px, py)          : point-in-abs-rect (visible only)
 //   - Component_getContentRect(self, *oX, *oY, *oW, *oH) : abs content box (abs + padding)
+//   - Component_gen(void)                      : process-wide generation counter (demand re-arm)
 void Component_recompute(Component *self);
 void Component_setParentAbs(Component *self, float px, float py, float pw, float ph);
-bool Component_render(Component *self, void *graphics);
+bool Component_render(Component *self, const ComponentView *view);
+void Component_viewMap(const ComponentView *view, float ax, float ay, float aw, float ah,
+                       float *outX, float *outY, float *outW, float *outH);
 bool Component_hitTest(const Component *self, float pointX, float pointY);
 void Component_getContentRect(const Component *self, float *outX, float *outY,
                               float *outW, float *outH);
+uint64_t Component_gen(void);
 
 // Setters (geometry setters recompute abs eagerly; visual setters do not):
 void Component_setX(Component *self, float x);

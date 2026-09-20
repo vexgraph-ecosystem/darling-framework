@@ -88,9 +88,7 @@ bool Dialog_requestClose(Dialog *dialog);
  *     struct Frame *parentFrame; // Parent frame if this frame is a child dialog (bidirectional tracking)
  *     bool (*onQuitRequested)(struct Frame *frame, void *userData); // Quit-request callback
  *     void *quitRequestedUserData; // User data for the quit-request callback
- *     bool hasVisualEffect; // NSVisualEffectView vibrancy enabled
- *     int visualEffectMaterial; // FrameVisualEffectMaterial
- *     bool presentsWithTransaction; // CAMetalLayer presentsWithTransaction = YES
+  *     bool presentsWithTransaction; // CAMetalLayer presentsWithTransaction = YES
  *     uint32_t presentedFrames; // Confirmed seam presents since attach (infancy gate)
  *     uint32_t emptyPresents; // Consecutive empty seam presents (empty-cap guard)
  *     uint64_t lastPublishGen; // Last observed VkLayer publish generation (probe re-arm)
@@ -569,8 +567,7 @@ void FrameCocoa_attach(Frame *frame) {
         CAMetalLayer *metalLayer = [CAMetalLayer layer];
         metalLayer.name = @"vexgraph.seam";
         if (getenv("ANTI_RESIZE_TRACE") != nullptr)
-            fprintf(stderr, "seam:attach layer=%p vfx=%d\n", (__bridge void*) metalLayer,
-                    (*frame).hasVisualEffect ? 1 : 0);
+            fprintf(stderr, "seam:attach layer=%p vfx=1\n", (__bridge void*) metalLayer);
         // Fixed-buffer model (the single-seam plaster): the seam chain is
         // allocated ONCE at the display's native pixel size, and the window is
         // a top-left CROP of it (kCAGravityTopLeft = non-resizing gravity: the
@@ -615,41 +612,31 @@ void FrameCocoa_attach(Frame *frame) {
         metalLayer.drawableSize = CGSizeMake(bounds.size.width * backingScale,
                                              bounds.size.height * backingScale);
 
-        if ((*frame).hasVisualEffect) {
-            NSVisualEffectView *vfx = [[NSVisualEffectView alloc] initWithFrame:bounds];
-            [vfx setAutoresizingMask:NSViewWidthSizable | NSViewHeightSizable];
-            [vfx setBlendingMode:NSVisualEffectBlendingModeBehindWindow];
-            [vfx setMaterial:(NSVisualEffectMaterial) (*frame).visualEffectMaterial];
-            [vfx setState:NSVisualEffectStateActive];
+        // NSWindow -> NSVisualEffectView -> CAMetalLayer (the Single-Seam Canvas Law).
+        // The NSVisualEffectView is ALWAYS the parent of the seam: even when the
+        // Vulkan seam fully covers it, the view's NSVisualEffectBlendingModeBehindWindow
+        // samples pixels behind the window (title bar, corners, traffic lights), and the
+        // NSVisualEffectMaterialHUDWindow material is the native macOS background for
+        // this chrome. Skipping it (the old !hasVisualEffect path) attached the seam as
+        // the contentView's OWN layer, letting AppKit reset drawableSize to 1x1 and
+        // apply resize-gravity on every live-resize beat (the top/right stretch).
+        // As a sublayer it never touches the canvas geometry or drawable.
+        NSVisualEffectView *vfx = [[NSVisualEffectView alloc] initWithFrame:bounds];
+        [vfx setAutoresizingMask:NSViewWidthSizable | NSViewHeightSizable];
+        [vfx setBlendingMode:NSVisualEffectBlendingModeBehindWindow];
+        [vfx setMaterial:NSVisualEffectMaterialHUDWindow];
+        [vfx setState:NSVisualEffectStateActive];
 
-            // The law's tree: blur view owns its OWN backing layer; the seam
-            // is a CHILD of it (blur -> seam). A view-owned seam
-            // ([vfx setLayer:metalLayer]) hands the canvas to AppKit, which
-            // resets drawableSize to 1x1 and applies resize-gravity on every
-            // live-resize beat — the top/right stretch. Sublayer = AppKit
-            // never touches the canvas geometry or drawable.
-            [vfx setWantsLayer:YES];
-            CALayer *blurLayer = [vfx layer];
-            // The seam layer is the monitor-sized plaster buffer (fixed-buffer
-            // model), so its PARENT must clip: the window's bounds are the
-            // viewport onto that buffer. Without this the buffer draws over
-            // the whole display area the view covers.
-            [blurLayer setMasksToBounds:YES];
-            [blurLayer addSublayer:metalLayer];
-            [contentView addSubview:vfx positioned:NSWindowBelow relativeTo:nil];
-            (*frame).nativeView = (__bridge_retained void*) vfx;
-        } else {
-            [contentView setWantsLayer:YES];
-            if (contentView.layer != nil) {
-                // Clip: the seam is a monitor-sized buffer; the content view's
-                // bounds are the window's viewport onto it (pane of glass).
-                [contentView.layer setMasksToBounds:YES];
-                [contentView.layer insertSublayer:metalLayer atIndex:0];
-            } else {
-                [contentView setLayer:metalLayer];
-            }
-            (*frame).nativeView = (__bridge_retained void*) metalLayer;
-        }
+        [vfx setWantsLayer:YES];
+        CALayer *blurLayer = [vfx layer];
+        // The seam layer is the monitor-sized plaster buffer (fixed-buffer
+        // model), so its PARENT must clip: the window's bounds are the
+        // viewport onto that buffer. Without this the buffer draws over
+        // the whole display area the view covers.
+        [blurLayer setMasksToBounds:YES];
+        [blurLayer addSublayer:metalLayer];
+        [contentView addSubview:vfx positioned:NSWindowBelow relativeTo:nil];
+        (*frame).nativeView = (__bridge_retained void*) vfx;
 
         // Bridge resize hook and WindowServer cadence
         Window_setResizeRenderHook((*frame).window, frameCocoaResizeHook, frame);
