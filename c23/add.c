@@ -1,9 +1,28 @@
 #include "c23/add.h"
 
+#include "annotation/definition.h"
 #include "annotation/overview.h"
 #include "c23/darling_parents.h"
 #include "darling/panel/panel.h"
 #include "oop/type.h"
+
+;;DEFINITION
+/**
+ * ============================================================================
+ * DEFINITION: Add
+ * ============================================================================
+ * Unified attach dispatch for the darling tree: the compile-time _Generic in
+ * c23/add.h picks the caster by child pointer type, this file validates by
+ * class id at runtime, and every attach funnels through one static
+ * addContainer() wrapping Panel_addContainer — no new tree logic. Also hosts
+ * the darling-side type helpers Darling_classOf/kindName, which map to
+ * vexspoke's registry without forking it. Operates on the Panel tree only
+ * (zero struct fields, zero allocation); the parent chain is granted to
+ * vexspoke once at first attach via Type_registerParents so Type_isA walks
+ * stay project-aware. Sits at the R4 attach seam between Panel-derived
+ * widgets and the R2 type registry.
+ * ============================================================================
+ */
 
 ;;OVERVIEW
 /**
