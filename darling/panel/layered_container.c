@@ -2,12 +2,31 @@
 
 #include "darling/panel/panel.h"
 #include "annotation/incomplete.h"
+#include "annotation/definition.h"
 #include "annotation/overview.h"
 #include "nio/mem.h"
 #include "oop/type.h"
 
 #include <stdbool.h>
 #include <stdint.h>
+
+;;DEFINITION
+/**
+ * ============================================================================
+ * DEFINITION: LayeredContainer
+ * ============================================================================
+ * Container that stacks a fixed number of full-window pane slots like glass
+ * panes: each slot with an identity (a Container set into it) allocates one
+ * full-window CAMetalLayer; NULL slots allocate zero layers and are skipped
+ * at render (hidden = zero). Pane slots are index-based with a 32-bit
+ * visibility mask (panes 0..31); setPaneCount clamps the mask and
+ * setPaneVisible flips single bits, both marking the tree dirty. Layer
+ * allocation and detachment land with the layer bridge, not here — this
+ * class owns only the slot accounting. Per the Container-vs-Panel Law it
+ * embeds Panel as its first member and inherits the layout/tree/background
+ * state; constructors cover detached, parent-attached, and N-slot forms.
+ * ============================================================================
+ */
 
 ;;OVERVIEW
 /**
