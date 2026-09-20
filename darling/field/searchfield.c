@@ -9,18 +9,70 @@
 #include "text/text_core.h"
 #include "vulkan/texture/texture.h"
 #include "vulkan/vk.h"
+#include "annotation/definition.h"
 #include "annotation/overview.h"
+
+;;DEFINITION
+/**
+ * ============================================================================
+ * DEFINITION: SearchField
+ * ============================================================================
+ * Search input composite with a search icon, clear button, and shortcut
+ * badge, wrapping an inner Input component and coordinating search events.
+ * The composite paints only its own ordered part pipeline — background
+ * (+ inner layout), image (icon + badge), border — while inner text and
+ * caret paint through the child Input's own pipeline. The Input child is
+ * owned and freed in SearchField_free; shortcut is an owned string;
+ * onSearch(ctx) fires with the query on inner submit. A composite R4 field
+ * widget over the Input base.
+ * ============================================================================
+ */
 
 ;;OVERVIEW
 /**
  * ============================================================================
- * CLASS: SearchField (inherits Panel, LEVEL L2 Behavior)
+ * CLASS: SearchField (inherits Panel)
+ * LEVEL: L2 — Behavior (search input composite)
  * ============================================================================
  * Search input composite with search icon, clear button, and shortcut badge.
  * Wraps an inner Input component and coordinates search events.
  *
  * Ordered part pipeline: background (+ inner layout) -> image (icon + badge)
  * -> border. Inner text/caret paint via the child Input's own pipeline.
+ *
+ * STRUCT FIELDS (Mirroring darling/field/searchfield.h):
+ * ----------------------------------------------------------------------------
+ *   Panel base;                  // Inherited layout, bounds, hierarchy state
+ *   Input *input;                // Owned child Input (text editing)
+ *   char *shortcut;              // Owned shortcut badge string; nullptr = none
+ *   SearchField_SearchFn onSearch; // Search callback; nullptr means none
+ *   void *ctx;                   // Callback context pointer
+ *
+ * FUNCTION REGISTRY:
+ * ----------------------------------------------------------------------------
+ * Constructors:
+ *   - SearchField_0(void)
+ *   - SearchField_1_parent(parent)
+ *   - SearchField_1_placeholder(placeholder)
+ *   - SearchField_2(parent, placeholder)
+ *
+ * Core Functions:
+ *   - SearchField_free(self)
+ *
+ * Setters:
+ *   - SearchField_setText(self, text)
+ *   - SearchField_setPlaceholder(self, placeholder)
+ *   - SearchField_setShortcut(self, shortcut)
+ *   - SearchField_setOnSearch(self, fn)
+ *   - SearchField_setCtx(self, ctx)
+ *
+ * Getters:
+ *   - SearchField_getText(self)
+ *   - SearchField_getPlaceholder(self)
+ *   - SearchField_getShortcut(self)
+ *   - SearchField_getOnSearch(self)
+ *   - SearchField_getCtx(self)
+ *   - SearchField_getInput(self)
  * ============================================================================
  */
 
