@@ -3,7 +3,28 @@
 #include "../c23/darling-type.h"
 #include "nio/mem.h"
 #include "oop/type.h"
+#include "annotation/definition.h"
 #include "annotation/overview.h"
+
+;;DEFINITION
+/**
+ * ============================================================================
+ * DEFINITION: Container
+ * ============================================================================
+ * Layout base of every darling node: position, size, scale, the anchor+pivot
+ * system, percentage placement, z-order, and the visible/enabled/dirty/
+ * clipping flags. Subclasses EMBED this struct as their first member so a
+ * subclass pointer's prefix lines up — pass &(*panel).base to any Container
+ * accessor. Per the Container-vs-Panel Law, Container is the multi-child
+ * layer owner: it holds the layout state that Panel and every darling node
+ * inherit, resolves children against parent bounds (dest-last), and
+ * marks/clears the dirty flag that drives the layout pass; the lockedRoot
+ * flag makes board-root panes immune to setSize/setLocation (Window Board
+ * Root Lock Law).
+ * ============================================================================
+ */
+
+
 
 ;;OVERVIEW
 /**
