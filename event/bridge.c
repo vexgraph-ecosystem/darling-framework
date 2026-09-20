@@ -10,7 +10,28 @@
 #include "input/mouse.h"
 #include "nio/mem.h"
 #include "time/nanotime.h"
+#include "annotation/definition.h"
 #include "annotation/overview.h"
+
+;;DEFINITION
+/**
+ * ============================================================================
+ * DEFINITION: EventBridge
+ * ============================================================================
+ * Procedural handoff module (no struct, no type id) forming the third part
+ * of the input path: vexspoke freezes capture-time timestamps at push, and
+ * EventBridge translates each raw Key/Mouse listener callback into a darling
+ * UI event, firing it synchronously into the Panel tree. Down/up carry
+ * exactNanos end to end so the press moment registers; move/drag are stamped
+ * at delivery since motion is never judgment-critical.
+ *
+ * Focus is explicit only — the app sets the key target via
+ * Darling_bridgeSetFocused(Window) — with auto-focus on click deferred. File
+ * statics hold the bindings: a fixed per-window BridgeSlot table (windowId
+ * 1..7) plus legacy global root/focus singletons. Char composition,
+ * scroll/zoom/delta, and touch gestures are deferred.
+ * ============================================================================
+ */
 
 ;;OVERVIEW
 /**
