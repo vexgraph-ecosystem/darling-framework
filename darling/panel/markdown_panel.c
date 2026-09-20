@@ -5,6 +5,7 @@
 #include "darling/label/rich_label.h"
 #include "darling/panel/panel.h"
 #include "event/pointer.h"
+#include "annotation/definition.h"
 #include "annotation/overview.h"
 #include "input/key.h"
 #include "nio/mem.h"
@@ -18,6 +19,30 @@
 #include <stdint.h>
 #include <stdlib.h>
 #include <string.h>
+
+;;DEFINITION
+/**
+ * ============================================================================
+ * DEFINITION: MarkdownPanel
+ * ============================================================================
+ * Markdown-fed document panel: takes a markdown string, scans it with a
+ * zero-alloc line walker over the vexspoke primitive/string block (index
+ * arithmetic only — no malloc in the scan path), and builds an owned row
+ * list of Label/RichLabel children inside an inner vertical ListContainer —
+ * the row-stacked document model. v1 syntax: hash headings, dash/star
+ * bullets, backtick inline code, fenced blocks, bold and italic spans via
+ * RichText styles; inline markup becomes RichLabel rows only when a Font is
+ * set (RichText layout needs a font for quads), otherwise those lines fall
+ * back to plain Labels with markers stripped. Rebuild is detach-all +
+ * re-layout (a cold path); row payloads and the text block use Memory_alloc
+ * like the rest of the tree, and the font is aliased, never owned.
+ * Document selection aggregates each row's text length into one contiguous
+ * rendered-text byte space (no tag reverse-mapping, no allocation on the
+ * pointer path), and getSelectedText emits the display-accurate bytes the
+ * user sees. Per the Container-vs-Panel Law it embeds Panel as its first
+ * member; rows pair naturally with a ScrollContainer viewport.
+ * ============================================================================
+ */
 
 ;;OVERVIEW
 /**
