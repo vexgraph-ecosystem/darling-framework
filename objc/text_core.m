@@ -10,7 +10,31 @@
 
 #include "annotation/draft.h"
 #include "annotation/intention.h"
+#include "annotation/definition.h"
 #include "annotation/overview.h"
+
+;;DEFINITION
+/**
+ * ============================================================================
+ * DEFINITION: Text_core
+ * ============================================================================
+ * Native CoreText line raster seam: Label's sharp native path asks the
+ * platform to rasterize one UTF-8 line into RGBA8 at native physical pixels
+ * (points * backing scale), while RichLabel stays on the SDF atlas path for
+ * mask/fill effects. The backing scale is override-pinned to the dragged
+ * window's live backingScaleFactor every drag step from frameCocoaResizeHook
+ * (TextCore_setBackingScaleOverride) and cleared on settle, so button / label
+ * / input raster and attachLayers / attachPanes px math track the dragged
+ * window — never mainScreen mid-drag. Per-glyph pen offsets come from the
+ * same shaper that paints (same font fallback chain, ligature flag, and
+ * tracking), so the hit-test table matches the baked highlight exactly; bad
+ * input fails closed with -1, never partial. This is a cold seam only — never
+ * called from tick/render paths — and the headless test clipboard routes
+ * copy/paste through an in-memory buffer so unit tests never touch the real
+ * NSPasteboard. It is the Apple implementation of the text/text_core.h seam;
+ * text/text_core_stub.c is the non-Apple fallback.
+ * ============================================================================
+ */
 
 ;;OVERVIEW
 /**
