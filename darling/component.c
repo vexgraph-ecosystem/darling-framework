@@ -5,6 +5,9 @@
 
 #include "../c23/darling-type.h"
 #include "graphics/graphics.h"
+#include "buffer/buffer.h"
+#include "image/image.h"
+#include "raster/raster_graphics.h"
 #include "lang/rect/rectangle.h"
 #include "paint/brush.h"
 #include "paint/stroke.h"
@@ -35,11 +38,25 @@
  * Component_render takes a ComponentView — the active unified Graphics row
  * plus the point-to-native-pixel scale of the current present — instead of a
  * bare pointer, so the seam renders the tree directly in device pixels and
- * the same view flows to every node and hook. A process-wide generation
+ * the same view flows to every node and hook. The view also carries an
+ * abs-space origin offset: samples map as (abs - origin) * scale, so the
+ * identical currency serves shifted (scroll/pan) views and the retained
+ * sub-pass view of a deferred component's bake. A process-wide generation
  * counter (Component_gen) bumps on every recompute and every visual/content
  * mutation; the compositor latches it per frame to re-arm present demand
  * (the Present-On-Demand Law) when a component tree changes without a
  * board/panel paint.
+ * OPT-IN DEFERRED SUBTREES: a node flagged with Component_setDeferred stops
+ * painting its subtree per frame — the render pass bakes it once into a
+ * retained alpha-first ARGB8 tile (ceil(absW*scale) x ceil(absH*scale)
+ * native px) whenever its mapped size, the view scale, or the generation
+ * counter drifts, then blits the tile with Graphics_drawImage. The bake
+ * swaps the Raster row's framebuffer (RasterGraphics_setFramebuffer),
+ * paints the subtree through a bake view shifted to the node's abs origin,
+ * reads the target back into the Image shadow, and restores the outer
+ * target — so nested deferred children bake into the parent's tile cleanly.
+ * Rows without a live drawImage (Vk/Metal draft today) degrade the subtree
+ * back to inline rendering.
  * ============================================================================
  */
 
@@ -98,6 +115,14 @@
  *   Component_RenderFn backgroundRender; // Stage 0 render hook
  *   Component_RenderFn foregroundRender; // Stage 1 render hook
  *   void *renderUserdata;  // Opaque arg handed to both hooks
+ *   uint8_t deferred;      // Opt-in retained subtree: bake on drift, then blit
+ *   struct Image *retainImage;    // Owned alpha-first ARGB8 artifact blitted by the render pass
+ *   struct Buffer *retainBuffer;  // Owned raster target painted during bake (framebuffer sub-pass)
+ *   uint32_t retainW;      // ceil(absW * viewScaleX), native px, at last bake
+ *   uint32_t retainH;      // ceil(absH * viewScaleY), native px, at last bake
+ *   float retainScaleX;    // Point->px scale at last bake (drift check)
+ *   float retainScaleY;    // Point->px scale at last bake (drift check)
+ *   uint64_t retainGen;    // Component_gen() latched at last bake (content drift check)
  *
  * FUNCTION REGISTRY:
  * ----------------------------------------------------------------------------
@@ -108,12 +133,19 @@
  *   - Component_recompute(self)
  *   - Component_setParentAbs(self, px, py, pw, ph)
  *   - Component_render(self, view)
- *   - Component_viewMap(view, ax, ay, aw, ah, outX, outY, outW, outH)
+ *   - Component_bake(self, view)              : rebuild retain target iff drift (dims/scale/content); true when current
+ *   - Component_viewMap(view, ax, ay, aw, ah, outX, outY, outW, outH) : points -> native px (origin-translated, provably gapless)
  *   - Component_hitTest(self, pointX, pointY)
  *   - Component_getContentRect(self, outX, outY, outW, outH)
  *   - Component_addChild(self, child)
  *   - Component_removeChild(self, child)
  *   - Component_gen(void)
+ *
+ * Private Core Functions: (.c static)
+ *   - touchGen(void)                           : bump the process-wide generation counter
+ *   - contentBox(self, outX, outY, outW, outH) : abs rect inset by padding (children cascade box)
+ *   - renderInline(self, view)                 : the immediate subtree paint (bg, hooks, children, border)
+ *   - renderDeferred(self, view)               : bake-if-dirty then blit the retained tile
  *
  * Setters:
  *   - Component_setX/Y(self, v)
@@ -139,6 +171,7 @@
  *   - Component_setBackgroundRender(self, fn)
  *   - Component_setForegroundRender(self, fn)
  *   - Component_setRenderUserdata(self, userdata)
+ *   - Component_setDeferred(self, deferred)    // opt-in retained subtree (drift-rebaked)
  *
  * Getters:
  *   - Component_getX/Y/Width/Height(self)
@@ -155,6 +188,9 @@
  *   - Component_getRadius/RadiusMode(self)
  *   - Component_getOpacity/Z(self)
  *   - Component_isVisible(self)
+ *   - Component_isDeferred(self)
+ *   - Component_getRetainWidth(self)
+ *   - Component_getRetainHeight(self)
  *   - Component_getParent(self)
  *   - Component_getChildCount(self)
  *   - Component_getChild(self, index)
@@ -250,6 +286,14 @@ Component *Component_0(void) {
     (*self).backgroundRender = nullptr;
     (*self).foregroundRender = nullptr;
     (*self).renderUserdata = nullptr;
+    (*self).deferred = 0;
+    (*self).retainImage = nullptr;
+    (*self).retainBuffer = nullptr;
+    (*self).retainW = 0;
+    (*self).retainH = 0;
+    (*self).retainScaleX = 0.0f;
+    (*self).retainScaleY = 0.0f;
+    (*self).retainGen = 0;
     return self;
 }
 
@@ -352,7 +396,12 @@ void Component_setParentAbs(Component *self, float px, float py, float pw, float
     Component_recompute(self);
 }
 
-bool Component_render(Component *self, const ComponentView *view) {
+// renderInline — the immediate subtree paint: native background fill,
+// background hook, children (each through Component_render, so a deferred
+// child bakes INTO this pass's target — nested bakes swap targets and
+// restore), border stroke, foreground hook. Shared by the non-deferred
+// render path and the deferred bake's sub-pass.
+static bool renderInline(Component *self, const ComponentView *view) {
     if (!self || !(*self).visible)
         return false;
     bool ran = false;
@@ -402,6 +451,128 @@ bool Component_render(Component *self, const ComponentView *view) {
     return ran;
 }
 
+// renderDeferred — the retained path: bake the subtree when its mapped size,
+// view scale, or process-wide generation drifted, then blit the retained
+// tile at the node's mapped rect (1:1 nearest: the target is ceil-mapped at
+// the very same scale). A failed bake (cold row, degenerate extent, OOM)
+// degrades to the inline paint so pixels stay correct.
+static bool renderDeferred(Component *self, const ComponentView *view) {
+    if (!Component_bake(self, view))
+        return renderInline(self, view);
+    if (!(*self).retainImage || !(*self).retainBuffer)
+        return false; // cold guard: bake reports current only with a target
+    Rectangle rect;
+    Component_viewMap(view, (*self).absX, (*self).absY, (*self).absW, (*self).absH,
+                      &rect.x, &rect.y, &rect.width, &rect.height);
+    if (rect.width <= 0.0f || rect.height <= 0.0f)
+        return false;
+    return Graphics_drawImage((*self).retainImage, &rect);
+}
+
+bool Component_render(Component *self, const ComponentView *view) {
+    if (!self || !(*self).visible)
+        return false;
+    // ;;INTENTION("deferred retain needs a live drawImage row: RASTER is live today; Vk/Metal rows draft-false, so the subtree degrades to inline rendering until their samplers land")
+    if ((*self).deferred && view && Graphics_getGraphicsId() == GRAPHICS_BACKEND_RASTER)
+        return renderDeferred(self, view);
+    return renderInline(self, view);
+}
+
+bool Component_bake(Component *self, const ComponentView *view) {
+    if (!self || !view || !(*self).visible)
+        return false;
+    if (Graphics_getGraphicsId() != GRAPHICS_BACKEND_RASTER)
+        return false; // the sub-pass swaps the Raster row's target — cold elsewhere
+    if (!RasterGraphics_getFramebuffer())
+        return false; // no outer target to restore — the swap would orphan the singleton
+
+    // Mapped retain extent: ceil(abs * scale), the gapless tile size. NaN
+    // and infinity fail the comparisons below (cold-strict, no crash paths).
+    float fw = ceilf((*self).absW * (*view).scaleX);
+    float fh = ceilf((*self).absH * (*view).scaleY);
+    if (fw >= (float) UINT32_MAX || fh >= (float) UINT32_MAX)
+        return false;
+    if (!(fw >= 1.0f) || !(fh >= 1.0f))
+        return false; // degenerate extent — nothing to retain
+    uint32_t rw = (uint32_t) fw;
+    uint32_t rh = (uint32_t) fh;
+
+    // Current? Retain is valid when the baked dims, view scale, and content
+    // generation all match — the O(1) demand check (per the Present-On-Demand
+    // Law: the seam repaints on Component_gen drift, so any subtree mutation
+    // lands here as a rebuild, and clean frames skip render entirely).
+    bool current = (*self).retainImage != nullptr && (*self).retainBuffer != nullptr
+        && (*self).retainW == rw && (*self).retainH == rh
+        && (*self).retainScaleX == (*view).scaleX
+        && (*self).retainScaleY == (*view).scaleY
+        && (*self).retainGen == Component_gen();
+    if (current)
+        return true;
+
+    // Rebuild the target pair (cold path, rare): free the old artifacts and
+    // allocate the ceil-mapped raster target + its ARGB8 image shadow.
+    if ((*self).retainBuffer)
+        Buffer_free((*self).retainBuffer);
+    if ((*self).retainImage)
+        Image_free((*self).retainImage);
+    (*self).retainBuffer = nullptr;
+    (*self).retainImage = nullptr;
+    Buffer *buf = Buffer_4(ID_COMPONENT, rw, rh, 4u);
+    Image *img = Image_2(rw, rh);
+    if (buf == nullptr || img == nullptr) {
+        if (buf)
+            Buffer_free(buf);
+        if (img)
+            Image_free(img);
+        return false; // cold-strict: OOM leaves the retain cleared
+    }
+    (*self).retainBuffer = buf;
+    (*self).retainImage = img;
+    (*self).retainW = rw;
+    (*self).retainH = rh;
+    (*self).retainScaleX = (*view).scaleX;
+    (*self).retainScaleY = (*view).scaleY;
+
+    // Sub-pass: swap the Raster row's target to the retain buffer, clear to
+    // transparent, paint the subtree through a bake view that shifts the
+    // origin to this node's abs top-left (children map (abs - origin)*scale
+    // into target device px), then restore the outer target.
+    Buffer *savedFb = RasterGraphics_getFramebuffer();
+    uint32_t savedW = RasterGraphics_getWidth();
+    uint32_t savedH = RasterGraphics_getHeight();
+    if (!RasterGraphics_setFramebuffer(buf, rw, rh))
+        return false; // unexpected swap rejection — cold state untouched below
+    Graphics_clip(nullptr); // the bake sub-pass owns its scissor space
+    Graphics_clear(COMPONENT_COLOR_CLEAR); // transparent base for the tile
+    ComponentView bakeView = {
+        .graphics = (*view).graphics,
+        .scaleX = (*view).scaleX,
+        .scaleY = (*view).scaleY,
+        .originX = (*self).absX,
+        .originY = (*self).absY,
+    };
+    renderInline(self, &bakeView);
+    RasterGraphics_setFramebuffer(savedFb, savedW, savedH);
+    Graphics_clip(nullptr); // ;;INTENTION("bake leaves clip disabled: nothing on the seam uses clip today")
+
+    // Read back the painted target into the alpha-first ARGB8 shadow:
+    // Buffer channels 0=A 1=R 2=G 3=B, image bytes [A,R,G,B].
+    uint8_t *shadow = (*img).rgba;
+    if (shadow) {
+        for (uint32_t y = 0; y < rh; ++y) {
+            for (uint32_t x = 0; x < rw; ++x) {
+                size_t p = ((size_t) y * (size_t) rw + (size_t) x) * 4u;
+                shadow[p + 0u] = (uint8_t) Buffer_getPixel(buf, x, y, 0u);
+                shadow[p + 1u] = (uint8_t) Buffer_getPixel(buf, x, y, 1u);
+                shadow[p + 2u] = (uint8_t) Buffer_getPixel(buf, x, y, 2u);
+                shadow[p + 3u] = (uint8_t) Buffer_getPixel(buf, x, y, 3u);
+            }
+        }
+    }
+    (*self).retainGen = Component_gen();
+    return true;
+}
+
 bool Component_hitTest(const Component *self, float pointX, float pointY) {
     if (!self || !(*self).visible)
         return false;
@@ -432,14 +603,15 @@ void Component_viewMap(const ComponentView *view, float ax, float ay, float aw, 
     float w = aw;
     float h = ah;
     if (view) {
-        // Provably gapless device mapping: floor leading edges, ceil trailing
-        // edges, so adjacent cells never leave a pixel gap and never overlap
-        // across a boundary — the seam's single rounding currency (no drift
-        // vs Board surfaces). A null view maps identity (point space).
-        x0 = floorf(ax * (*view).scaleX);
-        y0 = floorf(ay * (*view).scaleY);
-        float x1 = ceilf((ax + aw) * (*view).scaleX);
-        float y1 = ceilf((ay + ah) * (*view).scaleY);
+        // Provably gapless device mapping: translate (abs - origin), then
+        // floor leading edges, ceil trailing edges, so adjacent cells never
+        // leave a pixel gap and never overlap across a boundary — the seam's
+        // single rounding currency (no drift vs Board surfaces). A null view
+        // maps identity (point space, origin 0).
+        x0 = floorf((ax - (*view).originX) * (*view).scaleX);
+        y0 = floorf((ay - (*view).originY) * (*view).scaleY);
+        float x1 = ceilf((ax + aw - (*view).originX) * (*view).scaleX);
+        float y1 = ceilf((ay + ah - (*view).originY) * (*view).scaleY);
         w = x1 - x0;
         h = y1 - y0;
         if (w < 0.0f)
@@ -749,6 +921,13 @@ void Component_setRenderUserdata(Component *self, void *userdata) {
     touchGen();
 }
 
+void Component_setDeferred(Component *self, bool deferred) {
+    if (!self)
+        return;
+    (*self).deferred = deferred ? 1 : 0;
+    touchGen(); // mode flip drifts the retain: the next bake re-renders the subtree
+}
+
 // GETTERS
 
 float Component_getX(const Component *self) { return self ? (*self).x : 0.0f; }
@@ -836,6 +1015,9 @@ int Component_getRadiusMode(const Component *self) { return self ? (*self).radiu
 float Component_getOpacity(const Component *self) { return self ? (*self).opacity : 1.0f; }
 int Component_getZ(const Component *self) { return self ? (*self).z : 0; }
 bool Component_isVisible(const Component *self) { return self && (*self).visible != 0; }
+bool Component_isDeferred(const Component *self) { return self && (*self).deferred != 0; }
+uint32_t Component_getRetainWidth(const Component *self) { return self ? (*self).retainW : 0u; }
+uint32_t Component_getRetainHeight(const Component *self) { return self ? (*self).retainH : 0u; }
 Component *Component_getParent(const Component *self) { return self ? (*self).parent : nullptr; }
 uint32_t Component_getChildCount(const Component *self) { return self ? (*self).childCount : 0; }
 Component *Component_getChild(const Component *self, uint32_t index) {

@@ -952,7 +952,9 @@ void Darling_renderFrame(void *cmdBuffer, int drawW, int drawH, void *userdata) 
                              (float) ((bg >> 24) & 0xFFu) / 255.0f);
         // One view for the whole tree: the active Graphics row + the live
         // point->px scale (kx/ky from the Single Rounding Currency Law).
-        ComponentView view = {(void*) Graphics_getCurrent(), kx, ky};
+        // Origin stays zero — the root tree lives in window point space.
+        ComponentView view = { .graphics = (void*) Graphics_getCurrent(),
+                               .scaleX = kx, .scaleY = ky };
         Component_render(rootComponent, &view);
         Graphics_end();
         (*rframe).lastComponentGen = Component_gen();

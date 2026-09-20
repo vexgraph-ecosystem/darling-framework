@@ -41,18 +41,41 @@
 // Coordinate convention: x/y on right/bottom-anchored nodes is the EDGE
 // INSET (positive = inward from the anchored edge); margin applies additively
 // to the resolved placement, identical to Container_resolve.
+//
+// DEFERRED (opt-in retained subtree): a node flagged via Component_setDeferred
+// stops painting its subtree inline; the render pass bakes it once into an
+// offscreen retain target (ceil(absW*scale) x ceil(absH*scale) native px,
+// alpha-first ARGB8) whenever the mapped size, the view scale, or the
+// process-wide generation counter drift, then blits the retained tile with
+// Graphics_drawImage — one subtree paint per mutation instead of per frame.
+// The bake paints through a bake view that shifts the origin to the node's
+// abs top-left, so children map to (abs - origin) * scale inside the target.
+// The retained path requires the active row's drawImage to be live (RASTER
+// today; Vk/Metal draft rows degrade the subtree back to inline rendering
+// — see Component_render). Hooks run at bake time, never per blit.
 
 struct Component;
+
+// Forward declarations of graphvex artifact types held by the deferred
+// retain (full structs live in graphvex `buffer/buffer.h` / `image/image.h`).
+struct Image;   // alpha-first ARGB8 CPU shadow (retained artifact)
+struct Buffer;  // multi-channel raster target (retained paint surface)
 
 // ComponentView — pure-data render context handed to Component_render and
 // every render hook: the active unified Graphics row (never null on the live
 // seam path) plus the point-to-native-pixel scale of the current present
-// (scaleX = drawW / liveW — the seam's single device mapping). Hooks map
-// their eager abs rects through Component_viewMap before drawing.
+// (scaleX = drawW / liveW — the seam's single device mapping) plus an
+// abs-space translation (originX/originY): a sample point is
+// (abs - origin) * scale, so shifted views (scroll/pan) and retained
+// sub-pass views (deferred component baking with the node's own abs origin)
+// reuse the exact same viewMap currency. Hooks map their eager abs rects
+// through Component_viewMap before drawing.
 typedef struct ComponentView {
     void *graphics;   // the active Graphics_* row (Graphics_getCurrent())
     float scaleX;     // points -> native px (drawW / liveW)
     float scaleY;     // points -> native px (drawH / liveH)
+    float originX;    // abs-space translation, points: sample = (abs - origin) * scale
+    float originY;    // abs-space translation, points
 } ComponentView;
 
 // Render hook: requested to draw this component about its absolute rect.
@@ -97,6 +120,15 @@ typedef struct Component {
     Component_RenderFn backgroundRender; // stage 0
     Component_RenderFn foregroundRender; // stage 1
     void *renderUserdata;       // opaque arg handed to both hooks
+    // --- Deferred render (opt-in retained subtree) ---
+    uint8_t deferred;           // opt-in: bake the subtree into a retained target on drift, then blit
+    struct Image *retainImage;  // owned alpha-first ARGB8 artifact blitted by the render pass (null = none)
+    struct Buffer *retainBuffer;// owned raster target painted during bake (framebuffer-swap sub-pass)
+    uint32_t retainW;           // ceil(absW * viewScaleX), native px, at last bake
+    uint32_t retainH;           // ceil(absH * viewScaleY), native px, at last bake
+    float retainScaleX;         // point->px scale at last bake (drift check)
+    float retainScaleY;         // point->px scale at last bake (drift check)
+    uint64_t retainGen;         // Component_gen() latched at last bake (content drift check)
 } Component;
 
 // Origin: the parent container's coordinate zero-point and axis direction (4 corners).
@@ -139,6 +171,7 @@ Component *Component_0(void);
 //   - Component_recompute(self)                : recompute abs from stored parent abs
 //   - Component_setParentAbs(self, px, py, pw, ph) : parent reports its content box (cascade entry)
 //   - Component_render(self, view)             : on-demand: native bg, hooks, children, border (visible only)
+//   - Component_bake(self, view)               : deferred: rebuild retain target iff drift (dims/scale/content); true when current
 //   - Component_viewMap(view, ax, ay, aw, ah, *oX, *oY, *oW, *oH) : points -> native px (provably gapless)
 //   - Component_hitTest(self, px, py)          : point-in-abs-rect (visible only)
 //   - Component_getContentRect(self, *oX, *oY, *oW, *oH) : abs content box (abs + padding)
@@ -146,6 +179,7 @@ Component *Component_0(void);
 void Component_recompute(Component *self);
 void Component_setParentAbs(Component *self, float px, float py, float pw, float ph);
 bool Component_render(Component *self, const ComponentView *view);
+bool Component_bake(Component *self, const ComponentView *view);
 void Component_viewMap(const ComponentView *view, float ax, float ay, float aw, float ah,
                        float *outX, float *outY, float *outW, float *outH);
 bool Component_hitTest(const Component *self, float pointX, float pointY);
@@ -184,6 +218,7 @@ Component *Component_getChild(const Component *self, uint32_t index);
 void Component_setBackgroundRender(Component *self, Component_RenderFn fn);
 void Component_setForegroundRender(Component *self, Component_RenderFn fn);
 void Component_setRenderUserdata(Component *self, void *userdata);
+void Component_setDeferred(Component *self, bool deferred);   // opt-in retained subtree (drift-rebaked)
 
 // Getters (nullptr-safe defaults):
 float Component_getX(const Component *self);
@@ -213,6 +248,9 @@ int Component_getRadiusMode(const Component *self);
 float Component_getOpacity(const Component *self);
 int Component_getZ(const Component *self);
 bool Component_isVisible(const Component *self);
+bool Component_isDeferred(const Component *self);             // deferred flag
+uint32_t Component_getRetainWidth(const Component *self);     // retain tile px (ceil(absW*scaleX))
+uint32_t Component_getRetainHeight(const Component *self);    // retain tile px (ceil(absH*scaleY))
 Component *Component_getParent(const Component *self);
 Component_RenderFn Component_getBackgroundRender(const Component *self);
 Component_RenderFn Component_getForegroundRender(const Component *self);
