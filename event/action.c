@@ -1,6 +1,7 @@
 #include "event/action.h"
 
 #include "darling/panel/panel.h"
+#include "annotation/definition.h"
 #include "annotation/overview.h"
 #include "nio/mem.h"
 #include "oop/type.h"
@@ -8,6 +9,25 @@
 #include <stdbool.h>
 #include <stdint.h>
 #include <string.h>
+
+;;DEFINITION
+/**
+ * ============================================================================
+ * DEFINITION: ActionEvent
+ * ============================================================================
+ * Transient semantic action message for button presses, menu picks, and
+ * dialog confirms: a source panel, a numeric action id, and an owned command
+ * string (e.g. "menu:file:open"). Not a node and never attachable — central
+ * wiring delivers it through the Panel tree, where consume() short-circuits
+ * the bubble walk.
+ *
+ * The event is arena-allocated through Memory_alloc with the
+ * TYPE_ACTION_EVENT_SINGLETON type id; the command string is owned by the
+ * event and released by ActionEvent_free, which also returns the event to
+ * the arena. nanos is a plain settable timestamp (clock wiring is behavior
+ * phase).
+ * ============================================================================
+ */
 
 ;;OVERVIEW
 /**
