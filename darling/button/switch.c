@@ -1,6 +1,7 @@
 #include "darling/button/switch.h"
 
 #include "darling/panel/panel.h"
+#include "annotation/definition.h"
 #include "annotation/overview.h"
 #include "event/pointer.h"
 #include "nio/mem.h"
@@ -8,6 +9,20 @@
 
 #include <stdbool.h>
 #include <stdint.h>
+
+;;DEFINITION
+/**
+ * ============================================================================
+ * DEFINITION: Switch
+ * ============================================================================
+ * Panel shell for an on/off toggle switch: a boolean state, track and knob
+ * colors, and a change callback that fires whenever the state flips. Toggle
+ * routes through setOn so the callback always fires on a real flip; pointer
+ * handling flips state on a PTR_UP inside the track bounds. A leaf R4 widget
+ * with no owned resources beyond the embedded Panel base — heap-allocated once
+ * at construction, zero steady-state allocation.
+ * ============================================================================
+ */
 
 ;;OVERVIEW
 /**
