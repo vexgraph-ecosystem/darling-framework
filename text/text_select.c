@@ -2,7 +2,28 @@
 
 #include <stddef.h>
 
+#include "annotation/definition.h"
 #include "annotation/overview.h"
+
+;;DEFINITION
+/**
+ * ============================================================================
+ * DEFINITION: TextSelect
+ * ============================================================================
+ * Shared text-highlight part embedded by value in every text-handling
+ * container (Label, RichLabel, MarkdownPanel) so all three behave
+ * identically: DOWN anchors, DRAG moves only the active edge (backward then
+ * forward past the anchor selects exactly [anchor, active] — never a rolling
+ * union), UP orders and COMMITS a nonzero range as the new fixed selection
+ * (or collapses a plain click and clears entirely), PTR_CANCEL clears. The
+ * part stores byte offsets only — geometry-to-index mapping stays in the
+ * owning class (its charIndexAt hands the part indices), and the owning
+ * class renders the resulting span onto its own highlight raster. TextSelect
+ * is plain state: it never allocates, never touches panels, windows, or the
+ * arena, and never blocks — the hot-path contract is one nullptr guard, and
+ * ordered span outputs are dest-last per the Dest-Last Law.
+ * ============================================================================
+ */
 
 ;;OVERVIEW
 /**
