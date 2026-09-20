@@ -1,6 +1,7 @@
 #include "darling/panel/richtext_panel.h"
 
 #include "darling/panel/panel.h"
+#include "annotation/definition.h"
 #include "annotation/overview.h"
 #include "nio/mem.h"
 #include "oop/type.h"
@@ -9,6 +10,25 @@
 #include <stdbool.h>
 #include <stddef.h>
 #include <stdint.h>
+
+;;DEFINITION
+/**
+ * ============================================================================
+ * DEFINITION: RichTextPanel
+ * ============================================================================
+ * Document panel aliasing a caller-owned RichText source — the styled-span
+ * model: setters drive the real RichText_setString/setStyle/layout
+ * pipeline, and layout is never reimplemented here. setSource and
+ * setMaxWidth re-run RichText_layout on the aliased source
+ * (relayout-on-attach) and resize the panel height to the laid-out height;
+ * contentHeight exposes that height for ScrollContainer pairing. The source
+ * is aliased, never owned or freed (RichTextPanel_free only clears the
+ * pointer and frees the panel itself); maxWidth clamps to >= 0. Per the
+ * Container-vs-Panel Law it embeds Panel as its first member and inherits
+ * the layout/tree/background state, with symmetric getters/setters over
+ * the two state fields.
+ * ============================================================================
+ */
 
 ;;OVERVIEW
 /**
