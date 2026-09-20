@@ -1,8 +1,23 @@
 #include "darling/color/colordialog.h"
 
+#include "annotation/definition.h"
 #include "annotation/overview.h"
 #include <stdlib.h>
 #include <string.h>
+
+;;DEFINITION
+/**
+ * ============================================================================
+ * DEFINITION: ColorDialog
+ * ============================================================================
+ * Modal color picker frame inheriting Dialog: hosts a packed 0xAARRGGBB
+ * selection with an HSV mirror, optional alpha editing, and a live change
+ * callback fired on every setColor. Heap-allocated via calloc with
+ * Dialog_init base construction; free tears down the Dialog base before
+ * releasing the struct. A concrete Dialog subclass in the R4 modal family
+ * alongside InputDialog, OptionDialog, and FileDialog.
+ * ============================================================================
+ */
 
 ;;OVERVIEW
 /**
