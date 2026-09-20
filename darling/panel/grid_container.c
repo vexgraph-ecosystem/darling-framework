@@ -1,5 +1,6 @@
 #include "darling/panel/grid_container.h"
 
+#include "annotation/definition.h"
 #include "annotation/overview.h"
 #include "darling/panel/panel.h"
 #include "nio/mem.h"
@@ -9,6 +10,28 @@
 #include <stddef.h>
 #include <stdint.h>
 #include <string.h>
+
+;;DEFINITION
+/**
+ * ============================================================================
+ * DEFINITION: GridContainer
+ * ============================================================================
+ * Excel-core grid layout: fixed or auto rows x cols of Panel* cell slots
+ * with uniform gaps, optional frozen header counts, and per-row height
+ * overrides (-1 = auto). Cells live ONLY in the row-major slot array —
+ * never in the embedded base's child list — so an empty cell is nullptr
+ * and skipped in layout; the grid auto-grows on setCell past the edge via
+ * an exact-size row-major remap (Memory_alloc, zero steady-state
+ * allocation in the layout pass). Detach-only: overwriting or clearing a
+ * slot drops the old pointer without freeing it. The layout pass sizes
+ * each column to its widest child and each row to its tallest child unless
+ * a row override is set, then stacks cells top-left into their cell rects
+ * (no stretch in v1) and wraps the grid's own size around the total.
+ * Selection/editing lives above (a GridView controller later), not here.
+ * Per the Container-vs-Panel Law it embeds Panel as its first member;
+ * frozen header rows/cols are honored by a wrapping ScrollContainer.
+ * ============================================================================
+ */
 
 ;;OVERVIEW
 /**
