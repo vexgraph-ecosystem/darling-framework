@@ -3,9 +3,27 @@
 #include <string.h>
 
 #include "annotation/incomplete.h"
+#include "annotation/definition.h"
 #include "annotation/overview.h"
 #include "nio/mem.h"
 #include "oop/type.h"
+
+;;DEFINITION
+/**
+ * ============================================================================
+ * DEFINITION: Plot
+ * ============================================================================
+ * Data-first chart embedding Panel: borrowed vexspoke float buffers (xs/ys)
+ * rendered in a ranged, colored, labeled frame with grid/axes/legend toggles
+ * and an optional pick callback. The data buffers are strictly borrowed —
+ * Plot never owns, copies, or frees them; the caller keeps them alive while
+ * attached. Owned state is limited to the title/xlabel/ylabel strings (arena
+ * copies) plus range, color, and visibility flags; Plot_autorange recomputes
+ * ranges from the data on demand and Plot_hitPick maps a point to a sample
+ * index. The chart is a leaf display node in the R4 stack, sibling to the
+ * label family.
+ * ============================================================================
+ */
 
 ;;OVERVIEW
 /**
