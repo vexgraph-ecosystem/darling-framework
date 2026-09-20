@@ -1,7 +1,25 @@
 #include "render/raster.h"
 
 #include <stdio.h>
+#include "annotation/definition.h"
 #include "annotation/overview.h"
+
+;;DEFINITION
+/**
+ * ============================================================================
+ * DEFINITION: Raster
+ * ============================================================================
+ * The software rasterizer — pixels before Vulkan: pure painters over any
+ * 4-channel Buffer (ColorBuffer layout: R,G,B,A per pixel), clipped to
+ * bounds, zero-alloc, no retained state. Every function takes its target
+ * buffer first, geometry/colors after — dest-last is reserved for outputs,
+ * and here the buffer IS both canvas and destination of record. All geometry
+ * is clipped to the buffer bounds per the Forward Rendering & Bounded Surface
+ * Law: nothing scribbles outside, so the forward-render scissor path can
+ * trust each painter to stay inside its bounded surface. The local RGBA
+ * helper is a stack-only packed pixel value with no behavior of its own.
+ * ============================================================================
+ */
 
 ;;OVERVIEW
 /**
