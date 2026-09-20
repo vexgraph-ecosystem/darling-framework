@@ -19,8 +19,24 @@
 | **Living Darling Docs Law (Zero Drift Between Code and `_docs/darling.md`)** | R4 UI Toolkit | Mandatory for `darling-framework` |
 | **Panel Gravity Law** | R4 UI Toolkit | Mandatory for `darling-framework` |
 | **Window Decoupling Law (a Window is just a Window)** | R4 UI Toolkit | Mandatory for `darling-framework` |
+| **Forward Rendering & Bounded Surface Law** | R4 UI Toolkit | Mandatory for `darling-framework` |
 
 ## 2. Exclusive Repo-Local Laws (FULL PROSE RESTATEMENT)
+
+### Forward Rendering & Bounded Surface Law (Virtual Geometry vs Physical Allocation)
+
+#### Definition:
+A container, canvas, or panel's logical coordinate space is completely decoupled from its physical surface memory allocation. A panel may occupy arbitrary logical extents (e.g. 100,000 x 100,000 px for virtual canvases, huge document scrolls, or infinite layout nodes). Physical memory allocation is strictly bounded to the visible screen/viewport bounds (viewportW * viewportH * 4 bytes). Rendering is strictly forward: visible primitives are scissored and forward-rendered into the active target during the paint pass, rather than allocating intermediate deferred textures for off-screen extents.
+
+#### The Why:
+Allocating full-extent textures for large or virtual panels exhausts GPU memory instantly (a 100,000 px surface would require gigabytes of VRAM). Virtual panels are pure mathematical metadata; physical memory exists only for what the user can physically see on display hardware.
+
+#### The Rule:
+1. **Logical Scale Invariant:** Panel coordinates (x, y, w, h) scale to arbitrary positive dimensions without triggering proportional texture allocations.
+2. **Viewport Bounded Allocation:** GPU backing buffers (`IOSurface` or swapchain images) never exceed window or viewport dimensions * backing scale factor.
+3. **Forward Clipped Paint:** Primitives intersecting the viewport scissor rect render forward directly into the canvas; off-screen elements are culled before draw submission.
+
+---
 
 ### Window Board Root Lock Law (Dimension Override Law)
 
