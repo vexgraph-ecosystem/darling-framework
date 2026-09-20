@@ -2,10 +2,26 @@
 
 #include <math.h>
 
+#include "annotation/definition.h"
 #include "annotation/overview.h"
 #include "event/pointer.h"
 #include "nio/mem.h"
 #include "oop/type.h"
+
+;;DEFINITION
+/**
+ * ============================================================================
+ * DEFINITION: Slider
+ * ============================================================================
+ * Linear value track with an optional second range thumb and change callback.
+ * Embeds a Panel for layout and hierarchy; the struct is arena-allocated with
+ * zero owned heap. Values clamp to [min,max], step drives keyboard nudges,
+ * vertical/showValue/range flip presentation, and fill/knob carry packed
+ * colors. Pointer handling maps local coordinates to the track fraction; the
+ * borrowed onChange(ctx) callback fires on value changes. A leaf R4 field
+ * widget with symmetric getters/setters.
+ * ============================================================================
+ */
 
 ;;OVERVIEW
 /**
