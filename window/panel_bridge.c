@@ -14,7 +14,32 @@
 #include "darling/scene/scene.h"
 #include "vulkan/vk_layer.h"
 #include "window/window.h"
+#include "annotation/definition.h"
 #include "annotation/overview.h"
+
+;;DEFINITION
+/**
+ * ============================================================================
+ * DEFINITION: Panel_bridge
+ * ============================================================================
+ * Pure-C bridge for Metal pane operations between the darling panel tree and
+ * the OS window/Metal stack. The layer model (front to back) is: the Frame's
+ * seam canvas — the window's SINGLE on-screen CAMetalLayer — composites the
+ * two retained offscreen board images in z-order (content top, scene bottom)
+ * per the Window Compositing Layer Order Law; DIRECT scenes render into their
+ * own VkPane chains; COMPOSITED scenes live inside the content board pass.
+ * Classification-driven retained flight targets follow the Immediate vs
+ * Retained Element Model: a depth-1 child owns a retained offscreen VkLayer
+ * flight target ONLY when its subtree contains retained-output (RR) content;
+ * all-immediate / retained-texture subtrees paint INLINE into the board pass
+ * — zero targets, zero copies. Boards track the drawable every drag step
+ * (the Native Pixel Law, px = lround(rect * override-pinned
+ * TextCore_backingScale) from live points) with idle-gated resize per the
+ * Pane-of-Glass Law, and children are iterated via Panel_childCount per the
+ * Dynamic Scalability & Anti-Hardcoding Law. The bridge owns no struct — it
+ * is procedural glue over Panel, Frame, VkLayer, and PanelCocoa.
+ * ============================================================================
+ */
 
 ;;OVERVIEW
 /**
