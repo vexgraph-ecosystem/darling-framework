@@ -2,10 +2,25 @@
 
 #include <string.h>
 
+#include "annotation/definition.h"
 #include "annotation/overview.h"
 #include "event/pointer.h"
 #include "nio/mem.h"
 #include "oop/type.h"
+
+;;DEFINITION
+/**
+ * ============================================================================
+ * DEFINITION: RadioGroup
+ * ============================================================================
+ * Single-choice option list holding owned label strings and a select hook.
+ * Option storage allocates copies on add and frees them on clear/free — the
+ * only heap traffic in the class, confined to cold edits. RadioGroup_select
+ * enforces mutual exclusion and fires onSelect(ctx); RadioGroup_handlePointer
+ * divides panel bounds across options by orientation and selects the clicked
+ * option on PTR_UP. A leaf R4 field widget with symmetric getters/setters.
+ * ============================================================================
+ */
 
 ;;OVERVIEW
 /**
