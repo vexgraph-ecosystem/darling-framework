@@ -1,9 +1,26 @@
 #include "darling/field/checkbox.h"
 
+#include "annotation/definition.h"
 #include "annotation/overview.h"
 #include "event/pointer.h"
 #include "nio/mem.h"
 #include "oop/type.h"
+
+;;DEFINITION
+/**
+ * ============================================================================
+ * DEFINITION: Checkbox
+ * ============================================================================
+ * Boolean toggle with an indeterminate tri-state flag and a change callback.
+ * Embeds a Panel for layout, bounds, and hierarchy state; the whole struct is
+ * arena-allocated via Memory_alloc(TYPE_CHECKBOX_SINGLETON) with zero owned
+ * heap, so teardown is the arena reset. Pointer UP inside the box toggles
+ * checked, clears indeterminate, marks the container dirty, and fires the
+ * borrowed onChange(ctx) callback. A leaf R4 field widget beside Slider, Knob,
+ * and RadioGroup, with symmetric getters/setters and zero steady-state
+ * allocation.
+ * ============================================================================
+ */
 
 ;;OVERVIEW
 /**
