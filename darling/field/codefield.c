@@ -10,12 +10,32 @@
 #include "text/text_core.h"
 #include "vulkan/texture/texture.h"
 #include "vulkan/vk.h"
+#include "annotation/definition.h"
 #include "annotation/overview.h"
+
+;;DEFINITION
+/**
+ * ============================================================================
+ * DEFINITION: CodeField
+ * ============================================================================
+ * Code editor composite that inherits Panel and owns a child Textarea editor
+ * configured for monospace source code, plus a line-number gutter and an
+ * active-line indicator. The composite paints only its own ordered part
+ * pipeline — background (gutter fill + divider + inner layout), text (line
+ * numbers + active marker), border, foreground — while code text, selection
+ * highlight, and caret paint through the child Textarea's own pipeline
+ * (composite != render). The editor pointer is owned and freed in
+ * CodeField_free; gutter/color fields are plain scalars with symmetric
+ * getters/setters. onChange(ctx) fires through the child editor's change hook,
+ * marking the composite dirty.
+ * ============================================================================
+ */
 
 ;;OVERVIEW
 /**
  * ============================================================================
- * CLASS: CodeField (inherits Panel, LEVEL L2 Behavior)
+ * CLASS: CodeField (inherits Panel)
+ * LEVEL: L2 — Behavior (code editor composite)
  * ============================================================================
  * Code editor widget with line number gutter and active line indicator.
  * Wraps a Textarea editor configured for monospace source code.
@@ -25,6 +45,46 @@
  * foreground (reserved: loc text / buttons / highlight). Code text, selection
  * highlight, and caret paint via the child Textarea's own pipeline — the seam
  * never re-invokes them here (composite != render).
+ *
+ * STRUCT FIELDS (Mirroring darling/field/codefield.h):
+ * ----------------------------------------------------------------------------
+ *   Panel base;                  // Inherited layout, bounds, hierarchy state
+ *   Textarea *editor;            // Owned child editor (monospace text)
+ *   float gutterWidth;           // Line-number gutter width in px
+ *   uint32_t gutterBackground;   // Gutter fill color, packed 0xAARRGGBB
+ *   uint32_t gutterTextColor;    // Line-number text color, packed 0xAARRGGBB
+ *   uint32_t activeLineColor;    // Active-line marker color, packed 0xAARRGGBB
+ *   CodeField_ChangeFn onChange; // Edit callback; nullptr means none
+ *   void *ctx;                   // Callback context pointer
+ *
+ * FUNCTION REGISTRY:
+ * ----------------------------------------------------------------------------
+ * Constructors:
+ *   - CodeField_0(void)
+ *   - CodeField_1_parent(parent)
+ *   - CodeField_2(parent, initialCode)
+ *
+ * Core Functions:
+ *   - CodeField_free(self)
+ *
+ * Setters:
+ *   - CodeField_setText(self, code)
+ *   - CodeField_setGutterWidth(self, width)
+ *   - CodeField_setGutterBackground(self, color)
+ *   - CodeField_setGutterTextColor(self, color)
+ *   - CodeField_setActiveLineColor(self, color)
+ *   - CodeField_setOnChange(self, fn)
+ *   - CodeField_setCtx(self, ctx)
+ *
+ * Getters:
+ *   - CodeField_getText(self)
+ *   - CodeField_getGutterWidth(self)
+ *   - CodeField_getGutterBackground(self)
+ *   - CodeField_getGutterTextColor(self)
+ *   - CodeField_getActiveLineColor(self)
+ *   - CodeField_getOnChange(self)
+ *   - CodeField_getCtx(self)
+ *   - CodeField_getEditor(self)
  * ============================================================================
  */
 
