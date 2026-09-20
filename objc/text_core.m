@@ -24,7 +24,7 @@
  * mask/fill effects. The backing scale is override-pinned to the dragged
  * window's live backingScaleFactor every drag step from frameCocoaResizeHook
  * (TextCore_setBackingScaleOverride) and cleared on settle, so button / label
- * / input raster and attachLayers / attachPanes px math track the dragged
+ * / input raster and retained-layer px math track the dragged
  * window — never mainScreen mid-drag. Per-glyph pen offsets come from the
  * same shaper that paints (same font fallback chain, ligature flag, and
  * tracking), so the hit-test table matches the baked highlight exactly; bad

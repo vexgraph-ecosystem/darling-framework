@@ -54,7 +54,7 @@ typedef struct TextStyleDescriptor {
 // For active-mode currentWidth/pointWidth, combine with DisplayInfo on top.
 // During a live-resize drag the frame hook pins this seam to the window's
 // live backingScaleFactor via TextCore_setBackingScaleOverride, so button /
-// label / input raster and attachLayers / attachPanes px math track the
+// label / input raster and retained-layer px math track the
 // dragged window — never [[NSScreen mainScreen]] mid-drag. Cleared on settle.
 float TextCore_backingScale(void);
 
