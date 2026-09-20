@@ -1,12 +1,29 @@
 #include "event/focus.h"
 
 #include "darling/panel/panel.h"
+#include "annotation/definition.h"
 #include "annotation/overview.h"
 #include "nio/mem.h"
 #include "oop/type.h"
 
 #include <stdbool.h>
 #include <stdint.h>
+
+;;DEFINITION
+/**
+ * ============================================================================
+ * DEFINITION: FocusEvent
+ * ============================================================================
+ * Transient focus message for keyboard focus gain/loss: the target panel,
+ * the panel on the opposite side of the move, and the gained/lost direction.
+ * Not a node and never attachable — central wiring delivers it through the
+ * Panel tree, where consume() short-circuits the bubble walk.
+ *
+ * Arena-allocated through Memory_alloc with the TYPE_FOCUS_EVENT_SINGLETON
+ * type id; target and opposite are borrowed Panel references, never owned.
+ * nanos is a plain settable timestamp (clock wiring is behavior phase).
+ * ============================================================================
+ */
 
 ;;OVERVIEW
 /**
