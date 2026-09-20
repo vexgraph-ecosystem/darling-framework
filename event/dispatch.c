@@ -13,6 +13,7 @@
 #include "c23/darling-type.h"
 #include "lang/vec4.h"
 #include "annotation/incomplete.h"
+#include "annotation/definition.h"
 #include "annotation/overview.h"
 #include "nio/mem.h"
 #include "oop/type.h"
@@ -24,6 +25,27 @@
 #ifndef ID_SCROLLBAR
 #define ID_SCROLLBAR 0x009Fu
 #endif
+
+;;DEFINITION
+/**
+ * ============================================================================
+ * DEFINITION: EventDispatch
+ * ============================================================================
+ * Procedural event delivery module (no struct, no type id) that walks the
+ * Panel tree with seven fire functions, one per event family. Pointer and
+ * key delivery are implemented against the Pkg 1 contract — reverse-child-
+ * order hit-test walk, target-local coordinates, weak-extern type dispatch
+ * to widget handlePointer/handleKey handlers, capture routing for drags,
+ * hover ENTER/LEAVE tracking, and focus assignment on focusable kinds —
+ * while focus/action/value/tree/gesture bodies remain stubs until their
+ * behavior pass lands.
+ *
+ * Consumed short-circuits: an already-consumed event is dropped on entry and
+ * no further delivery step runs once consumed is set. File statics hold the
+ * capture target, hovered panel, and focused panel; widgets never walk the
+ * tree.
+ * ============================================================================
+ */
 
 ;;OVERVIEW
 /**
