@@ -1,6 +1,7 @@
 #include "darling/button/button.h"
 
 #include "darling/panel/panel.h"
+#include "annotation/definition.h"
 #include "annotation/overview.h"
 #include "event/pointer.h"
 #include "nio/mem.h"
@@ -13,6 +14,22 @@
 #include <stdint.h>
 #include <stdlib.h>
 #include <string.h>
+
+;;DEFINITION
+/**
+ * ============================================================================
+ * DEFINITION: Button
+ * ============================================================================
+ * Panel shell for a pressable button: an owned label copy, a borrowed font
+ * handle, per-state colors (idle/hover/pressed), corner radius and border, a
+ * press callback, and pointer event handling. Paint is a three-stage pipeline
+ * (background -> text -> border) registered on the Panel base at construction,
+ * with the label quad cached in an owned GPU raster texture that re-rasters
+ * only when dirty — zero steady-state allocation on the paint path. State
+ * colors are packed 0xAARRGGBB; disabled buttons are non-interactive. Composes
+ * the R4 Panel tree with the R3 font/texture stack.
+ * ============================================================================
+ */
 
 ;;OVERVIEW
 /**
