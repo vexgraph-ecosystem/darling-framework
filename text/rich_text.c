@@ -5,7 +5,27 @@
 #include <stdlib.h>
 #include <string.h>
 #include <stdio.h>
+#include "annotation/definition.h"
 #include "annotation/overview.h"
+
+;;DEFINITION
+/**
+ * ============================================================================
+ * DEFINITION: RichText
+ * ============================================================================
+ * Styled rich-text layout model: a raw UTF-8 string plus a style dictionary,
+ * a shaped run list, and laid-out glyph quads rendered through the SDF atlas
+ * path. The struct is arena-allocated (Memory_alloc) and owns its arrays;
+ * styles, runs, and quads grow exponentially on demand (the Dynamic
+ * Scalability & Anti-Hardcoding Law — no artificial ceilings), and
+ * RichText_free returns every owned allocation to the arena. Style layers
+ * merge CSS-cascade style (mergeStyle) into computed per-run styles, and
+ * layout produces the quad stream plus the last laid-out width/height under
+ * the WRAP_NONE/WORD/CHAR wrap policy. Setters validate at least as strictly
+ * as getters per the Cold-Strict, Hot-Minimal Validation Law (null/negative
+ * ids are rejected, never dereferenced).
+ * ============================================================================
+ */
 
 ;;OVERVIEW
 /**
