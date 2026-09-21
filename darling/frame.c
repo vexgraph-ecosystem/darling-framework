@@ -575,7 +575,7 @@ void Frame_present(Frame *frame) {
         Frame_platformSyncTransaction(frame);
 }
 
-static void relayoutSubtree(Panel *parent, float parentW, float parentH) {
+static void relayoutSubtree(Panel *parent, float parentX, float parentY, float parentW, float parentH) {
     if (!parent || parentW <= 0.0f || parentH <= 0.0f)
         return;
 
@@ -597,8 +597,9 @@ static void relayoutSubtree(Panel *parent, float parentW, float parentH) {
             continue;
 
         Vec4 rect;
-        Container_resolve(&(*child).base, 0.0f, 0.0f, parentW, parentH, &rect);
-        relayoutSubtree(child, rect.z, rect.w);
+        Container *base = &(*child).base;
+        Container_resolve(base, parentX, parentY, parentW, parentH, &rect);
+        relayoutSubtree(child, rect.x, rect.y, rect.z, rect.w);
     }
 }
 
@@ -618,11 +619,11 @@ void Frame_relayoutChildren(Frame *frame) {
         return;
 
     if ((*frame).contentPane != nullptr)
-        relayoutSubtree((*frame).contentPane, w, h);
+        relayoutSubtree((*frame).contentPane, 0.0f, 0.0f, w, h);
     if ((*frame).scenePane != nullptr)
-        relayoutSubtree((*frame).scenePane, w, h);
+        relayoutSubtree((*frame).scenePane, 0.0f, 0.0f, w, h);
     if ((*frame).rootPanel != nullptr && (*frame).rootPanel != (*frame).contentPane)
-        relayoutSubtree((*frame).rootPanel, w, h);
+        relayoutSubtree((*frame).rootPanel, 0.0f, 0.0f, w, h);
 }
 
 bool Frame_syncResize(Frame *frame, int width, int height) {

@@ -432,8 +432,9 @@ void Container_resolve(Container *c, float parentX, float parentY,
     if (Container_hasPercentY(c))
         screenY = parentY + (*c).percentY * parentH;
 
-    // Pivot shift: if anchor is TOP_LEFT, pivot shifts the placement point.
-    // (Used in Container_setCenter and custom pivot positioning).
+    // Pivot shift (universal, mirrors Component_recompute): which point on
+    // the child docks to the parent anchor point (red in the anchor sketch).
+    // Applies for all 9 anchors: screen = origin + anchor - pivot + offset.
     float offX = 0.0f;
     float offY = 0.0f;
     switch (Container_getPivot(c)) {
@@ -444,10 +445,8 @@ void Container_resolve(Container *c, float parentX, float parentY,
         default:
             break; // TOP_LEFT
     }
-    if (a == CONTAINER_ANCHOR_TOP_LEFT) {
-        screenX -= offX;
-        screenY -= offY;
-    }
+    screenX -= offX;
+    screenY -= offY;
 
     Vec4_set(outRect, screenX, screenY, sw, sh);
 }
