@@ -89,11 +89,14 @@ typedef void (*Component_RenderFn)(struct Component *self, const ComponentView *
 typedef struct Component {
     // --- Geometry (parent units; placement varies with anchor) ---
     float x, y, w, h;           // placement + size; x/y direction governed by origin
+    float scaleX, scaleY;       // axis scale multipliers (1 = unscaled; shifted from Container)
     uint8_t origin;             // COMPONENT_ORIGIN_* 0..3
     uint8_t anchor;             // COMPONENT_ANCHOR_* 0..8
     int32_t pivot;              // COMPONENT_PIVOT_* 0..4
     float minW, minH;           // size constraints (0 = unset)
     float maxW, maxH;           // size constraints (0 = unset)
+    float minX, minY;           // location constraints (0 = unset both ends)
+    float maxX, maxY;
     // --- Spacing ---
     float marginL, marginT;     // additive placement offsets (final = resolved + margin)
     float marginR, marginB;     // right/bottom edges stored for sibling layout
@@ -193,10 +196,13 @@ void Component_setX(Component *self, float x);
 void Component_setY(Component *self, float y);
 void Component_setWidth(Component *self, float w);
 void Component_setHeight(Component *self, float h);
+void Component_setScale(Component *self, float sx, float sy);
 void Component_setLocation(Component *self, float x, float y);
 void Component_setSize(Component *self, float w, float h);          // clamps [min, max]
 void Component_setMinSize(Component *self, float w, float h);       // re-clamps current size
 void Component_setMaxSize(Component *self, float w, float h);       // re-clamps current size
+void Component_setMinLocation(Component *self, float x, float y);   // re-clamps current location
+void Component_setMaxLocation(Component *self, float x, float y);   // re-clamps current location
 void Component_setOrigin(Component *self, int origin);
 void Component_setAnchor(Component *self, int anchor);
 void Component_setPivot(Component *self, int pivot);
@@ -226,6 +232,8 @@ float Component_getX(const Component *self);
 float Component_getY(const Component *self);
 float Component_getWidth(const Component *self);
 float Component_getHeight(const Component *self);
+float Component_getScaleX(const Component *self);
+float Component_getScaleY(const Component *self);
 float Component_getAbsX(const Component *self);
 float Component_getAbsY(const Component *self);
 float Component_getAbsW(const Component *self);
@@ -239,6 +247,10 @@ float Component_getMinWidth(const Component *self);
 float Component_getMinHeight(const Component *self);
 float Component_getMaxWidth(const Component *self);
 float Component_getMaxHeight(const Component *self);
+float Component_getMinX(const Component *self);
+float Component_getMinY(const Component *self);
+float Component_getMaxX(const Component *self);
+float Component_getMaxY(const Component *self);
 void Component_getMargin(const Component *self, float *outL, float *outT, float *outR, float *outB);
 void Component_getPadding(const Component *self, float *outL, float *outT, float *outR, float *outB);
 float Component_getBorderWidth(const Component *self);

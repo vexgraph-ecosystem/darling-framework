@@ -88,11 +88,14 @@
  * ----------------------------------------------------------------------------
  *   float x, y, w, h;      // Placement + size in parent units; x/y direction
  *                          // governed by origin (4 corners)
+ *   float scaleX, scaleY;  // Axis scale multipliers (1 = unscaled; shifted from Container)
  *   uint8_t origin;        // COMPONENT_ORIGIN_* 0..3 (4 corners: coordinate frame)
  *   uint8_t anchor;        // COMPONENT_ANCHOR_* 0..8 (9-grid docking point on parent)
  *   int32_t pivot;         // COMPONENT_PIVOT_* 0..4 (5 child points: 4 corners + center)
  *   float minW, minH;      // Size constraints (0 = unset)
  *   float maxW, maxH;      // Size constraints (0 = unset)
+ *   float minX, minY;      // Location constraints (0 = unset both ends)
+ *   float maxX, maxY;
  *   float marginL, marginT; // Additive placement: final = resolved + margin
  *   float marginR, marginB; // Right/bottom edges stored for sibling layout
  *   float paddingL, paddingT; // Inward content insets (content box = abs + padding)
@@ -149,11 +152,13 @@
  *   - renderDeferred(self, view)               : bake-if-dirty then blit the retained tile
  *
  * Setters:
- *   - Component_setX/Y(self, v)
+ *   - Component_setX/Y(self, v)               // clamps [min, max] location
  *   - Component_setWidth/Height(self, v)
+ *   - Component_setScale(self, sx, sy)
  *   - Component_setLocation(self, x, y)
  *   - Component_setSize(self, w, h)          // clamps [min, max]
  *   - Component_setMinSize/MaxSize(self, w, h) // re-clamps current size
+ *   - Component_setMinLocation/MaxLocation(self, x, y) // re-clamps current location
  *   - Component_setOrigin(self, origin)
  *   - Component_setAnchor(self, anchor)
  *   - Component_setPivot(self, pivot)
@@ -176,6 +181,7 @@
  *
  * Getters:
  *   - Component_getX/Y/Width/Height(self)
+ *   - Component_getScaleX/ScaleY(self)
  *   - Component_getAbsX/Y/W/H(self)
  *   - Component_getAbsRect(self, outRect)
  *   - Component_getParentAbsRect(self, outRect)
@@ -183,6 +189,7 @@
  *   - Component_getAnchor(self)
  *   - Component_getPivot(self)
  *   - Component_getMinWidth/MinHeight/MaxWidth/MaxHeight(self)
+ *   - Component_getMinX/MinY/MaxX/MaxY(self)
  *   - Component_getMargin(self, outL, outT, outR, outB)
  *   - Component_getPadding(self, outL, outT, outR, outB)
  *   - Component_getBorderWidth/BorderColor/BackgroundColor(self)
@@ -249,6 +256,8 @@ Component *Component_0(void) {
     (*self).y = 0.0f;
     (*self).w = 0.0f;
     (*self).h = 0.0f;
+    (*self).scaleX = 1.0f;
+    (*self).scaleY = 1.0f;
     (*self).origin = COMPONENT_ORIGIN_TOP_LEFT;
     (*self).anchor = COMPONENT_ANCHOR_TOP_LEFT;
     (*self).pivot = COMPONENT_PIVOT_TOP_LEFT;
@@ -256,6 +265,10 @@ Component *Component_0(void) {
     (*self).minH = 0.0f;
     (*self).maxW = 0.0f;
     (*self).maxH = 0.0f;
+    (*self).minX = 0.0f;
+    (*self).minY = 0.0f;
+    (*self).maxX = 0.0f;
+    (*self).maxY = 0.0f;
     (*self).marginL = 0.0f;
     (*self).marginT = 0.0f;
     (*self).marginR = 0.0f;
@@ -305,8 +318,8 @@ void Component_recompute(Component *self) {
         return;
     touchGen();
 
-    float sw = (*self).w;
-    float sh = (*self).h;
+    float sw = (*self).w * (*self).scaleX;
+    float sh = (*self).h * (*self).scaleY;
     float locX = (*self).x;
     float locY = (*self).y;
     float parentW = (*self).parentAbsW;
@@ -640,6 +653,10 @@ uint64_t Component_gen(void) {
 void Component_setX(Component *self, float x) {
     if (!self)
         return;
+    if ((*self).minX != 0.0f && x < (*self).minX)
+        x = (*self).minX;
+    if ((*self).maxX != 0.0f && x > (*self).maxX)
+        x = (*self).maxX;
     (*self).x = x;
     Component_recompute(self);
 }
@@ -647,6 +664,10 @@ void Component_setX(Component *self, float x) {
 void Component_setY(Component *self, float y) {
     if (!self)
         return;
+    if ((*self).minY != 0.0f && y < (*self).minY)
+        y = (*self).minY;
+    if ((*self).maxY != 0.0f && y > (*self).maxY)
+        y = (*self).maxY;
     (*self).y = y;
     Component_recompute(self);
 }
@@ -723,6 +744,52 @@ void Component_setMaxSize(Component *self, float w, float h) {
         ch = (*self).minH;
     Component_setWidth(self, cw);
     Component_setHeight(self, ch);
+}
+
+void Component_setScale(Component *self, float sx, float sy) {
+    if (!self)
+        return;
+    (*self).scaleX = sx;
+    (*self).scaleY = sy;
+    Component_recompute(self);
+}
+
+void Component_setMinLocation(Component *self, float x, float y) {
+    if (!self)
+        return;
+    (*self).minX = x;
+    (*self).minY = y;
+    float cx = (*self).x;
+    float cy = (*self).y;
+    if ((*self).minX != 0.0f && cx < x)
+        cx = x;
+    if ((*self).minY != 0.0f && cy < y)
+        cy = y;
+    if ((*self).maxX != 0.0f && cx > (*self).maxX)
+        cx = (*self).maxX;
+    if ((*self).maxY != 0.0f && cy > (*self).maxY)
+        cy = (*self).maxY;
+    Component_setX(self, cx);
+    Component_setY(self, cy);
+}
+
+void Component_setMaxLocation(Component *self, float x, float y) {
+    if (!self)
+        return;
+    (*self).maxX = x;
+    (*self).maxY = y;
+    float cx = (*self).x;
+    float cy = (*self).y;
+    if (x != 0.0f && cx > x)
+        cx = x;
+    if (y != 0.0f && cy > y)
+        cy = y;
+    if ((*self).minX != 0.0f && cx < (*self).minX)
+        cx = (*self).minX;
+    if ((*self).minY != 0.0f && cy < (*self).minY)
+        cy = (*self).minY;
+    Component_setX(self, cx);
+    Component_setY(self, cy);
 }
 
 void Component_setOrigin(Component *self, int origin) {
@@ -936,6 +1003,8 @@ float Component_getX(const Component *self) { return self ? (*self).x : 0.0f; }
 float Component_getY(const Component *self) { return self ? (*self).y : 0.0f; }
 float Component_getWidth(const Component *self) { return self ? (*self).w : 0.0f; }
 float Component_getHeight(const Component *self) { return self ? (*self).h : 0.0f; }
+float Component_getScaleX(const Component *self) { return self ? (*self).scaleX : 1.0f; }
+float Component_getScaleY(const Component *self) { return self ? (*self).scaleY : 1.0f; }
 
 float Component_getAbsX(const Component *self) { return self ? (*self).absX : 0.0f; }
 float Component_getAbsY(const Component *self) { return self ? (*self).absY : 0.0f; }
@@ -978,6 +1047,10 @@ float Component_getMinWidth(const Component *self) { return self ? (*self).minW 
 float Component_getMinHeight(const Component *self) { return self ? (*self).minH : 0.0f; }
 float Component_getMaxWidth(const Component *self) { return self ? (*self).maxW : 0.0f; }
 float Component_getMaxHeight(const Component *self) { return self ? (*self).maxH : 0.0f; }
+float Component_getMinX(const Component *self) { return self ? (*self).minX : 0.0f; }
+float Component_getMinY(const Component *self) { return self ? (*self).minY : 0.0f; }
+float Component_getMaxX(const Component *self) { return self ? (*self).maxX : 0.0f; }
+float Component_getMaxY(const Component *self) { return self ? (*self).maxY : 0.0f; }
 
 void Component_getMargin(const Component *self, float *outL, float *outT, float *outR, float *outB) {
     float ml = self ? (*self).marginL : 0.0f;
