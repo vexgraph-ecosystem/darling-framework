@@ -21,7 +21,10 @@
  * canonical element metadata (anchor/origin/pivot/margin/absolute cascade).
  * Geometry facades dual-write both (Container stays the reader until the
  * Component cascade wires up) and it owns a List of child
- * Panels; the VIEW model deep-copies structure but aliases shared payloads
+ * Panels; node connect runs both trees — Panel_addContainer /
+ * Panel_removeChild mirror the edge into the embedded Component tree
+ * (Component_addChild cascades the content box eagerly), so a panel stack
+ * IS a component stack; the VIEW model deep-copies structure but aliases shared payloads
  * (image/filters) BY POINTER through the source slot, with dirty flags
  * fanning out through the parent-ref set so every holder of a view
  * re-renders. Rendering is an ordered five-stage part pipeline
@@ -445,6 +448,11 @@ void Panel_addContainer(Panel *p, Panel *child) {
     List_add((*p).children, (uint64_t)(uintptr_t)child);
     Container_markDirty(&(*p).base);
     Container_markDirty(&(*child).base);
+    // Node connect: mirror the edge into the embedded Component tree so a
+    // panel stack IS a component stack (Shift 2b). addChild cascades the
+    // parent content box into the child eagerly; a false return is arena
+    // OOM — the Panel edge stays authoritative until Shift 2c.
+    Component_addChild(&(*p).component, &(*child).component);
 }
 
 bool Panel_removeChild(Panel *p, Panel *child) {
@@ -458,6 +466,9 @@ bool Panel_removeChild(Panel *p, Panel *child) {
                 (*child).parent = nullptr;
             Container_markDirty(&(*p).base);
             Container_markDirty(&(*child).base);
+            // Node disconnect: mirror into the Component tree (false = the
+            // edge was never wired; the Panel edge stays authoritative).
+            Component_removeChild(&(*p).component, &(*child).component);
             return true;
         }
     }
