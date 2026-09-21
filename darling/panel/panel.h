@@ -7,6 +7,7 @@
 #include "c23/constructor.h"
 #include "../../c23/darling-type.h"
 #include "darling/container.h"
+#include "darling/component.h"
 #include "image/image.h"
 #include "struct/list.h"
 #include "struct/set.h"
@@ -40,7 +41,11 @@ typedef bool (*Panel_PartFn)(struct Panel *panel, void *renderer,
                              float x, float y, float w, float h);
 
 typedef struct Panel {
-    Container base;         // embedded prefix — pass &(*panel).base upward
+    Container base;         // embedded prefix — pass &(*panel).base upward.
+                            // Stays FIRST: (Container*) panel punning (canvas.c) depends on it.
+    Component component;    // element metadata (anchor/origin/pivot/abs cascade).
+                            // Dual-written by the facades below; Container stays the
+                            // reader until the Component cascade wires up (Shift 2).
     uint32_t color;         // 0xAARRGGBB
     void *filters;          // render-graph slot (@Draft placeholder)
     Image *image;           // payload slot: backing Image (Image class in graphvex)
@@ -111,38 +116,41 @@ bool Panel_paintParts(Panel *panel, void *renderer, void *cmdBuffer,
 // over their embedded prefix (Scene_setLocation -> Panel_setLocation ->
 // Container_setLocation), which is Java's inherited methods without a
 // vtable: static binding, zero runtime cost, type-checked at each level.
+// Dual-write: geometry setters mirror into the embedded Component metadata
+// (anchor/pivot values mirror CONTAINER_* exactly); readers stay on the
+// Container until the Component cascade wires up, so behavior is unchanged.
 static inline void Panel_setLocation(Panel *p, float x, float y)
-    { if (p) Container_setLocation(&(*p).base, x, y); }
+    { if (p) { Container_setLocation(&(*p).base, x, y); Component_setLocation(&(*p).component, x, y); } }
 static inline void Panel_setSize(Panel *p, float w, float h)
-    { if (p) Container_setSize(&(*p).base, w, h); }
+    { if (p) { Container_setSize(&(*p).base, w, h); Component_setSize(&(*p).component, w, h); } }
 static inline void Panel_setMinSize(Panel *p, float w, float h)
-    { if (p) Container_setMinSize(&(*p).base, w, h); }
+    { if (p) { Container_setMinSize(&(*p).base, w, h); Component_setMinSize(&(*p).component, w, h); } }
 static inline void Panel_setMaxSize(Panel *p, float w, float h)
-    { if (p) Container_setMaxSize(&(*p).base, w, h); }
+    { if (p) { Container_setMaxSize(&(*p).base, w, h); Component_setMaxSize(&(*p).component, w, h); } }
 static inline void Panel_setAnchor(Panel *p, int anchor)
-    { if (p) Container_setAnchor(&(*p).base, anchor); }
+    { if (p) { Container_setAnchor(&(*p).base, anchor); Component_setAnchor(&(*p).component, anchor); } }
 static inline void Panel_setPivot(Panel *p, int pivot)
-    { if (p) Container_setPivot(&(*p).base, pivot); }
+    { if (p) { Container_setPivot(&(*p).base, pivot); Component_setPivot(&(*p).component, pivot); } }
 static inline void Panel_setVisible(Panel *p, bool visible)
-    { if (p) Container_setVisible(&(*p).base, visible); }
+    { if (p) { Container_setVisible(&(*p).base, visible); Component_setVisible(&(*p).component, visible); } }
 static inline void Panel_setOpacity(Panel *p, float opacity)
-    { if (p) Container_setOpacity(&(*p).base, opacity); }
+    { if (p) { Container_setOpacity(&(*p).base, opacity); Component_setOpacity(&(*p).component, opacity); } }
 static inline float Panel_getOpacity(const Panel *p)
     { return p ? Container_getOpacity(&(*p).base) : 1.0f; }
 static inline bool Panel_isVisible(const Panel *p)
     { return p && Container_isVisible(&(*p).base); }
 static inline void Panel_setZ(Panel *p, int z)
-    { if (p) Container_setZ(&(*p).base, z); }
+    { if (p) { Container_setZ(&(*p).base, z); Component_setZ(&(*p).component, z); } }
 static inline void Panel_setMargin(Panel *p, float l, float t, float r, float b)
-    { if (p) Container_setMargin(&(*p).base, l, t, r, b); }
+    { if (p) { Container_setMargin(&(*p).base, l, t, r, b); Component_setMargin(&(*p).component, l, t, r, b); } }
 static inline void Panel_getMargin(const Panel *p, float *l, float *t, float *r, float *b)
     { if (p) Container_getMargin(&(*p).base, l, t, r, b); }
 static inline void Panel_setRadius(Panel *p, float r)
-    { if (p) Container_setRadius(&(*p).base, r); }
+    { if (p) { Container_setRadius(&(*p).base, r); Component_setRadius(&(*p).component, r); } }
 static inline float Panel_getRadius(const Panel *p)
     { return p ? Container_getRadius(&(*p).base) : 0.0f; }
 static inline void Panel_setRadiusMode(Panel *p, int mode)
-    { if (p) Container_setRadiusMode(&(*p).base, mode); }
+    { if (p) { Container_setRadiusMode(&(*p).base, mode); Component_setRadiusMode(&(*p).component, mode); } }
 static inline int Panel_getRadiusMode(const Panel *p)
     { return p ? Container_getRadiusMode(&(*p).base) : CORNER_ARC; }
 

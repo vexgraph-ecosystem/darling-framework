@@ -12,10 +12,15 @@
  * ============================================================================
  * DEFINITION: Panel
  * ============================================================================
- * The UI panel: Container layout + background color + the parent/child
- * tree — the base class of Label/Picture/Scene and every R4 widget, since
+ * The UI panel: Container layout + Component element metadata +
+ * background color + the parent/child tree — the base class of
+ * Label/Picture/Scene and every R4 widget, since
  * every node IS-A Panel with extra payload on top. It embeds Container as
- * its first member (the Container-vs-Panel Law) and owns a List of child
+ * its first member (the Container-vs-Panel Law; the (Container*) pun in
+ * canvas.c depends on the prefix) plus an embedded Component holding the
+ * canonical element metadata (anchor/origin/pivot/margin/absolute cascade).
+ * Geometry facades dual-write both (Container stays the reader until the
+ * Component cascade wires up) and it owns a List of child
  * Panels; the VIEW model deep-copies structure but aliases shared payloads
  * (image/filters) BY POINTER through the source slot, with dirty flags
  * fanning out through the parent-ref set so every holder of a view
@@ -32,16 +37,20 @@
 ;;OVERVIEW
 /**
  * ============================================================================
- * CLASS: Panel (embeds Container)
+ * CLASS: Panel (embeds Container prefix + Component metadata)
  * LEVEL: L2 — Behavior (UI panel hierarchy behavior API)
  * ============================================================================
- * the UI panel: Container layout + background color +
- * the parent/child tree. Base class of Label/Picture/Scene — every node
- * IS-A Panel with extra payload on top.
+ * the UI panel: Container layout + Component element metadata + background
+ * color + the parent/child tree. Base class of Label/Picture/Scene — every
+ * node IS-A Panel with extra payload on top.
  *
  * STRUCT FIELDS (Mirroring darling/panel/panel.h):
  * ----------------------------------------------------------------------------
- *   Container base;                // Inherited layout/bounds/anchors/flags (see container.h)
+ *   Container base;                // Inherited layout/bounds/anchors/flags (see container.h).
+ *                                  // FIRST: (Container*) punning depends on the prefix.
+ *   Component component;           // Element metadata (anchor/origin/pivot/abs cascade,
+ *                                  // see component.h). Dual-written by the facades;
+ *                                  // Container stays the reader until Shift 2.
  *   uint32_t color;                // Background fill, packed 0xAARRGGBB
  *   void *filters;                 // Render-graph slot (@Draft placeholder, not yet wired)
  *   void *image;                   // Shared payload pointer (aliased through views)
@@ -159,6 +168,7 @@ Panel *Panel_0(void) {
     // adopt the container block's contents into our prefix, then free the shell
     *(&(*p).base) = (*b);
     Memory_free(b);
+    Component_init(&(*p).component);
 
     (*p).color = PANEL_COLOR_CLEAR;
     (*p).filters = nullptr;
@@ -479,6 +489,16 @@ Panel *Panel_add(Panel *parent, const Panel *node) {
     (*cb).clipping = (*nb).clipping;
     (*cb).percentX = (*nb).percentX;
     (*cb).percentY = (*nb).percentY;
+    // replay the copied geometry into the embedded Component metadata (the
+    // same dual-write the facades perform; percent/enabled/clipping have no
+    // Component counterpart and stay Container-only until the cascade wires).
+    Component *dst = &(*copy).component;
+    Component_setLocation(dst, (*nb).x, (*nb).y);
+    Component_setSize(dst, (*nb).w, (*nb).h);
+    Component_setAnchor(dst, (*nb).anchor);
+    Component_setPivot(dst, (*nb).pivot);
+    Component_setVisible(dst, (*nb).visible != 0);
+    Component_setZ(dst, (*nb).z);
     (*copy).color = (*node).color;
     // behavior travels with structure: a view renders exactly like its source
     (*copy).renderHandler = (*node).renderHandler;
