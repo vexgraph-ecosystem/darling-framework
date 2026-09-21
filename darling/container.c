@@ -432,9 +432,11 @@ void Container_resolve(Container *c, float parentX, float parentY,
     if (Container_hasPercentY(c))
         screenY = parentY + (*c).percentY * parentH;
 
-    // Pivot shift (universal, mirrors Component_recompute): which point on
-    // the child docks to the parent anchor point (red in the anchor sketch).
-    // Applies for all 9 anchors: screen = origin + anchor - pivot + offset.
+    // Pivot shift (LEGACY FROZEN: TOP_LEFT-anchored only).
+    // Canonical resolve lives in Component_recompute (darling/component.c):
+    // screen = origin + anchor - pivot + offset, universal over all 9
+    // anchors, with padding-inset content-box cascade. This shim keeps the
+    // legacy Panel tree stable and gains no new math.
     float offX = 0.0f;
     float offY = 0.0f;
     switch (Container_getPivot(c)) {
@@ -445,8 +447,10 @@ void Container_resolve(Container *c, float parentX, float parentY,
         default:
             break; // TOP_LEFT
     }
-    screenX -= offX;
-    screenY -= offY;
+    if (a == CONTAINER_ANCHOR_TOP_LEFT) {
+        screenX -= offX;
+        screenY -= offY;
+    }
 
     Vec4_set(outRect, screenX, screenY, sw, sh);
 }
