@@ -42,7 +42,7 @@ bool Dialog_requestClose(Dialog *dialog);
  * inside the loop per the Present-On-Demand Law. No new thread, no wait — the
  * hook is the only live seam while AppKit's modal tracking loop owns thread 0.
  * FrameCocoa is the platform glue for the darling Frame class (darling/frame.h)
- * and composes with PanelCocoa's retained offscreen boards and the GfxLoop.
+ * and composes with Surface and the GfxLoop.
  * ============================================================================
  */
 
@@ -302,6 +302,10 @@ void Frame_platformSyncLayer(Frame *frame, int width, int height) {
             [seam setFrame:seamRect];
             [seam setBounds:seamRect];
             [seam setPosition:CGPointMake(0.0, 0.0)];
+            if ((*frame).surface != nullptr) {
+                Surface_sync((*frame).surface, (int) lround(liveBounds.size.width), (int) lround(liveBounds.size.height), (float) liveScale);
+                Surface_setActiveArea((*frame).surface, (uint32_t) drawW, (uint32_t) drawH);
+            }
             return;
         }
         // No content view (degenerate/borderless): fall back to the layout
@@ -310,6 +314,10 @@ void Frame_platformSyncLayer(Frame *frame, int width, int height) {
                                          (CGFloat) lround((double) height * liveScale))];
         (*frame).liveWidth = (float) width;
         (*frame).liveHeight = (float) height;
+        if ((*frame).surface != nullptr) {
+            Surface_sync((*frame).surface, width, height, (float) liveScale);
+            Surface_setActiveArea((*frame).surface, (uint32_t) lround((double) width * liveScale), (uint32_t) lround((double) height * liveScale));
+        }
     }
 }
 
@@ -623,11 +631,19 @@ void FrameCocoa_attach(Frame *frame) {
         // the contentView's OWN layer, letting AppKit reset drawableSize to 1x1 and
         // apply resize-gravity on every live-resize beat (the top/right stretch).
         // As a sublayer it never touches the canvas geometry or drawable.
-        NSVisualEffectView *vfx = [[NSVisualEffectView alloc] initWithFrame:bounds];
-        [vfx setAutoresizingMask:NSViewWidthSizable | NSViewHeightSizable];
-        [vfx setBlendingMode:NSVisualEffectBlendingModeBehindWindow];
-        [vfx setMaterial:NSVisualEffectMaterialHUDWindow];
-        [vfx setState:NSVisualEffectStateActive];
+        NSVisualEffectView *vfx = nil;
+        if ((*frame).visualEffect != nullptr) {
+            VisualEffect_attach((*frame).visualEffect, (__bridge void*) contentView);
+            vfx = (__bridge NSVisualEffectView*) VisualEffect_nativeHandle((*frame).visualEffect);
+        }
+        if (vfx == nil) {
+            vfx = [[NSVisualEffectView alloc] initWithFrame:bounds];
+            [vfx setAutoresizingMask:NSViewWidthSizable | NSViewHeightSizable];
+            [vfx setBlendingMode:NSVisualEffectBlendingModeBehindWindow];
+            [vfx setMaterial:NSVisualEffectMaterialHUDWindow];
+            [vfx setState:NSVisualEffectStateActive];
+            [contentView addSubview:vfx positioned:NSWindowBelow relativeTo:nil];
+        }
 
         [vfx setWantsLayer:YES];
         CALayer *blurLayer = [vfx layer];
@@ -637,13 +653,10 @@ void FrameCocoa_attach(Frame *frame) {
         // the whole display area the view covers.
         [blurLayer setMasksToBounds:YES];
         [blurLayer addSublayer:metalLayer];
-        [contentView addSubview:vfx positioned:NSWindowBelow relativeTo:nil];
         (*frame).nativeView = (__bridge_retained void*) vfx;
 
-        if ((*frame).visualEffect != nullptr)
-            VisualEffect_attach((*frame).visualEffect, (__bridge void*) contentView);
         if ((*frame).surface != nullptr)
-            Surface_attach((*frame).surface, (__bridge void*) contentView);
+            Surface_attach((*frame).surface, (__bridge void*) vfx);
 
         // Bridge resize hook and WindowServer cadence
         Window_setResizeRenderHook((*frame).window, frameCocoaResizeHook, frame);
@@ -703,6 +716,7 @@ void FrameCocoa_syncTransaction(Frame *frame) {
         [CATransaction begin];
         [CATransaction setDisableActions:YES];
         [CATransaction commit];
+        [CATransaction flush];
     }
 }
 

@@ -358,8 +358,12 @@ static bool buttonPaintText(Panel *panel, void *renderer, void *cmdBuffer,
     if ((*b).rasterTex < 0 || (*b).rasterW <= 0 || (*b).rasterH <= 0)
         return false;
     float backing = (*b).rasterBacking > 0.0f ? (*b).rasterBacking : 1.0f;
-    float qw = (float) (*b).rasterW / backing;
-    float qh = (float) (*b).rasterH / backing;
+    float qw = (float) (*b).rasterW;
+    float qh = (float) (*b).rasterH;
+    if (w <= (*c).w * 1.25f && backing > 1.0f) {
+        qw /= backing;
+        qh /= backing;
+    }
     float qx = x + (w - qw) * 0.5f;
     float qy = y + (h - qh) * 0.5f;
     Vk_drawTexture(cmdBuffer, surfaceW, surfaceH, qx, qy, qw, qh, 1.0f, 1.0f, 1.0f, op,

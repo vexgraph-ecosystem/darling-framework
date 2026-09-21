@@ -789,6 +789,8 @@ void Darling_preFrame(Window *window, int drawW, int drawH, void *userdata) {
     // inline at AFTER layout through the live direct pass; the settle tick
     // (live false) resumes the full path below and rebuilds once.
     if (live) {
+        if (root)
+            Container_forceSize(&(*root).base, rootW, rootH);
         if (contentPanel)
             Container_forceSize(&(*contentPanel).base, rootW, rootH);
         if (scenePanel)
@@ -800,6 +802,8 @@ void Darling_preFrame(Window *window, int drawW, int drawH, void *userdata) {
         refreshClearColor(scenePanel, root, contentPanel);
         return;
     }
+    if (root)
+        Container_forceSize(&(*root).base, rootW, rootH);
     if (contentPanel)
         Container_forceSize(&(*contentPanel).base, rootW, rootH);
     if (scenePanel)
@@ -912,10 +916,6 @@ void Darling_renderFrame(void *cmdBuffer, int drawW, int drawH, void *userdata) 
     float liveH = Frame_getLiveHeight(rframe);
     float kx = (float) drawW / (liveW > 0.0f ? liveW : (float) winW);
     float ky = (float) drawH / (liveH > 0.0f ? liveH : (float) winH);
-    // Resolve rects against the SAME live bounds the relayout used — mixing
-    // currencies here would double-shift every parent-derived edge.
-    float resolveW = liveW > 0.0f ? liveW : (float) winW;
-    float resolveH = liveH > 0.0f ? liveH : (float) winH;
 
     // COMPONENT SEAM (Phase 1, the Canvas Planes Law): a frame with a
     // Component root (Frame_setRootComponent) renders the retained tree
@@ -967,163 +967,41 @@ void Darling_renderFrame(void *cmdBuffer, int drawW, int drawH, void *userdata) 
     // Loop1 seam collage (the Present-On-Demand Law): retained
     // presentables are EXACTLY the scene panel, the content panel, and their
     // first-generation children. The seam pass samples EVERY registered
-    // board on EVERY present — sampling is one draw call per board (cheap)
-    // while the fresh-cleared swapchain image would ERASE a skipped board,
-    // so demand gates board RE-RENDER (visit-side dirty, already working),
-    // never sampling. Scene-bottom/content-top order per the Window
-    // Compositing Layer Order Law. The window-level `demanded` flag (any
-    // board demand, never-presented, or live-resizing) presents exactly once
-    // per tick, else rests. A successful board composite clears that board's
-    // tree dirt (scene and content alike) so a clean board CLEAN-SKIPs next
-    // tick instead of re-arming forever.
-    extern void *PanelCocoa_fromPanel(void *panel);
-    extern bool PanelCocoa_isBoard(const void *pc);
-    extern int PanelCocoa_chain(const void *pc);
-    extern int PanelCocoa_width(const void *pc);
-    extern int PanelCocoa_height(const void *pc);
-    extern bool VkLayer_composite(void *cmdBuffer, float surfaceW, float surfaceH,
-                                  int index, float x, float y, float w, float h,
-                                  float r, float g, float b, float a);
     Panel *boardPanels[2] = { Frame_getScenePane(rframe), Frame_getContentPane(rframe) };
-    static uint64_t s_lastChildPresent[2] = { 0u, 0u };
-    static bool s_loop1First = true;
+    if (!boardPanels[1] && root)
+        boardPanels[1] = root;
+
     bool live = Window_isLiveResizing(window);
     GraphicsClient *client = GraphicsLoop_findClient(GraphicsLoop_default(), window);
     bool neverPresented = client && !(*client).hasPresented;
-    bool want[2] = { false, false };
-    uint64_t curPresent[2] = { 0u, 0u };
-    bool boardsRegistered = false;
-    for (int i = 0; i < 2; i++) {
-        Panel *board = boardPanels[i];
-        if (!board)
-            continue;
-        void *boardPc = PanelCocoa_fromPanel(board);
-        if (!boardPc || !PanelCocoa_isBoard(boardPc))
-            continue;
-        int boardLayer = PanelCocoa_chain(boardPc);
-        if (boardLayer < 0)
-            continue;
-        boardsRegistered = true;
-        bool boardDirty = Panel_isTreeDirty(board) || VkLayer_isDirty(boardLayer);
-        uint64_t childPresent = 0u;
-        size_t n = Panel_childCount(board);
-        for (size_t ci = 0; ci < n; ci++) {
-            Panel *child = Panel_getChild(board, ci);
-            if (!child)
-                continue;
-            int childLayer = VkLayer_find(child);
-            if (childLayer < 0)
-                continue;
-            if (VkLayer_isDirty(childLayer))
-                boardDirty = true;
-            childPresent += VkLayer_presentCount(childLayer);
-        }
-        curPresent[i] = childPresent;
-        bool childPublished = s_loop1First || (childPresent != s_lastChildPresent[i]);
-        if (boardDirty || childPublished || live || neverPresented)
-            want[i] = true;
-    }
     bool demanded = live || neverPresented;
-    if (want[0] || want[1])
+
+    for (int i = 0; i < 2; i++) {
+        Panel *board = boardPanels[i];
+        if (board && Panel_isTreeDirty(board))
+            demanded = true;
+    }
+    if (root && Panel_isTreeDirty(root))
         demanded = true;
-    if (!boardsRegistered && root && Panel_isTreeDirty(root))
-        demanded = true;
+
     if (!demanded) {
-        // Deliberate rest: nothing changed since the last composite and the
-        // screen already holds it (!demanded implies hasPresented — a
-        // never-presented client always demands). Report non-empty so the
-        // present verdict latches rest instead of retrying clean content.
         s_seamNonEmpty = true;
         return;
     }
-    if (live && boardsRegistered) {
-        // Live direct pass: allocations are frozen, so there is nothing to
-        // sample — sampling a stale-extent board is exactly the one-step lag
-        // and the stretch. Paint both boards inline at AFTER layout straight
-        // into the seam image through the shared board painter (backdrop,
-        // then children in tree order; COMPOSITED scenes sample their frozen
-        // targets at their own extent).
-        // Points map with the live backing scale inside the shared painter
-        // (never across mismatched sizes); the surface stays the real image
-        // size for NDC + clip. Shrink drags are pixel-perfect, grow drags pin
-        // top-left with a clear strip the settle rebuild fills.
-        extern void Darling_getPanelSize(Panel *p, int *outW, int *outH);
-        static int directLog = -1;
-        if (directLog < 0)
-            directLog = getenv("VEX_GEOMETRY_LOG") != nullptr;
-        for (int i = 0; i < 2; i++) {
-            Panel *board = boardPanels[i];
-            if (!board)
-                continue;
-            int panelW = 0, panelH = 0;
-            Darling_getPanelSize(board, &panelW, &panelH);
-            if (directLog)
-                fprintf(stderr, "direct: win=(%dx%d) draw=(%dx%d) panel=(%dx%d)\n",
-                        winW, winH, drawW, drawH, panelW, panelH);
-            // Live fractional board size (the Single Rounding Currency Law):
-            // resolve children against the stored float bounds, not the
-            // lround'ed ints.
-            float fpW = (*board).base.w;
-            float fpH = (*board).base.h;
-            if (fpW <= 0.0f || fpH <= 0.0f) {
-                fpW = (float) panelW;
-                fpH = (float) panelH;
-            }
-            if (fpW <= 0.0f || fpH <= 0.0f)
-                continue;
-            paintBoardSubtree(cmdBuffer, drawW, drawH, board, fpW, fpH);
-        }
-        s_seamNonEmpty = true;
-        return;
-    }
+
+    float curW = liveW > 0.0f ? liveW : (float) winW;
+    float curH = liveH > 0.0f ? liveH : (float) winH;
+
     for (int i = 0; i < 2; i++) {
         Panel *board = boardPanels[i];
         if (!board)
             continue;
-        void *boardPc = PanelCocoa_fromPanel(board);
-        if (!boardPc || !PanelCocoa_isBoard(boardPc))
-            continue;
-        int boardLayer = PanelCocoa_chain(boardPc);
-        if (boardLayer < 0)
-            continue;
-        // Sample always, gate render: every registered board composites on
-        // every present (unpublished boards no-op inside VkLayer_composite).
-        // Success clears that board's tree dirt — the scene-tree dirt leak
-        // fix: Panel_clearTreeDirty ran for content only, so scene dirt
-        // re-armed layer 0 every tick.
-        // Pinned top-left in FRAMEBUFFER space, sized to the board's OWN
-        // pixel extent — never stretched to fill the drawable (the
-        // Continuous Real-Time Live Resize Law). VkLayer_composite's
-        // top-down viewport pins the board at TOP-left (y=0), matching
-        // the seam layer's kCAGravityTopLeft anchor.
-        int boardW = PanelCocoa_width(boardPc);
-        int boardH = PanelCocoa_height(boardPc);
-        float boardY = 0.0f;
-        if (boardW > 0 && boardH > 0
-            && VkLayer_composite(cmdBuffer, (float) drawW, (float) drawH, boardLayer,
-                                 0.0f, boardY, (float) boardW, (float) boardH,
-                                 1.0f, 1.0f, 1.0f, 1.0f)) {
-            s_lastChildPresent[i] = curPresent[i];
-            Panel_clearTreeDirty(board);
-            s_seamNonEmpty = true;
-        }
+        Container_forceSize(&(*board).base, curW, curH);
+        paintBoardSubtree(cmdBuffer, drawW, drawH, board, curW, curH);
+        Panel_clearTreeDirty(board);
     }
-    s_loop1First = false;
-    // Loop1 collages only: when boards are registered the canvas holds
-    // exactly the finished composite and nothing else paints on top.
-    if (boardsRegistered)
-        return;
-
-    if (root) {
-        size_t childCount = Panel_childCount(root);
-        for (size_t i = 0; i < childCount; i++) {
-            Panel *child = Panel_getChild(root, i);
-            if (!child)
-                continue;
-            if (paintChildIntoPass(cmdBuffer, child, 0.0f, 0.0f, resolveW, resolveH, kx, ky, (float)drawW, (float)drawH, false))
-                s_seamNonEmpty = true;
-        }
-    }
+    s_seamNonEmpty = true;
+    return;
 }
 
 // Live-resize render hook — thread 0 only.

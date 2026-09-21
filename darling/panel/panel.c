@@ -321,14 +321,14 @@ void Panel_setBackgroundColorAndMark(Panel *p, uint32_t color) {
     Panel_setBackgroundColor(p, color);
 }
 
-void *Panel_getImage(const Panel *p) {
+Image *Panel_getImage(const Panel *p) {
     if (!p)
         return nullptr;
     const Panel *src = (*p).source;
     return src ? Panel_getImage(src) : (*p).image;
 }
 
-void Panel_setImage(Panel *p, void *image) {
+void Panel_setImage(Panel *p, Image *image) {
     if (!p)
         return;
     Panel *src = (*p).source;

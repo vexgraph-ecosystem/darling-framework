@@ -142,12 +142,10 @@ endif()
 # the font engine — graphvex links it, darling consumes via link (Rule 17).
 if(APPLE)
     target_sources(darling PRIVATE
-        objc/panel_cocoa.m
         objc/text_core.m
         objc/frame_cocoa.m
     )
     set_source_files_properties(
-        objc/panel_cocoa.m
         objc/text_core.m
         objc/frame_cocoa.m
         PROPERTIES COMPILE_OPTIONS "-fobjc-arc"

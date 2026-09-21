@@ -47,7 +47,7 @@ static int edgeSnapPx(float deviceEdge) {
  * with idle-gated resize per the Single-Seam Canvas Law, and children are
  * iterated via Panel_childCount per the Dynamic Scalability &
  * Anti-Hardcoding Law. The bridge owns no struct — it is procedural glue
- * over Panel, Frame, VkLayer, and PanelCocoa.
+ * over Panel, Frame, and VkLayer.
  * ============================================================================
  */
 
@@ -63,27 +63,9 @@ static int edgeSnapPx(float deviceEdge) {
  *
  * FUNCTION REGISTRY:
  * ----------------------------------------------------------------------------
- * Constructors:
- *   - PanelCocoa_newBoard(panel, w, h)        (extern, objc/panel_cocoa.m)
- *
  * Core Functions:
  *   - Darling_attachPanelBoards(window, scenePane, contentPane, width, height, drawW, drawH)
- *     (boards are RETAINED OFFSCREEN VkLayer targets — fixed pixel size,
- *     never a CALayer, never in the window tree; the Frame seam canvas is
- *     the window's single on-screen layer per the Window Compositing
- *     Layer Order Law; width/height are live points, drawW/drawH are the
- *     live drawable px — board px == drawable px directly when drawW/drawH
- *     are positive (the Native Pixel Law, never width * stale scale), else
- *     a width * TextCore_backingScale fallback via lround — the scale is
- *     override-pinned to the dragged window's liveScale every drag step
- *     (frameCocoaResizeHook setter, cleared on settle), so the fallback
- *     never reads mainScreen mid-drag and never breathes; board setSize
- *     idle-gated via Darling_compositorIdleForResize per the Single-Seam
- *     Canvas Law on the settle path, BYPASSED while Window_isLiveResizing
- *     (boards track the drawable every drag step — the retired chains
- *     drain 3 generations later, so immediate resize is safe); first-time
- *     PanelCocoa_newBoard ungated; GRAPHICS_VK_STATS-gated vk:board-resize
- *     log on true drift only)
+ *     (boards are full-window containers resized to the live window bounds)
  *   - Darling_attachLayers(window, boardPanel, width, height)
  *     (classification-driven retained flight targets per the Immediate vs
  *     Retained Element Model — darling.md section 55: a depth-1 child owns
@@ -150,71 +132,22 @@ static int edgeSnapPx(float deviceEdge) {
 // natively (autoresizingMask); boards keep their fixed pixel extent (the
 // Single-Seam Canvas Law).
 
-// Attach board backing to the scene + content panels: retained OFFSCREEN
-// VkLayer targets (PanelCocoa_newBoard) at fixed pixel size — never a
-// CALayer, never in the window tree (the seam canvas is the window's single
-// on-screen layer). The seam pass composites the published board images in
-// z-order (scene bottom, content top). Returns the number of boards attached
-// or resized.
+// Update board dimensions to track the live window width and height.
+// Returns the number of boards sized.
 int Darling_attachPanelBoards(Window *window, Panel *scenePane, Panel *contentPane, int width, int height, int drawW, int drawH) {
-    if (!window || width <= 0 || height <= 0)
+    (void) window;
+    (void) drawW;
+    (void) drawH;
+    if (width <= 0 || height <= 0)
         return 0;
-    int pxW = 0;
-    int pxH = 0;
-    if (drawW > 0 && drawH > 0) {
-        pxW = drawW;
-        pxH = drawH;
-    } else {
-        extern float TextCore_backingScale(void);
-        float scale = TextCore_backingScale();
-        if (scale <= 0.0f)
-            scale = 1.0f;
-        pxW = (int) lround((double) width * (double) scale);
-        pxH = (int) lround((double) height * (double) scale);
-    }
-    if (pxW <= 0 || pxH <= 0 || pxW > 16384 || pxH > 16384)
-        return 0;
-    Panel *boards[2] = { scenePane, contentPane };
-    extern void *PanelCocoa_fromPanel(void *panel);
-    extern void *PanelCocoa_newBoard(void *panel, int w, int h);
-    extern bool PanelCocoa_setSize(void *pc, int w, int h);
-    extern int PanelCocoa_width(const void *pc);
-    extern int PanelCocoa_height(const void *pc);
-    extern bool Darling_compositorIdleForResize(void);
-    static int s_boardDiag = -1;
-    if (s_boardDiag < 0)
-        s_boardDiag = getenv("GRAPHICS_VK_STATS") != nullptr || getenv("ANTI_VK_STATS") != nullptr;
     int done = 0;
-    for (int i = 0; i < 2; i++) {
-        Panel *board = boards[i];
-        if (!board)
-            continue;
-        void *pc = PanelCocoa_fromPanel(board);
-        if (pc) {
-            extern bool PanelCocoa_isBoard(const void *pc);
-            if (!PanelCocoa_isBoard(pc))
-                continue;
-            // Idle-gate parity with the child path (Darling_attachLayers):
-            // a board resize rebuilds flight targets the composite pass may
-            // still reference — defer to a quiescent tick per the
-            // Single-Seam Canvas Law and retry next tick. First-time
-            // PanelCocoa_newBoard below stays ungated. Live-drag bypass:
-            // while Window_isLiveResizing the boards track the drawable
-            // every step (the Continuous Real-Time Live Resize Law) — the
-            // graveyard retires old chains 3 generations later, so
-            // immediate resize is safe; the settle path keeps the gate.
-            bool live = Window_isLiveResizing(window);
-            if (!live && !Darling_compositorIdleForResize())
-                continue;
-            int oldW = PanelCocoa_width(pc);
-            int oldH = PanelCocoa_height(pc);
-            if (s_boardDiag && (oldW != pxW || oldH != pxH))
-                fprintf(stderr, "vk:board-resize %s %dx%d -> %dx%d\n", i == 0 ? "scene" : "content", oldW, oldH, pxW, pxH);
-            if (PanelCocoa_setSize(pc, pxW, pxH))
-                done++;
-        } else if (PanelCocoa_newBoard(board, pxW, pxH)) {
-            done++;
-        }
+    if (scenePane) {
+        Container_forceSize(&(*scenePane).base, (float) width, (float) height);
+        done++;
+    }
+    if (contentPane) {
+        Container_forceSize(&(*contentPane).base, (float) width, (float) height);
+        done++;
     }
     return done;
 }
@@ -356,9 +289,6 @@ int Darling_attachLayers(Window *window, Panel *contentPanel, int width, int hei
 void Darling_propagatePaneDirty(Window *window, Panel *scenePane, Panel *contentPanel) {
     if (!window || !contentPanel)
         return;
-    extern void *PanelCocoa_fromPanel(void *panel);
-    extern bool PanelCocoa_isBoard(const void *pc);
-    extern int PanelCocoa_chain(const void *pc);
 
     // Per-board snapshot of depth-1 child publish counts (one-hop on
     // publish): the summed VkLayer_presentCount over each board's retained
@@ -425,23 +355,8 @@ void Darling_propagatePaneDirty(Window *window, Panel *scenePane, Panel *content
             s_boardChildPublish[0] = scenePublish;
         }
     }
-
-    Panel *boards[2] = { scenePane, contentPanel };
-    for (int i = 0; i < 2; i++) {
-        Panel *board = boards[i];
-        if (!board)
-            continue;
-        void *bpc = PanelCocoa_fromPanel(board);
-        if (!bpc || !PanelCocoa_isBoard(bpc))
-            continue;
-        int chain = PanelCocoa_chain(bpc);
-        if (chain < 0)
-            continue;
-        bool childDemand = (i == 0) ? anySceneDemand : anyContentDemand;
-        bool boardDirty = Panel_isTreeDirty(board) || Window_isLiveResizing(window) || childDemand;
-        if (boardDirty)
-            VkLayer_markDirty(chain, true);
-    }
+    (void) anySceneDemand;
+    (void) anyContentDemand;
 }
 
 // Get panel's current display size.

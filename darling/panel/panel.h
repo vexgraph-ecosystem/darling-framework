@@ -7,6 +7,7 @@
 #include "c23/constructor.h"
 #include "../../c23/darling-type.h"
 #include "darling/container.h"
+#include "image/image.h"
 #include "struct/list.h"
 #include "struct/set.h"
 
@@ -42,7 +43,7 @@ typedef struct Panel {
     Container base;         // embedded prefix — pass &(*panel).base upward
     uint32_t color;         // 0xAARRGGBB
     void *filters;          // render-graph slot (@Draft placeholder)
-    void *image;            // payload slot (shared through views)
+    Image *image;           // payload slot: backing Image (Image class in graphvex)
     Panel_RenderFn renderHandler; // legacy monolith; non-null = back-compat path
     void *renderUserdata;   // opaque arg handed back to renderHandler
     Panel_PartFn backgroundFn; // stage 0: fill / material; nullptr = skip
@@ -146,8 +147,8 @@ static inline int Panel_getRadiusMode(const Panel *p)
     { return p ? Container_getRadiusMode(&(*p).base) : CORNER_ARC; }
 
 // Shared payload slots (read/write-through to the canonical source on views).
-void *Panel_getImage(const Panel *p);
-void Panel_setImage(Panel *p, void *image);
+Image *Panel_getImage(const Panel *p);
+void   Panel_setImage(Panel *p, Image *image);
 void *Panel_getFilters(const Panel *p);
 void Panel_setFilters(Panel *p, void *filters);
 
