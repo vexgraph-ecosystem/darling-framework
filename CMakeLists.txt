@@ -425,3 +425,25 @@ if(NOT TARGET frame_root_panel_test AND EXISTS "${DARLING_TEST_DIR}/frame_root_p
     )
     target_link_libraries(frame_root_panel_test PRIVATE darling)
 endif()
+
+# Anchor lattice artifact: headless Anchor Lattice Law suite — a full 9-grid
+# lattice of anchored cells with anchored children and grandchildren, resized
+# through a drag sequence and walked against independent expectations computed
+# from the LIVE size. Catches one-step-late relayout (the tear signature).
+if(NOT TARGET anchor_lattice_test AND EXISTS "${DARLING_TEST_DIR}/anchor_lattice_test.c")
+    add_executable(anchor_lattice_test
+        ${DARLING_TEST_DIR}/anchor_lattice_test.c
+    )
+    target_link_libraries(anchor_lattice_test PRIVATE darling)
+endif()
+
+# Anchor oracle artifact: independent origin/anchor/pivot oracle asserting
+# BOTH paths (Component abs for all nodes, Container_resolve for the legacy
+# TOP_LEFT-pivot subset) on integer + fractional drag steps. The oracle
+# shares zero code with either resolve, so a systematic bias fails loudly.
+if(NOT TARGET anchor_oracle_test AND EXISTS "${DARLING_TEST_DIR}/anchor_oracle_test.c")
+    add_executable(anchor_oracle_test
+        ${DARLING_TEST_DIR}/anchor_oracle_test.c
+    )
+    target_link_libraries(anchor_oracle_test PRIVATE darling)
+endif()
