@@ -624,6 +624,24 @@ void Frame_relayoutChildren(Frame *frame) {
         relayoutSubtree((*frame).scenePane, 0.0f, 0.0f, w, h);
     if ((*frame).rootPanel != nullptr && (*frame).rootPanel != (*frame).contentPane)
         relayoutSubtree((*frame).rootPanel, 0.0f, 0.0f, w, h);
+
+    // Shift 2b: cascade the live board rect into the node-connected
+    // Component tree (Panel_addContainer wiring). setParentAbs recomputes
+    // the board abs and cascades the padding-inset content box down the
+    // whole stack eagerly, so every abs rect carries anchors, pivots,
+    // margin AND padding. Readers stay on Container until Shift 2c.
+    if ((*frame).contentPane != nullptr) {
+        Panel *board = (*frame).contentPane;
+        Component_setParentAbs(&(*board).component, 0.0f, 0.0f, w, h);
+    }
+    if ((*frame).scenePane != nullptr) {
+        Panel *board = (*frame).scenePane;
+        Component_setParentAbs(&(*board).component, 0.0f, 0.0f, w, h);
+    }
+    if ((*frame).rootPanel != nullptr && (*frame).rootPanel != (*frame).contentPane) {
+        Panel *board = (*frame).rootPanel;
+        Component_setParentAbs(&(*board).component, 0.0f, 0.0f, w, h);
+    }
 }
 
 bool Frame_syncResize(Frame *frame, int width, int height) {
@@ -661,6 +679,7 @@ bool Frame_syncResize(Frame *frame, int width, int height) {
     float liveH = (*frame).liveHeight > 0.0f ? (*frame).liveHeight : (float) height;
     if ((*frame).rootComponent != nullptr) {
         Component_setSize((*frame).rootComponent, liveW, liveH);
+        Component_setParentAbs((*frame).rootComponent, 0.0f, 0.0f, liveW, liveH);
     }
     if ((*frame).contentPane != nullptr)
         Container_forceSize(&(*(*frame).contentPane).base, liveW, liveH);
@@ -773,6 +792,7 @@ void Frame_setContentPane(Frame *frame, Panel *panel) {
         Component_setPivot(meta, COMPONENT_PIVOT_TOP_LEFT);
         Component_setLocation(meta, 0.0f, 0.0f);
         Component_setSize(meta, (float)(*frame).width, (float)(*frame).height);
+        Component_setParentAbs(meta, 0.0f, 0.0f, (float)(*frame).width, (float)(*frame).height);
     }
 }
 
@@ -798,6 +818,7 @@ void Frame_setScenePane(Frame *frame, Panel *panel) {
         Component_setPivot(meta, COMPONENT_PIVOT_TOP_LEFT);
         Component_setLocation(meta, 0.0f, 0.0f);
         Component_setSize(meta, (float)(*frame).width, (float)(*frame).height);
+        Component_setParentAbs(meta, 0.0f, 0.0f, (float)(*frame).width, (float)(*frame).height);
     }
 }
 
