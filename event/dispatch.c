@@ -60,9 +60,11 @@
  * DELIVERY CONTRACT (Pkg 1, implemented as-is):
  * ----------------------------------------------------------------------------
  *   1. Hit-test walk: recursive reverse-child-order walk (top-most first)
- *      with Container_hitTest; first (deepest, top-most) hit wins.
- *   2. Local coords: screen minus the resolved origin of the hit panel
- *      (Container_resolve); handlers always observe target-local points.
+ *      with Component_hitTest over the eager abs rects; first (deepest,
+ *      top-most) hit wins. No parent box threads through — the cascade
+ *      keeps every abs live (Shift 2c).
+ *   2. Local coords: screen minus the abs origin of the hit panel
+ *      (Component_getAbsRect); handlers always observe target-local points.
  *   3. Type dispatch: the target's handlePointer rides Memory_type masked
  *      to class; no widget headers are included here — handlers arrive as
  *      weak externs (Pkg 2/3/4 define them later) and absent handlers are
@@ -193,20 +195,24 @@ static void *dispatchWindow(void) {
     return Darling_bridgeGetWindow();
 }
 
-static Panel *dispatchPick(Panel *node, float parentX, float parentY, float parentW, float parentH, float sx, float sy, Vec4 *outRect) {
+static Panel *dispatchPick(Panel *node, float sx, float sy, Vec4 *outRect) {
     if (!node || !outRect)
         return nullptr;
     if (!Panel_isVisible(node))
         return nullptr;
+    // Shift 2c: read the eager Component abs rect (live anchors, pivots,
+    // margin and padding folded in by the cascade) instead of resolving.
+    // Children carry absolute rects, so no parent box threads through.
     Vec4 rect;
-    Container_resolve(&(*node).base, parentX, parentY, parentW, parentH, &rect);
+    Component *meta = &(*node).component;
+    Component_getAbsRect(meta, &rect);
     size_t n = Panel_childCount(node);
     if (n > 0) {
         uint64_t doc = dispatchClass(node);
         for (size_t k = n; k > 0; k--) {
             Panel *kid = Panel_getChild(node, k - 1);
             Vec4 kidRect;
-            Panel *hit = dispatchPick(kid, rect.x, rect.y, rect.z, rect.w, sx, sy, &kidRect);
+            Panel *hit = dispatchPick(kid, sx, sy, &kidRect);
             if (hit) {
                 if (doc == ID_MARKDOWN_PANEL) {
                     Vec4_copy(&rect, outRect);
@@ -217,7 +223,7 @@ static Panel *dispatchPick(Panel *node, float parentX, float parentY, float pare
             }
         }
     }
-    if (!Container_hitTest(&(*node).base, parentX, parentY, parentW, parentH, sx, sy))
+    if (!Component_hitTest(meta, sx, sy))
         return nullptr;
     Vec4_copy(&rect, outRect);
     return node;
@@ -399,7 +405,7 @@ void Darling_firePointer(Panel *root, PointerEvent *ev) {
         return;
     }
     Vec4 rect;
-    Panel *hit = dispatchPick(root, 0.0f, 0.0f, 0.0f, 0.0f, sx, sy, &rect);
+    Panel *hit = dispatchPick(root, sx, sy, &rect);
     if (kind == PTR_DOWN) {
         if (hit) {
             s_activePanel = hit;
