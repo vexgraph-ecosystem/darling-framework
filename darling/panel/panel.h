@@ -119,10 +119,13 @@ bool Panel_paintParts(Panel *panel, void *renderer, void *cmdBuffer,
 // Dual-write: geometry setters mirror into the embedded Component metadata
 // (anchor/pivot values mirror CONTAINER_* exactly); readers stay on the
 // Container until the Component cascade wires up, so behavior is unchanged.
+// Panel Override Law: locked board roots (contentPane/scenePane) ignore
+// userland location/size on BOTH members — Container no-ops internally,
+// the Component write is guarded here.
 static inline void Panel_setLocation(Panel *p, float x, float y)
-    { if (p) { Container_setLocation(&(*p).base, x, y); Component_setLocation(&(*p).component, x, y); } }
+    { if (p) { Container_setLocation(&(*p).base, x, y); if (!Container_isLockedRoot(&(*p).base)) Component_setLocation(&(*p).component, x, y); } }
 static inline void Panel_setSize(Panel *p, float w, float h)
-    { if (p) { Container_setSize(&(*p).base, w, h); Component_setSize(&(*p).component, w, h); } }
+    { if (p) { Container_setSize(&(*p).base, w, h); if (!Container_isLockedRoot(&(*p).base)) Component_setSize(&(*p).component, w, h); } }
 static inline void Panel_setMinSize(Panel *p, float w, float h)
     { if (p) { Container_setMinSize(&(*p).base, w, h); Component_setMinSize(&(*p).component, w, h); } }
 static inline void Panel_setMaxSize(Panel *p, float w, float h)

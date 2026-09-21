@@ -668,6 +668,21 @@ bool Frame_syncResize(Frame *frame, int width, int height) {
         Container_forceSize(&(*(*frame).scenePane).base, liveW, liveH);
     if ((*frame).rootPanel != nullptr && (*frame).rootPanel != (*frame).contentPane)
         Container_forceSize(&(*(*frame).rootPanel).base, liveW, liveH);
+    // Panel Override Law: the embedded Component metadata tracks the same
+    // forced size (plain setters ARE the force path — Component carries no
+    // lock flag; the Panel facades enforce it).
+    if ((*frame).contentPane != nullptr) {
+        Panel *board = (*frame).contentPane;
+        Component_setSize(&(*board).component, liveW, liveH);
+    }
+    if ((*frame).scenePane != nullptr) {
+        Panel *board = (*frame).scenePane;
+        Component_setSize(&(*board).component, liveW, liveH);
+    }
+    if ((*frame).rootPanel != nullptr && (*frame).rootPanel != (*frame).contentPane) {
+        Panel *board = (*frame).rootPanel;
+        Component_setSize(&(*board).component, liveW, liveH);
+    }
 
     // Edit layouts of the children & resolve anchors/locations
     Frame_relayoutChildren(frame);
@@ -751,6 +766,13 @@ void Frame_setContentPane(Frame *frame, Panel *panel) {
         (*base).w = (float)(*frame).width;
         (*base).h = (float)(*frame).height;
         (*base).dirty = 1;
+        // Panel Override Law: mirror the override into the embedded
+        // Component metadata (anchor/pivot values mirror CONTAINER_*).
+        Component *meta = &(*panel).component;
+        Component_setAnchor(meta, COMPONENT_ANCHOR_TOP_LEFT);
+        Component_setPivot(meta, COMPONENT_PIVOT_TOP_LEFT);
+        Component_setLocation(meta, 0.0f, 0.0f);
+        Component_setSize(meta, (float)(*frame).width, (float)(*frame).height);
     }
 }
 
@@ -769,6 +791,13 @@ void Frame_setScenePane(Frame *frame, Panel *panel) {
         (*base).w = (float)(*frame).width;
         (*base).h = (float)(*frame).height;
         (*base).dirty = 1;
+        // Panel Override Law: mirror the override into the embedded
+        // Component metadata (anchor/pivot values mirror CONTAINER_*).
+        Component *meta = &(*panel).component;
+        Component_setAnchor(meta, COMPONENT_ANCHOR_TOP_LEFT);
+        Component_setPivot(meta, COMPONENT_PIVOT_TOP_LEFT);
+        Component_setLocation(meta, 0.0f, 0.0f);
+        Component_setSize(meta, (float)(*frame).width, (float)(*frame).height);
     }
 }
 
