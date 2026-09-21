@@ -132,6 +132,7 @@
  * ----------------------------------------------------------------------------
  * Constructors:
  *   - Component_0(void)
+ *   - Component_init(self)                   : in-place defaults for embedded members
  *
  * Core Functions:
  *   - Component_recompute(self)
@@ -248,10 +249,9 @@ static void contentBox(const Component *self, float *outX, float *outY,
 
 // CONSTRUCTORS
 
-Component *Component_0(void) {
-    Component *self = (Component*) Memory_alloc(TYPE_COMPONENT_SINGLETON, sizeof(Component));
+void Component_init(Component *self) {
     if (!self)
-        return nullptr;
+        return;
     (*self).x = 0.0f;
     (*self).y = 0.0f;
     (*self).w = 0.0f;
@@ -308,6 +308,13 @@ Component *Component_0(void) {
     (*self).retainScaleX = 0.0f;
     (*self).retainScaleY = 0.0f;
     (*self).retainGen = 0;
+}
+
+Component *Component_0(void) {
+    Component *self = (Component*) Memory_alloc(TYPE_COMPONENT_SINGLETON, sizeof(Component));
+    if (!self)
+        return nullptr;
+    Component_init(self);
     return self;
 }
 

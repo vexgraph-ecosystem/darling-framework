@@ -171,6 +171,10 @@ typedef struct Component {
 // visible, opaque, zero padding/border, hooks null.
 Component *Component_0(void);
 
+// Value initializer for embedded members (Panel.component): fills defaults
+// in place without allocating. Component_0 allocates, then calls this.
+void Component_init(Component *self);
+
 // Core Functions:
 //   - Component_recompute(self)                : recompute abs from stored parent abs
 //   - Component_setParentAbs(self, px, py, pw, ph) : parent reports its content box (cascade entry)
