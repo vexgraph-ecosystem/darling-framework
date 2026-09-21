@@ -13,8 +13,9 @@
  * DEFINITION: Color
  * ============================================================================
  * Unified color class holding canonical normalized float RGBA components
- * [0.0, 1.0], with bidirectional, value-preserving conversions across ARGB32,
- * RGBA32, HSV, HSL, and hexadecimal string encodings. Constructors
+ * [0.0, 1.0], with bidirectional, value-preserving conversions across RGBA32
+ * (packed 0xRRGGBBAA per the Strict 0xRRGGBBAA Color Law), HSV, HSL, and
+ * hexadecimal string encodings. Constructors
  * heap-allocate via calloc while Color_init and the from* factories write
  * dest-last into caller-owned storage; every entry path clamps components
  * into [0.0, 1.0]. Static constants (white, black, red, ...) return stack
@@ -30,7 +31,8 @@
  * LEVEL: L2 — Behavior (Multi-Format Unified Color Representation)
  * ============================================================================
  * Unified color class holding normalized float RGBA values [0.0, 1.0].
- * Provides bidirectional conversions across ARGB32, RGBA32, HSV, HSL, and
+ * Provides bidirectional conversions across RGBA32 (packed 0xRRGGBBAA,
+ * the Strict 0xRRGGBBAA Color Law), HSV, HSL, and
  * hexadecimal string encodings while preserving identical color values.
  *
  * STRUCT FIELDS (Mirroring darling/color/color.h):
@@ -44,7 +46,7 @@
  * ----------------------------------------------------------------------------
  * Constructors:
  *   - Color_0(void)
- *   - Color_1(argb)
+ *   - Color_1(rgba)
  *   - Color_2(rgb, a)
  *   - Color_3(r, g, b)
  *   - Color_4(r, g, b, a)
@@ -52,14 +54,13 @@
  *   - Color_free(color)
  *
  * Factories:
- *   - Color_fromARGB(argb, dest)
+ *   - Color_fromRGBA32(rgba, dest)
  *   - Color_fromRGBA(r, g, b, a, dest)
  *   - Color_fromHSV(h, s, v, a, dest)
  *   - Color_fromHSL(h, s, l, a, dest)
  *   - Color_fromHex(hex, dest)
  *
  * Projections:
- *   - Color_toARGB(const color)
  *   - Color_toRGBA32(const color)
  *   - Color_toHSV(const color, outH, outS, outV)
  *   - Color_toHSL(const color, outH, outS, outL)
@@ -71,7 +72,7 @@
  *
  * Setters:
  *   - Color_setRGBA(color, r, g, b, a)
- *   - Color_setARGB(color, argb)
+ *   - Color_setRGBA32(color, rgba)
  *   - Color_setHSV(color, h, s, v)
  *   - Color_setHSL(color, h, s, l)
  *   - Color_setHex(color, hex)
@@ -85,7 +86,7 @@
  *   - Color_getG(const color)
  *   - Color_getB(const color)
  *   - Color_getA(const color)
- *   - Color_getARGB(const color)
+ *   - Color_getRGBA32(const color)
  *   - Color_getHSV(const color, outH, outS, outV)
  *   - Color_getHSL(const color, outH, outS, outL)
  * ============================================================================
@@ -121,11 +122,11 @@ Color *Color_0(void) {
     return c;
 }
 
-Color *Color_1(uint32_t argb) {
+Color *Color_1(uint32_t rgba) {
     Color *c = (Color*) calloc(1, sizeof(Color));
     if (c == nullptr)
         return nullptr;
-    Color_fromARGB(argb, c);
+    Color_fromRGBA32(rgba, c);
     return c;
 }
 
@@ -165,14 +166,16 @@ void Color_free(Color *color) {
 // FACTORY INITIALIZERS
 // ============================================================================
 
-void Color_fromARGB(uint32_t argb, Color *dest) {
+void Color_fromRGBA32(uint32_t rgba, Color *dest) {
     if (dest == nullptr)
         return;
 
-    float a = ((argb >> 24) & 0xFF) / 255.0f;
-    float r = ((argb >> 16) & 0xFF) / 255.0f;
-    float g = ((argb >> 8) & 0xFF) / 255.0f;
-    float b = (argb & 0xFF) / 255.0f;
+    // Packed 0xRRGGBBAA per the Strict 0xRRGGBBAA Color Law: red = bits
+    // 24..31, green = bits 16..23, blue = bits 8..15, alpha = bits 0..7.
+    float r = ((rgba >> 24) & 0xFF) / 255.0f;
+    float g = ((rgba >> 16) & 0xFF) / 255.0f;
+    float b = ((rgba >> 8) & 0xFF) / 255.0f;
+    float a = (rgba & 0xFF) / 255.0f;
     Color_init(r, g, b, a, dest);
 }
 
@@ -303,18 +306,6 @@ bool Color_fromHex(const char *hex, Color *dest) {
 
 // PROJECTIONS / CONVERSIONS
 // ============================================================================
-
-uint32_t Color_toARGB(const Color *color) {
-    if (color == nullptr)
-        return 0;
-
-    uint32_t a = (uint32_t) lroundf((*color).a * 255.0f);
-    uint32_t r = (uint32_t) lroundf((*color).r * 255.0f);
-    uint32_t g = (uint32_t) lroundf((*color).g * 255.0f);
-    uint32_t b = (uint32_t) lroundf((*color).b * 255.0f);
-
-    return (a << 24) | (r << 16) | (g << 8) | b;
-}
 
 uint32_t Color_toRGBA32(const Color *color) {
     if (color == nullptr)
@@ -460,12 +451,6 @@ void Color_setRGBA(Color *color, float r, float g, float b, float a) {
     Color_init(r, g, b, a, color);
 }
 
-void Color_setARGB(Color *color, uint32_t argb) {
-    if (color == nullptr)
-        return;
-    Color_fromARGB(argb, color);
-}
-
 void Color_setHSV(Color *color, float h, float s, float v) {
     if (color == nullptr)
         return;
@@ -533,10 +518,6 @@ float Color_getA(const Color *color) {
     if (color == nullptr)
         return 0.0f;
     return (*color).a;
-}
-
-uint32_t Color_getARGB(const Color *color) {
-    return Color_toARGB(color);
 }
 
 void Color_getHSV(const Color *color, float *outH, float *outS, float *outV) {

@@ -13,6 +13,8 @@
 #include "graphvex/graphics_loop.h"
 #include "window/window.h"
 #include "window/window_event.h"
+#include "effect/visual_effect.h"
+#include "surface/surface.h"
 
 void Dialog_focus(Dialog *dialog);
 void Dialog_bringToFront(Dialog *dialog);
@@ -638,6 +640,11 @@ void FrameCocoa_attach(Frame *frame) {
         [contentView addSubview:vfx positioned:NSWindowBelow relativeTo:nil];
         (*frame).nativeView = (__bridge_retained void*) vfx;
 
+        if ((*frame).visualEffect != nullptr)
+            VisualEffect_attach((*frame).visualEffect, (__bridge void*) contentView);
+        if ((*frame).surface != nullptr)
+            Surface_attach((*frame).surface, (__bridge void*) contentView);
+
         // Bridge resize hook and WindowServer cadence
         Window_setResizeRenderHook((*frame).window, frameCocoaResizeHook, frame);
 
@@ -661,6 +668,10 @@ void FrameCocoa_detach(Frame *frame) {
         return;
 
     @autoreleasepool {
+        if ((*frame).surface != nullptr)
+            Surface_detach((*frame).surface);
+        if ((*frame).visualEffect != nullptr)
+            VisualEffect_detach((*frame).visualEffect);
         if ((*frame).nativeView != nullptr) {
             id obj = (__bridge_transfer id) (*frame).nativeView;
             if ([obj isKindOfClass:[NSView class]]) {

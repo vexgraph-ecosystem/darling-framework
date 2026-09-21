@@ -8,6 +8,9 @@
 #include "c23/constructor.h"
 #include "input/key_map.h"
 #include "window/window.h"
+#include "color/color.h"
+#include "effect/visual_effect.h"
+#include "surface/surface.h"
 
 #ifdef __cplusplus
 extern "C" {
@@ -110,6 +113,9 @@ typedef struct Frame {
     uint64_t lastRenderNanos;        // Monotonic clock at last Frame_render (dt source)
 
     void *nativeView;          // Pointer to platform NSView / CAMetalLayer container
+    VisualEffect *visualEffect;// R3 graphvex visual effect (frosted glass / vibrancy)
+    Surface *surface;          // R3 graphvex zero-swapchain IOSurface presentation canvas
+    Color backgroundColor;     // Background / clear color of the canvas
 } Frame;
 
 // Constructors:
@@ -305,6 +311,22 @@ void Frame_addMouseAdapter(Frame *frame, const MouseHandler *adapter);
 bool Frame_removeMouseAdapter(Frame *frame, const MouseHandler *adapter);
 void Frame_addTouchAdapter(Frame *frame, const TouchHandler *adapter);
 bool Frame_removeTouchAdapter(Frame *frame, const TouchHandler *adapter);
+
+// Visual Effect & Surface Presentation:
+void          Frame_setBlur(Frame *frame, float blur);
+float         Frame_getBlur(const Frame *frame);
+void          Frame_setMaterial(Frame *frame, int material);
+int           Frame_getMaterial(const Frame *frame);
+void          Frame_setVibrancy(Frame *frame, bool vibrant);
+bool          Frame_isVibrant(const Frame *frame);
+VisualEffect *Frame_getVisualEffect(const Frame *frame);
+Surface      *Frame_getSurface(const Frame *frame);
+
+// Background & Canvas Clear Color:
+void         Frame_setBackgroundColor(Frame *frame, const Color *color);
+const Color *Frame_getBackgroundColor(const Frame *frame);
+void         Frame_setBackground(Frame *frame, float r, float g, float b, float a);
+void         Frame_getBackground(const Frame *frame, float *outR, float *outG, float *outB, float *outA);
 
 #ifdef __cplusplus
 }

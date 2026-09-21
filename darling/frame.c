@@ -279,6 +279,8 @@ bool Frame_init(Window *win, void *graphics, Frame *frame) {
     (*frame).keyMap = nullptr;
     (*frame).lastRenderNanos = 0;
     (*frame).nativeView = nullptr;
+    (*frame).visualEffect = VisualEffect_0();
+    (*frame).surface = Surface_0();
 
     Frame_platformAttach(frame);
     return true;
@@ -343,6 +345,15 @@ void Frame_destroy(Frame *frame) {
     }
 
     Frame_platformDetach(frame);
+
+    if ((*frame).visualEffect != nullptr) {
+        VisualEffect_free((*frame).visualEffect);
+        (*frame).visualEffect = nullptr;
+    }
+    if ((*frame).surface != nullptr) {
+        Surface_free((*frame).surface);
+        (*frame).surface = nullptr;
+    }
 
     // Release arena-backed composables before the window resources die.
     // The master arena owns their slabs — reclaimed at Memory_freeAll (the
@@ -1442,3 +1453,93 @@ void Frame_setOnQuitRequested(Frame *frame, bool (*onQuitRequested)(Frame *frame
     (*frame).onQuitRequested = onQuitRequested;
     (*frame).quitRequestedUserData = userData;
 }
+
+// VISUAL EFFECT & SURFACE INTEGRATION
+// ============================================================================
+
+void Frame_setBlur(Frame *frame, float blur) {
+    if (frame == nullptr)
+        return;
+    if ((*frame).visualEffect != nullptr)
+        VisualEffect_setBlur((*frame).visualEffect, blur);
+}
+
+float Frame_getBlur(const Frame *frame) {
+    if (frame == nullptr || (*frame).visualEffect == nullptr)
+        return 0.0f;
+    return VisualEffect_getBlur((*frame).visualEffect);
+}
+
+void Frame_setMaterial(Frame *frame, int material) {
+    if (frame == nullptr)
+        return;
+    if ((*frame).visualEffect != nullptr)
+        VisualEffect_setMaterial((*frame).visualEffect, material);
+}
+
+int Frame_getMaterial(const Frame *frame) {
+    if (frame == nullptr || (*frame).visualEffect == nullptr)
+        return 0;
+    return VisualEffect_getMaterial((*frame).visualEffect);
+}
+
+void Frame_setVibrancy(Frame *frame, bool vibrant) {
+    if (frame == nullptr)
+        return;
+    if ((*frame).visualEffect != nullptr)
+        VisualEffect_setVibrancy((*frame).visualEffect, vibrant);
+}
+
+bool Frame_isVibrant(const Frame *frame) {
+    if (frame == nullptr || (*frame).visualEffect == nullptr)
+        return false;
+    return VisualEffect_isVibrant((*frame).visualEffect);
+}
+
+VisualEffect *Frame_getVisualEffect(const Frame *frame) {
+    return frame ? (*frame).visualEffect : nullptr;
+}
+
+Surface *Frame_getSurface(const Frame *frame) {
+    return frame ? (*frame).surface : nullptr;
+}
+
+void Frame_setBackgroundColor(Frame *frame, const Color *color) {
+    if (frame == nullptr)
+        return;
+    if (color != nullptr) {
+        (*frame).backgroundColor = *color;
+        if ((*frame).window != nullptr)
+            Window_setTransparentBackground((*frame).window, (*color).a < 1.0f);
+    }
+}
+
+const Color *Frame_getBackgroundColor(const Frame *frame) {
+    if (frame == nullptr)
+        return nullptr;
+    return &(*frame).backgroundColor;
+}
+
+void Frame_setBackground(Frame *frame, float r, float g, float b, float a) {
+    if (frame == nullptr)
+        return;
+    Color c;
+    Color_init(r, g, b, a, &c);
+    Frame_setBackgroundColor(frame, &c);
+}
+
+void Frame_getBackground(const Frame *frame, float *outR, float *outG, float *outB, float *outA) {
+    if (frame == nullptr) {
+        if (outR) *outR = 0.0f;
+        if (outG) *outG = 0.0f;
+        if (outB) *outB = 0.0f;
+        if (outA) *outA = 0.0f;
+        return;
+    }
+    if (outR) *outR = (*frame).backgroundColor.r;
+    if (outG) *outG = (*frame).backgroundColor.g;
+    if (outB) *outB = (*frame).backgroundColor.b;
+    if (outA) *outA = (*frame).backgroundColor.a;
+}
+
+

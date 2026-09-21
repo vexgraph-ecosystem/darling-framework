@@ -13,8 +13,9 @@ extern "C" {
 
 // darling/color/color.h — multi-format unified color representation.
 // Stores canonical RGBA normalized float components [0.0, 1.0] while
-// supporting lossless projection into and ingestion from ARGB32, RGBA32,
-// HSV, HSL, and hexadecimal string formats.
+// supporting lossless projection into and ingestion from RGBA32 (packed
+// 0xRRGGBBAA per the Strict 0xRRGGBBAA Color Law), HSV, HSL, and
+// hexadecimal string formats.
 
 typedef struct Color {
     float r;      // Red component [0.0f, 1.0f]
@@ -25,12 +26,12 @@ typedef struct Color {
 
 // Constructors:
 //   Color()                           — default opaque white (1, 1, 1, 1)
-//   Color(argb)                       — packed 0xAARRGGBB
+//   Color(rgba)                       — packed 0xRRGGBBAA
 //   Color(rgb, a)                     — packed 0x00RRGGBB + normalized alpha
 //   Color(r, g, b)                    — normalized floats, alpha = 1.0
 //   Color(r, g, b, a)                 — normalized floats
 Color *Color_0(void);
-Color *Color_1(uint32_t argb);
+Color *Color_1(uint32_t rgba);
 Color *Color_2(uint32_t rgb, float a);
 Color *Color_3(float r, float g, float b);
 Color *Color_4(float r, float g, float b, float a);
@@ -41,14 +42,13 @@ bool Color_init(float r, float g, float b, float a, Color *dest);
 void Color_free(Color *color);
 
 // Factory Initializers (Dest-Last):
-void Color_fromARGB(uint32_t argb, Color *dest);
+void Color_fromRGBA32(uint32_t rgba, Color *dest);
 void Color_fromRGBA(float r, float g, float b, float a, Color *dest);
 void Color_fromHSV(float h, float s, float v, float a, Color *dest);
 void Color_fromHSL(float h, float s, float l, float a, Color *dest);
 bool Color_fromHex(const char *hex, Color *dest);
 
 // Projections / Conversions:
-uint32_t Color_toARGB(const Color *color);
 uint32_t Color_toRGBA32(const Color *color);
 void Color_toHSV(const Color *color, float *outH, float *outS, float *outV);
 void Color_toHSL(const Color *color, float *outH, float *outS, float *outL);
@@ -60,7 +60,7 @@ bool Color_equals(const Color *a, const Color *b);
 
 // Setters:
 void Color_setRGBA(Color *color, float r, float g, float b, float a);
-void Color_setARGB(Color *color, uint32_t argb);
+void Color_setRGBA32(Color *color, uint32_t rgba);
 void Color_setHSV(Color *color, float h, float s, float v);
 void Color_setHSL(Color *color, float h, float s, float l);
 bool Color_setHex(Color *color, const char *hex);
@@ -74,7 +74,7 @@ float Color_getR(const Color *color);
 float Color_getG(const Color *color);
 float Color_getB(const Color *color);
 float Color_getA(const Color *color);
-uint32_t Color_getARGB(const Color *color);
+uint32_t Color_getRGBA32(const Color *color);
 void Color_getHSV(const Color *color, float *outH, float *outS, float *outV);
 void Color_getHSL(const Color *color, float *outH, float *outS, float *outL);
 
