@@ -101,6 +101,7 @@
  *   - Panel_setMaxSize(p, w, h)
  *   - Panel_setAnchor(p, anchor)
  *   - Panel_setPivot(p, pivot)
+ *   - Panel_setOrigin(p, origin)             // Component-only (Container has no origin)
  *   - Panel_setVisible(p, visible)
  *   - Panel_setZ(p, z)
  *   - Panel_setImage(p, image)

@@ -134,6 +134,11 @@ static inline void Panel_setAnchor(Panel *p, int anchor)
     { if (p) { Container_setAnchor(&(*p).base, anchor); Component_setAnchor(&(*p).component, anchor); } }
 static inline void Panel_setPivot(Panel *p, int pivot)
     { if (p) { Container_setPivot(&(*p).base, pivot); Component_setPivot(&(*p).component, pivot); } }
+// Origin lives on the Component only (Container has no origin field): always
+// safe to write, nothing to diverge. Corner-anchored insets measure from
+// their own corner (TR + TOP_RIGHT origin + positive loc = inward inset).
+static inline void Panel_setOrigin(Panel *p, int origin)
+    { if (p) Component_setOrigin(&(*p).component, origin); }
 static inline void Panel_setVisible(Panel *p, bool visible)
     { if (p) { Container_setVisible(&(*p).base, visible); Component_setVisible(&(*p).component, visible); } }
 static inline void Panel_setOpacity(Panel *p, float opacity)
