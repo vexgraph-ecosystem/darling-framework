@@ -5,7 +5,6 @@
 #include "oop/type.h"
 #include "annotation/definition.h"
 #include "annotation/overview.h"
-#include "vulkan/vk.h"
 
 ;;DEFINITION
 /**
@@ -29,9 +28,12 @@
  * fanning out through the parent-ref set so every holder of a view
  * re-renders. Rendering is an ordered five-stage part pipeline
  * (background -> image -> text -> border -> foreground) with per-instance
- * function-pointer slots — the setter is the @Override, nullptr restores
- * the built-in default, and callers route through Panel_paintParts; the
- * legacy renderHandler remains as a back-compat path. All state is
+ * function-pointer slots — the setter is the @Override, nullptr skips the
+ * stage, and callers route through Panel_paintParts, which issues each
+ * stage's draws through the active Graphics row into the panel's absolute
+ * rect (the legacy Vulkan renderHandler slot died with the old renderer).
+ * The background color lives on the embedded Component (Strict 0xRRGGBBAA).
+ * All state is
  * arena-allocated (Memory_alloc) with symmetric getters/setters and
  * dest-last layout facades forwarding to the embedded Container.
  * ============================================================================
@@ -51,14 +53,11 @@
  * ----------------------------------------------------------------------------
  *   Container base;                // Inherited layout/bounds/anchors/flags (see container.h).
  *                                  // FIRST: (Container*) punning depends on the prefix.
- *   Component component;           // Element metadata (anchor/origin/pivot/abs cascade,
- *                                  // see component.h). Dual-written by the facades;
- *                                  // Container stays the reader until Shift 2.
- *   uint32_t color;                // Background fill, packed 0xAARRGGBB
+ *   Component component;           // Element metadata (anchor/origin/pivot/abs cascade
+ *                                  // + background color, Strict 0xRRGGBBAA). Dual-written
+ *                                  // by the facades; Container stays the reader until Shift 2.
  *   void *filters;                 // Render-graph slot (@Draft placeholder, not yet wired)
- *   void *image;                   // Shared payload pointer (aliased through views)
- *   Panel_RenderFn renderHandler;  // Legacy monolith; non-null = back-compat path
- *   void *renderUserdata;          // Opaque handler state; never interpreted
+ *   Image *image;                  // Shared payload (aliased through views; graphvex Image)
  *   Panel_PartFn backgroundFn;     // Stage 0: fill; nullptr = skip
  *   Panel_PartFn imageFn;          // Stage 1: picture content; nullptr = skip
  *   Panel_PartFn textFn;           // Stage 2: label quad; nullptr = skip
@@ -75,7 +74,7 @@
  *   - Panel_1(parent)
  *
  * Core Functions:
- *   - Panel_paintParts(panel, renderer, cmdBuffer, surfaceW, surfaceH, x, y, w, h)
+ *   - Panel_paintParts(panel, rect)
  *   - Panel_childCount(p)
  *   - Panel_containsChild(p, child)
  *   - Panel_addContainer(p, child)
@@ -88,8 +87,6 @@
  * Setters:
  *   - Panel_setBackgroundColor(p, color)
  *   - Panel_setBackgroundColorRGBA(p, r, g, b, a)
- *   - Panel_setRenderHandler(p, fn)
- *   - Panel_setRenderUserdata(p, userdata)
  *   - Panel_setBackgroundFn(p, fn)
  *   - Panel_setImageFn(p, fn)
  *   - Panel_setTextFn(p, fn)
@@ -110,8 +107,6 @@
  *
  * Getters:
  *   - Panel_getBackgroundColor(p)
- *   - Panel_getRenderHandler(p)
- *   - Panel_getRenderUserdata(p)
  *   - Panel_getBackgroundFn(p)
  *   - Panel_getImageFn(p)
  *   - Panel_getTextFn(p)
@@ -133,30 +128,23 @@
 
 #define PANEL_CHILDREN_INITIAL 4
 
-// Default stage 0: solid background fill via solid_quad.
-// Transparent color skips; opacity folds per Container.
-static bool paintBackground(Panel *panel, void *renderer, void *cmdBuffer,
-                            float surfaceW, float surfaceH,
-                            float x, float y, float w, float h) {
-    (void) renderer;
-    if (!panel || !cmdBuffer)
+// Default stage 0: solid background fill through the active Graphics row.
+// Transparent color skips; opacity folds over the color. The color lives on
+// the embedded Component (Strict 0xRRGGBBAA — the Brush contract), so the
+// stack Brush is a plain literal: zero heap on the paint path.
+static bool paintBackground(Panel *panel, const Rectangle *rect) {
+    if (!panel || !rect)
         return false;
-    if (w <= 0.0f || h <= 0.0f)
+    if ((*rect).width <= 0.0f || (*rect).height <= 0.0f)
         return false;
-    uint32_t color = (*panel).color;
-    if ((color >> 24) == 0)
+    uint32_t color = GraphicsComponent_getBackgroundColor(&(*panel).component);
+    if ((color & 0xFFu) == 0)
         return false;
     float op = GraphicsComponent_getOpacity(&(*panel).component);
     if (op <= 0.0f)
         return false;
-    float r = (float) ((color >> 16) & 0xFF) / 255.0f;
-    float g = (float) ((color >> 8) & 0xFF) / 255.0f;
-    float b = (float) (color & 0xFF) / 255.0f;
-    float a = (float) ((color >> 24) & 0xFF) / 255.0f * op;
-    if (a <= 0.0f)
-        return false;
-    Vk_fillRect(cmdBuffer, surfaceW, surfaceH, x, y, w, h, r, g, b, a);
-    return true;
+    Brush brush = { color, op };
+    return Graphics_fillRect(rect, &brush);
 }
 
 Panel *Panel_0(void) {
@@ -173,11 +161,8 @@ Panel *Panel_0(void) {
     Memory_free(b);
     GraphicsComponent_init(&(*p).component);
 
-    (*p).color = PANEL_COLOR_CLEAR;
     (*p).filters = nullptr;
     (*p).image = nullptr;
-    (*p).renderHandler = nullptr;
-    (*p).renderUserdata = nullptr;
     (*p).backgroundFn = paintBackground;
     (*p).imageFn = nullptr;
     (*p).textFn = nullptr;
@@ -197,42 +182,18 @@ Panel *Panel_1(Panel *parent) {
 }
 
 uint32_t Panel_getBackgroundColor(const Panel *p) {
-    return p ? (*p).color : PANEL_COLOR_CLEAR;
+    return p ? GraphicsComponent_getBackgroundColor(&(*p).component) : PANEL_COLOR_CLEAR;
 }
 
 void Panel_setBackgroundColor(Panel *p, uint32_t color) {
     if (!p)
         return;
-    (*p).color = color;
+    GraphicsComponent_setBackgroundColor(&(*p).component, color);
 }
 
 void Panel_setBackgroundColorRGBA(Panel *p, uint8_t r, uint8_t g, uint8_t b, uint8_t a) {
-    Panel_setBackgroundColor(p, ((uint32_t)a << 24) | ((uint32_t)r << 16)
-        | ((uint32_t)g << 8) | (uint32_t)b);
-}
-
-// Method-slot accessors: setting a handler is the @Override; nullptr restores
-// the renderer default. Marked dirty so every holder re-renders this tick.
-Panel_RenderFn Panel_getRenderHandler(const Panel *p) {
-    return p ? (*p).renderHandler : nullptr;
-}
-
-void Panel_setRenderHandler(Panel *p, Panel_RenderFn fn) {
-    if (!p)
-        return;
-    (*p).renderHandler = fn;
-}
-
-// Opaque handler state (e.g. per-pane animation structs). Pure slot — never
-// interpreted, never copied by views (payload aliasing stops at handler data).
-void *Panel_getRenderUserdata(const Panel *p) {
-    return p ? (*p).renderUserdata : nullptr;
-}
-
-void Panel_setRenderUserdata(Panel *p, void *userdata) {
-    if (!p)
-        return;
-    (*p).renderUserdata = userdata;
+    Panel_setBackgroundColor(p, ((uint32_t)r << 24) | ((uint32_t)g << 16)
+        | ((uint32_t)b << 8) | (uint32_t)a);
 }
 
 static void markPartDirty(Panel *p) {
@@ -294,34 +255,27 @@ void Panel_setForegroundFn(Panel *p, Panel_PartFn fn) {
     markPartDirty(p);
 }
 
-bool Panel_paintParts(Panel *panel, void *renderer, void *cmdBuffer,
-                      float surfaceW, float surfaceH,
-                      float x, float y, float w, float h) {
-    if (!panel || !cmdBuffer)
+bool Panel_paintParts(Panel *panel, const Rectangle *rect) {
+    if (!panel || !rect)
         return false;
-    if (w <= 0.0f || h <= 0.0f)
+    if ((*rect).width <= 0.0f || (*rect).height <= 0.0f)
         return false;
-    Panel_RenderFn mono = (*panel).renderHandler;
-    if (mono) {
-        mono(panel, renderer, cmdBuffer, surfaceW, surfaceH, x, y, w, h);
-        return true;
-    }
     bool drew = false;
     Panel_PartFn bg = (*panel).backgroundFn;
     if (bg)
-        drew = bg(panel, renderer, cmdBuffer, surfaceW, surfaceH, x, y, w, h) || drew;
+        drew = bg(panel, rect) || drew;
     Panel_PartFn img = (*panel).imageFn;
     if (img)
-        drew = img(panel, renderer, cmdBuffer, surfaceW, surfaceH, x, y, w, h) || drew;
+        drew = img(panel, rect) || drew;
     Panel_PartFn txt = (*panel).textFn;
     if (txt)
-        drew = txt(panel, renderer, cmdBuffer, surfaceW, surfaceH, x, y, w, h) || drew;
+        drew = txt(panel, rect) || drew;
     Panel_PartFn bd = (*panel).borderFn;
     if (bd)
-        drew = bd(panel, renderer, cmdBuffer, surfaceW, surfaceH, x, y, w, h) || drew;
+        drew = bd(panel, rect) || drew;
     Panel_PartFn fg = (*panel).foregroundFn;
     if (fg)
-        drew = fg(panel, renderer, cmdBuffer, surfaceW, surfaceH, x, y, w, h) || drew;
+        drew = fg(panel, rect) || drew;
     return drew;
 }
 
@@ -459,12 +413,9 @@ Panel *Panel_add(Panel *parent, const Panel *node) {
         return nullptr;
 
     // structural deep copy: the Component metadata is its own layout
+    // (and carries the background color — Strict 0xRRGGBBAA)
     (*copy).component = (*node).component;
-    (*copy).color = (*node).color;
     // behavior travels with structure: a view renders exactly like its source
-    (*copy).renderHandler = (*node).renderHandler;
-    // handler state aliases like a payload (opaque, shared through the view)
-    (*copy).renderUserdata = (*node).renderUserdata;
     (*copy).backgroundFn = (*node).backgroundFn;
     (*copy).imageFn = (*node).imageFn;
     (*copy).textFn = (*node).textFn;

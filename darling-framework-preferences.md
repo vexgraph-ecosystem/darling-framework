@@ -319,6 +319,44 @@ duplicate. One record means one resolve path, one AUTO protocol, one truth.
 
 ---
 
+### One Paint Path Law (the Graphics row is the only renderer)
+
+#### Definition:
+A widget paints through **graphvex's `Graphics` row** and nothing else. The
+part-fn slot is `bool (*Panel_PartFn)(struct Panel *panel, const Rectangle
+*rect)`: each stage issues its draws through the `Graphics_*` forwarders into
+the panel's absolute rect (bind the target + row first, exactly like
+`ElementPainter`). The legacy Vulkan `renderHandler` monolith and its
+`renderUserdata` are **deleted** — there is no second renderer.
+
+#### The Why:
+A widget that speaks Vulkan handles directly cannot be tested headless, cannot
+run on the raster row, and drags the whole old driver API into R4. One row
+means one renderer, one headless test path, and zero driver lock-in (the
+Vertical Integration Law: R4 consumes R3's seam, never the driver).
+
+#### The Rule:
+1. **Part-fns take (panel, rect) and draw through the row.** No `cmdBuffer`,
+   no `surfaceW/H`, no `Vk_*` in a widget. The background color is read from
+   the embedded `GraphicsComponent` (Strict `0xRRGGBBAA`) and painted with a
+   stack `Brush` literal — zero heap on the paint path.
+2. **Fit math is R3's.** An image is drawn with `Graphics_drawImageFit`
+   (`Image_fitRect` + scissor + draw); a widget never reimplements scaling,
+   letterboxing, cropping, or windowing.
+3. **The picture modes are eight, over the R3 families.** `PICTURE_MODE_FIT`
+   → stretch, `PICTURE_MODE_ZOOM_FILL` → cover, `PICTURE_MODE_ZOOM_FIT` →
+   contain, and `PICTURE_MODE_FILL_{CENTER,TOP_LEFT,TOP_RIGHT,BOTTOM_LEFT,
+   BOTTOM_RIGHT}` → the source-pixel window with that anchor.
+4. **The window is one window with two doors.** `setFillWidth` / `setFillHeight`
+   name the same source-pixel window — whichever axis you think in — the other
+   derives from the widget's aspect at paint, the window scales to fill the
+   widget (`scale = widget ÷ window`), unset means widget pixels (true 1:1),
+   and the window always clamps to the image.
+5. **An unbound picture is its background.** A null image skips stage 1 and
+   leaves stage 0's fill — never an amber placeholder, never a crash.
+
+---
+
 ## 3. Repo-Local Extensions (managed, per the Conflict Triage Law)
 
 ;;INTENTION("R4 UI Toolkit: retained-mode presentation; locked root boards; sub-part field segregation; zero runtime allocation in layout passes.")

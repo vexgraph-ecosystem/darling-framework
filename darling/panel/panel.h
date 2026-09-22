@@ -8,7 +8,8 @@
 #include "../../c23/darling-type.h"
 #include "darling/container.h"
 #include "darling/component.h"
-#include "image/image.h"
+#include "lang/graphics.h"
+#include "lang/image.h"
 #include "struct/list.h"
 #include "struct/set.h"
 
@@ -23,22 +24,18 @@
 // class load; here it is an explicit function-pointer slot per INSTANCE.
 // The setter is the @Override annotation, nullptr restores the built-in
 // default, and callers never read slots directly — they call the dispatcher
-// (Panel_render), which routes handler-or-default. Subclasses inherit the
-// slots by embedding (Scene3D -> Scene -> Panel), no vtable needed.
+// (Panel_paintParts), which runs the stages in order through the active
+// Graphics row. Subclasses inherit the slots by embedding (Scene3D -> Scene
+// -> Panel), no vtable needed.
 
 struct Panel;
 
-typedef void (*Panel_RenderFn)(struct Panel *panel, void *renderer,
-                               void *cmdBuffer, float surfaceW, float surfaceH,
-                               float x, float y, float w, float h);
-
 // Per-part paint slot: one stage of the ordered pipeline
-// (background -> image -> text -> border -> foreground).
-// Records into the open pass like Panel_RenderFn; returns true when a draw
-// was issued (feeds the empty-present guard). nullptr = skip stage.
-typedef bool (*Panel_PartFn)(struct Panel *panel, void *renderer,
-                             void *cmdBuffer, float surfaceW, float surfaceH,
-                             float x, float y, float w, float h);
+// (background -> image -> text -> border -> foreground). A stage ISSUES its
+// draws through the active Graphics row (bind the target + row first), painting
+// into the panel's absolute rect; returns true when a draw was issued (feeds
+// the empty-present guard). nullptr = skip stage.
+typedef bool (*Panel_PartFn)(struct Panel *panel, const Rectangle *rect);
 
 typedef struct Panel {
     Container base;         // embedded prefix — pass &(*panel).base upward.
@@ -46,11 +43,9 @@ typedef struct Panel {
     Component component;    // element metadata (anchor/origin/pivot/abs cascade).
                             // Dual-written by the facades below; Container stays the
                             // reader until the Component cascade wires up (Shift 2).
-    uint32_t color;         // 0xAARRGGBB
+                            // The background color lives here too (Strict 0xRRGGBBAA).
     void *filters;          // render-graph slot (@Draft placeholder)
     Image *image;           // payload slot: backing Image (Image class in graphvex)
-    Panel_RenderFn renderHandler; // legacy monolith; non-null = back-compat path
-    void *renderUserdata;   // opaque arg handed back to renderHandler
     Panel_PartFn backgroundFn; // stage 0: fill / material; nullptr = skip
     Panel_PartFn imageFn;   // stage 1: picture / video / scene content
     Panel_PartFn textFn;    // stage 2: raster / SDF label quad
@@ -62,7 +57,7 @@ typedef struct Panel {
 } Panel;
 
 #define PANEL_COLOR_WHITE 0xFFFFFFFFu
-#define PANEL_COLOR_BLACK 0xFF000000u
+#define PANEL_COLOR_BLACK 0x000000FFu
 #define PANEL_COLOR_CLEAR 0x00000000u
 
 // Constructors:
@@ -73,21 +68,10 @@ Panel *Panel_1(Panel *parent);
 
 #define Panel(...) CONSTRUCTOR_DISPATCH(Panel, __VA_ARGS__)
 
-// Background color (0xAARRGGBB).
+// Background color (Strict 0xRRGGBBAA — lives on the embedded Component).
 uint32_t Panel_getBackgroundColor(const Panel *p);
 void Panel_setBackgroundColor(Panel *p, uint32_t color);
 void Panel_setBackgroundColorRGBA(Panel *p, uint8_t r, uint8_t g, uint8_t b, uint8_t a);
-
-// Draw override (see METHOD SLOTS above). The renderer hands the panel a
-// drawable-clipped pixel rect inside an open render pass; the handler
-// records whatever it wants into cmdBuffer. nullptr = built-in solid quad.
-Panel_RenderFn Panel_getRenderHandler(const Panel *p);
-void Panel_setRenderHandler(Panel *p, Panel_RenderFn fn);
-
-// Opaque per-instance state for the render handler (e.g. PaneAnim for
-// CAMetalLayer pane scenes). Never interpreted by the panel itself.
-void *Panel_getRenderUserdata(const Panel *p);
-void Panel_setRenderUserdata(Panel *p, void *userdata);
 
 // Per-part paint slots (ordered pipeline: background -> image -> text
 // -> border -> foreground). Setter is the @Override; nullptr skips the
@@ -103,12 +87,10 @@ void Panel_setBorderFn(Panel *p, Panel_PartFn fn);
 Panel_PartFn Panel_getForegroundFn(const Panel *p);
 void Panel_setForegroundFn(Panel *p, Panel_PartFn fn);
 
-// Ordered dispatcher: runs legacy renderHandler when set (back-compat
-// for unmigrated widgets), else runs background -> image -> text ->
-// border -> foreground, skipping nulls. Returns true when any stage ran.
-bool Panel_paintParts(Panel *panel, void *renderer, void *cmdBuffer,
-                      float surfaceW, float surfaceH,
-                      float x, float y, float w, float h);
+// Ordered dispatcher: runs background -> image -> text -> border ->
+// foreground through the active Graphics row, skipping nulls. Returns true
+// when any stage issued a draw.
+bool Panel_paintParts(Panel *panel, const Rectangle *rect);
 
 // Layout facade — the delegation chain ends here. Every accessor below is a
 // one-hop static inline to the embedded Component metadata, so call sites
@@ -147,9 +129,9 @@ static inline void Panel_setMargin(Panel *p, float l, float t, float r, float b)
 static inline void Panel_getMargin(const Panel *p, float *l, float *t, float *r, float *b)
     { if (p) GraphicsComponent_getMargin(&(*p).component, l, t, r, b); }
 static inline void Panel_setRadius(Panel *p, float r)
-    { if (p) GraphicsComponent_setRadius(&(*p).component, r); }
+    { if (p) GraphicsComponent_setCornerRadius(&(*p).component, r); }
 static inline float Panel_getRadius(const Panel *p)
-    { return p ? GraphicsComponent_getRadius(&(*p).component) : 0.0f; }
+    { return p ? GraphicsComponent_getCornerRadius(&(*p).component) : 0.0f; }
 static inline void Panel_setRadiusMode(Panel *p, int mode)
     { if (p) GraphicsComponent_setRadiusMode(&(*p).component, mode); }
 static inline int Panel_getRadiusMode(const Panel *p)
