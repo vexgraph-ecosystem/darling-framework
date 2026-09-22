@@ -122,7 +122,7 @@ static bool codePaintBackground(Panel *panel, void *renderer, void *cmdBuffer,
     if (w <= 0.0f || h <= 0.0f)
         return false;
     Component *c = &(*panel).component;
-    float op = Component_getOpacity(c);
+    float op = GraphicsComponent_getOpacity(c);
     if (op <= 0.0f)
         return false;
     float gw = (*cf).gutterWidth > 0.0f ? (*cf).gutterWidth : CODEFIELD_DEFAULT_GUTTER_W;
@@ -133,8 +133,8 @@ static bool codePaintBackground(Panel *panel, void *renderer, void *cmdBuffer,
             edW = 10.0f;
         Panel *ebp = &(*ed).base;
         Component *ec = &(*ebp).component;
-        Component_setLocation(ec, gw, 0.0f);
-        Component_setSize(ec, edW, h);
+        GraphicsComponent_setLocation(ec, gw, 0.0f);
+        GraphicsComponent_setSize(ec, edW, h);
     }
     uint32_t gbg = (*cf).gutterBackground;
     float gr = ((gbg >> 16) & 0xFF) / 255.0f;
@@ -159,7 +159,7 @@ static bool codePaintText(Panel *panel, void *renderer, void *cmdBuffer,
     if (w <= 0.0f || h <= 0.0f)
         return false;
     Component *c = &(*panel).component;
-    float op = Component_getOpacity(c);
+    float op = GraphicsComponent_getOpacity(c);
     if (op <= 0.0f)
         return false;
     Textarea *ed = (*cf).editor;

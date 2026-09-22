@@ -195,13 +195,13 @@ void Canvas_resolveRoot(const Canvas *c, void *node, float fbW, float fbH, Vec4 
         Picture *pic = (Picture*) node;
         Panel *panel = &(*pic).base;
         Component *meta = &(*panel).component;
-        Component_setParentAbs(meta, 0.0f, 0.0f, cw, ch);
-        Component_getAbsRect(meta, outRect);
+        GraphicsComponent_setParentAbs(meta, 0.0f, 0.0f, cw, ch);
+        GraphicsComponent_getAbsRect(meta, outRect);
     } else {
         Panel *panel = (Panel*) node;
         Component *meta = &(*panel).component;
-        Component_setParentAbs(meta, 0.0f, 0.0f, cw, ch);
-        Component_getAbsRect(meta, outRect);
+        GraphicsComponent_setParentAbs(meta, 0.0f, 0.0f, cw, ch);
+        GraphicsComponent_getAbsRect(meta, outRect);
     }
 }
 

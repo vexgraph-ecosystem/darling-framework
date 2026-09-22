@@ -232,7 +232,7 @@ static bool textareaPaintBackground(Panel *panel, void *renderer, void *cmdBuffe
     if (w <= 0.0f || h <= 0.0f)
         return false;
     Component *c = &(*panel).component;
-    float op = Component_getOpacity(c);
+    float op = GraphicsComponent_getOpacity(c);
     if (op <= 0.0f)
         return false;
     uint32_t bg = Panel_getBackgroundColor(panel);
@@ -259,7 +259,7 @@ static bool textareaPaintText(Panel *panel, void *renderer, void *cmdBuffer,
     if (w <= 0.0f || h <= 0.0f)
         return false;
     Component *c = &(*panel).component;
-    float op = Component_getOpacity(c);
+    float op = GraphicsComponent_getOpacity(c);
     if (op <= 0.0f)
         return false;
     if (!(*ta).text || (*ta).text[0] == '\0')
@@ -294,7 +294,7 @@ static bool textareaPaintBorder(Panel *panel, void *renderer, void *cmdBuffer,
     if (w <= 0.0f || h <= 0.0f)
         return false;
     Component *c = &(*panel).component;
-    float op = Component_getOpacity(c);
+    float op = GraphicsComponent_getOpacity(c);
     if (op <= 0.0f)
         return false;
     uint32_t borderColor = (*ta).focused ? 0xFF3B82F6u : 0xFF3F3F46u;
@@ -322,7 +322,7 @@ static bool textareaPaintCaret(Panel *panel, void *renderer, void *cmdBuffer,
     if (!(*ta).focused)
         return false;
     Component *c = &(*panel).component;
-    float op = Component_getOpacity(c);
+    float op = GraphicsComponent_getOpacity(c);
     if (op <= 0.0f)
         return false;
     float padX = 8.0f;

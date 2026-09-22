@@ -281,7 +281,7 @@ static bool buttonPaintBackground(Panel *panel, void *renderer, void *cmdBuffer,
     if (w <= 0.0f || h <= 0.0f)
         return false;
     Component *c = &(*panel).component;
-    float op = Component_getOpacity(c);
+    float op = GraphicsComponent_getOpacity(c);
     if (op <= 0.0f)
         return false;
     uint32_t fill = (*b).bg;
@@ -313,7 +313,7 @@ static bool buttonPaintBorder(Panel *panel, void *renderer, void *cmdBuffer,
     if (w <= 0.0f || h <= 0.0f)
         return false;
     Component *c = &(*panel).component;
-    float op = Component_getOpacity(c);
+    float op = GraphicsComponent_getOpacity(c);
     if (op <= 0.0f)
         return false;
     float btw = (*b).borderWidth > 0.0f ? (*b).borderWidth : 1.0f;
@@ -342,7 +342,7 @@ static bool buttonPaintText(Panel *panel, void *renderer, void *cmdBuffer,
     if (w <= 0.0f || h <= 0.0f)
         return false;
     Component *c = &(*panel).component;
-    float op = Component_getOpacity(c);
+    float op = GraphicsComponent_getOpacity(c);
     if (op <= 0.0f)
         return false;
     if (!(*b).label || (*b).label[0] == '\0')

@@ -115,45 +115,45 @@ bool Panel_paintParts(Panel *panel, void *renderer, void *cmdBuffer,
 // never pierce (*panel).component directly. The embedded Container base is
 // just a Component[] node (child metadata list) and carries no layout.
 // Subclass levels re-export the same names over their embedded prefix
-// (Scene_setLocation -> Panel_setLocation -> Component_setLocation), which
+// (Scene_setLocation -> Panel_setLocation -> GraphicsComponent_setLocation), which
 // is Java's inherited methods without a vtable: static binding, zero
 // runtime cost, type-checked at each level.
 static inline void Panel_setLocation(Panel *p, float x, float y)
-    { if (p) Component_setLocation(&(*p).component, x, y); }
+    { if (p) GraphicsComponent_setLocation(&(*p).component, x, y); }
 static inline void Panel_setSize(Panel *p, float w, float h)
-    { if (p) Component_setSize(&(*p).component, w, h); }
+    { if (p) GraphicsComponent_setSize(&(*p).component, w, h); }
 static inline void Panel_setMinSize(Panel *p, float w, float h)
-    { if (p) Component_setMinSize(&(*p).component, w, h); }
+    { if (p) GraphicsComponent_setMinSize(&(*p).component, w, h); }
 static inline void Panel_setMaxSize(Panel *p, float w, float h)
-    { if (p) Component_setMaxSize(&(*p).component, w, h); }
+    { if (p) GraphicsComponent_setMaxSize(&(*p).component, w, h); }
 static inline void Panel_setAnchor(Panel *p, int anchor)
-    { if (p) Component_setAnchor(&(*p).component, anchor); }
+    { if (p) GraphicsComponent_setAnchor(&(*p).component, anchor); }
 static inline void Panel_setPivot(Panel *p, int pivot)
-    { if (p) Component_setPivot(&(*p).component, pivot); }
+    { if (p) GraphicsComponent_setPivot(&(*p).component, pivot); }
 static inline void Panel_setOrigin(Panel *p, int origin)
-    { if (p) Component_setOrigin(&(*p).component, origin); }
+    { if (p) GraphicsComponent_setOrigin(&(*p).component, origin); }
 static inline void Panel_setVisible(Panel *p, bool visible)
-    { if (p) Component_setVisible(&(*p).component, visible); }
+    { if (p) GraphicsComponent_setVisible(&(*p).component, visible); }
 static inline void Panel_setOpacity(Panel *p, float opacity)
-    { if (p) Component_setOpacity(&(*p).component, opacity); }
+    { if (p) GraphicsComponent_setOpacity(&(*p).component, opacity); }
 static inline float Panel_getOpacity(const Panel *p)
-    { return p ? Component_getOpacity(&(*p).component) : 1.0f; }
+    { return p ? GraphicsComponent_getOpacity(&(*p).component) : 1.0f; }
 static inline bool Panel_isVisible(const Panel *p)
-    { return p && Component_isVisible(&(*p).component); }
+    { return p && GraphicsComponent_isVisible(&(*p).component); }
 static inline void Panel_setZ(Panel *p, int z)
-    { if (p) Component_setZ(&(*p).component, z); }
+    { if (p) GraphicsComponent_setZ(&(*p).component, z); }
 static inline void Panel_setMargin(Panel *p, float l, float t, float r, float b)
-    { if (p) Component_setMargin(&(*p).component, l, t, r, b); }
+    { if (p) GraphicsComponent_setMargin(&(*p).component, l, t, r, b); }
 static inline void Panel_getMargin(const Panel *p, float *l, float *t, float *r, float *b)
-    { if (p) Component_getMargin(&(*p).component, l, t, r, b); }
+    { if (p) GraphicsComponent_getMargin(&(*p).component, l, t, r, b); }
 static inline void Panel_setRadius(Panel *p, float r)
-    { if (p) Component_setRadius(&(*p).component, r); }
+    { if (p) GraphicsComponent_setRadius(&(*p).component, r); }
 static inline float Panel_getRadius(const Panel *p)
-    { return p ? Component_getRadius(&(*p).component) : 0.0f; }
+    { return p ? GraphicsComponent_getRadius(&(*p).component) : 0.0f; }
 static inline void Panel_setRadiusMode(Panel *p, int mode)
-    { if (p) Component_setRadiusMode(&(*p).component, mode); }
+    { if (p) GraphicsComponent_setRadiusMode(&(*p).component, mode); }
 static inline int Panel_getRadiusMode(const Panel *p)
-    { return p ? Component_getRadiusMode(&(*p).component) : COMPONENT_CORNER_ARC; }
+    { return p ? GraphicsComponent_getRadiusMode(&(*p).component) : COMPONENT_CORNER_ARC; }
 
 // Shared payload slots (read/write-through to the canonical source on views).
 Image *Panel_getImage(const Panel *p);

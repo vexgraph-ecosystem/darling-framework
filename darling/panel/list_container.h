@@ -40,9 +40,9 @@ ListContainer *ListContainer_1(int32_t direction);
 #define ListContainer(...) CONSTRUCTOR_DISPATCH(ListContainer, __VA_ARGS__)
 
 // Layout facade (same pattern as Panel_* shims: forward over the prefix).
-static inline void ListComponent_setLocation(ListContainer *lp, float x, float y)
+static inline void ListGraphicsComponent_setLocation(ListContainer *lp, float x, float y)
     { if (lp) Panel_setLocation(&(*lp).base, x, y); }
-static inline void ListComponent_setSize(ListContainer *lp, float w, float h)
+static inline void ListGraphicsComponent_setSize(ListContainer *lp, float w, float h)
     { if (lp) Panel_setSize(&(*lp).base, w, h); }
 
 // Core (detach-only: add/insert attach, remove detaches, never frees;

@@ -113,7 +113,7 @@ Scene *Scene_0(void) {
 Scene *Scene_2(float width, float height) {
     Scene *s = Scene_0();
     if (s)
-        Component_setSize(sceneLayout(s), width, height);
+        GraphicsComponent_setSize(sceneLayout(s), width, height);
     return s;
 }
 

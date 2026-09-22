@@ -210,7 +210,7 @@ static bool otpPaintBackground(Panel *panel, void *renderer, void *cmdBuffer,
     if (w <= 0.0f || h <= 0.0f)
         return false;
     Component *c = &(*panel).component;
-    float op = Component_getOpacity(c);
+    float op = GraphicsComponent_getOpacity(c);
     if (op <= 0.0f)
         return false;
     int32_t len = 0;
@@ -247,7 +247,7 @@ static bool otpPaintBorder(Panel *panel, void *renderer, void *cmdBuffer,
     if (w <= 0.0f || h <= 0.0f)
         return false;
     Component *c = &(*panel).component;
-    float op = Component_getOpacity(c);
+    float op = GraphicsComponent_getOpacity(c);
     if (op <= 0.0f)
         return false;
     int32_t len = 0;
@@ -289,7 +289,7 @@ static bool otpPaintText(Panel *panel, void *renderer, void *cmdBuffer,
     if (w <= 0.0f || h <= 0.0f)
         return false;
     Component *c = &(*panel).component;
-    float op = Component_getOpacity(c);
+    float op = GraphicsComponent_getOpacity(c);
     if (op <= 0.0f)
         return false;
     int32_t len = 0;
@@ -332,7 +332,7 @@ static bool otpPaintCaret(Panel *panel, void *renderer, void *cmdBuffer,
     if (!(*otp).focused)
         return false;
     Component *c = &(*panel).component;
-    float op = Component_getOpacity(c);
+    float op = GraphicsComponent_getOpacity(c);
     if (op <= 0.0f)
         return false;
     int32_t len = 0;

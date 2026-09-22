@@ -146,7 +146,7 @@ ScrollPanel *ScrollPanel_2(float viewW, float viewH) {
     (*sp).vVisible = true;
     Panel *self = &(*sp).base;
     Component *c = &(*self).component;
-    Component_setSize(c, viewW, viewH);
+    GraphicsComponent_setSize(c, viewW, viewH);
     Panel_addContainer(self, &(*h).base);
     Panel_addContainer(self, &(*v).base);
     applyBarVisible(sp);
@@ -228,7 +228,7 @@ static void resolveContentAuto(ScrollPanel *sp) {
         w = viewW;
     if ((*sp).contentAutoH)
         h = viewH;
-    Component_setSize(cc, w, h);
+    GraphicsComponent_setSize(cc, w, h);
 }
 
 // Dock one bar: the Panel base (R4 identity) and the GraphicsComponent track
@@ -240,10 +240,10 @@ static void dockBar(ScrollPanel *sp, ScrollBar *bar, bool horizontal) {
     if (!sp || !bar)
         return;
     Panel *b = &(*sp).base;
-    float vax = Component_getAbsX(&(*b).component);
-    float vay = Component_getAbsY(&(*b).component);
-    float vaw = Component_getAbsW(&(*b).component);
-    float vah = Component_getAbsH(&(*b).component);
+    float vax = GraphicsComponent_getAbsX(&(*b).component);
+    float vay = GraphicsComponent_getAbsY(&(*b).component);
+    float vaw = GraphicsComponent_getAbsW(&(*b).component);
+    float vah = GraphicsComponent_getAbsH(&(*b).component);
     float t = ScrollBar_getThickness(bar);
     float inset = ScrollBar_getInset(bar);
     Panel *thumb = &(*bar).base;
@@ -253,10 +253,10 @@ static void dockBar(ScrollPanel *sp, ScrollBar *bar, bool horizontal) {
         float len = vaw - 2.0f * inset;
         if (len < 0.0f)
             len = 0.0f;
-        Component_setAnchor(bc, COMPONENT_ANCHOR_BOTTOM_LEFT);
-        Component_setPivot(bc, COMPONENT_PIVOT_BOTTOM_LEFT);
-        Component_setLocation(bc, inset, -inset);
-        Component_setSize(bc, len, t);
+        GraphicsComponent_setAnchor(bc, COMPONENT_ANCHOR_BOTTOM_LEFT);
+        GraphicsComponent_setPivot(bc, COMPONENT_PIVOT_BOTTOM_LEFT);
+        GraphicsComponent_setLocation(bc, inset, -inset);
+        GraphicsComponent_setSize(bc, len, t);
         GraphicsComponent_setParentAbs(track, vax, vay, vaw, vah);
         GraphicsComponent_setAnchor(track, GRAPHICS_COMPONENT_ANCHOR_BOTTOM_LEFT);
         GraphicsComponent_setPivot(track, GRAPHICS_COMPONENT_PIVOT_BOTTOM_LEFT);
@@ -266,10 +266,10 @@ static void dockBar(ScrollPanel *sp, ScrollBar *bar, bool horizontal) {
         float len = vah - 2.0f * inset;
         if (len < 0.0f)
             len = 0.0f;
-        Component_setAnchor(bc, COMPONENT_ANCHOR_TOP_RIGHT);
-        Component_setPivot(bc, COMPONENT_PIVOT_TOP_RIGHT);
-        Component_setLocation(bc, -inset, inset);
-        Component_setSize(bc, t, len);
+        GraphicsComponent_setAnchor(bc, COMPONENT_ANCHOR_TOP_RIGHT);
+        GraphicsComponent_setPivot(bc, COMPONENT_PIVOT_TOP_RIGHT);
+        GraphicsComponent_setLocation(bc, -inset, inset);
+        GraphicsComponent_setSize(bc, t, len);
         GraphicsComponent_setParentAbs(track, vax, vay, vaw, vah);
         GraphicsComponent_setAnchor(track, GRAPHICS_COMPONENT_ANCHOR_TOP_RIGHT);
         GraphicsComponent_setPivot(track, GRAPHICS_COMPONENT_PIVOT_TOP_RIGHT);
@@ -283,11 +283,11 @@ static void applyBarVisible(ScrollPanel *sp) {
         return;
     if ((*sp).hBar) {
         Panel *thumb = &(*(*sp).hBar).base;
-        Component_setVisible(&(*thumb).component, (*sp).hVisible);
+        GraphicsComponent_setVisible(&(*thumb).component, (*sp).hVisible);
     }
     if ((*sp).vBar) {
         Panel *thumb = &(*(*sp).vBar).base;
-        Component_setVisible(&(*thumb).component, (*sp).vVisible);
+        GraphicsComponent_setVisible(&(*thumb).component, (*sp).vVisible);
     }
 }
 
@@ -325,7 +325,7 @@ void ScrollPanel_setViewportSize(ScrollPanel *sp, float w, float h) {
     if (!sp)
         return;
     Panel *self = &(*sp).base;
-    Component_setSize(&(*self).component, w, h);
+    GraphicsComponent_setSize(&(*self).component, w, h);
     ScrollPanel_layoutBars(sp);
 }
 
@@ -336,7 +336,7 @@ void ScrollPanel_setContentSize(ScrollPanel *sp, float w, float h) {
     (*sp).contentAutoW = Size_isAutoF(w);
     (*sp).contentAutoH = Size_isAutoF(h);
     if ((*sp).contentPanel)
-        Component_setSize(&(*(*sp).contentPanel).component, w, h);
+        GraphicsComponent_setSize(&(*(*sp).contentPanel).component, w, h);
     ScrollPanel_layoutBars(sp);
 }
 
@@ -589,7 +589,7 @@ void ScrollPanel_contentPanel_setSize(ScrollPanel *sp, float w, float h) {
     (*sp).contentAutoW = Size_isAutoF(w);
     (*sp).contentAutoH = Size_isAutoF(h);
     if ((*sp).contentPanel)
-        Component_setSize(&(*(*sp).contentPanel).component, w, h);
+        GraphicsComponent_setSize(&(*(*sp).contentPanel).component, w, h);
     ScrollPanel_layoutBars(sp);
 }
 
@@ -608,7 +608,7 @@ void ScrollPanel_contentPanel_getSize(const ScrollPanel *sp, float *outW, float 
 void ScrollPanel_contentPanel_setVisible(ScrollPanel *sp, bool visible) {
     if (!sp || !(*sp).contentPanel)
         return;
-    Component_setVisible(&(*(*sp).contentPanel).component, visible);
+    GraphicsComponent_setVisible(&(*(*sp).contentPanel).component, visible);
 }
 
 // GETTERS (PUBLIC & PRIVATE)

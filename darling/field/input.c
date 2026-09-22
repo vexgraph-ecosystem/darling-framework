@@ -294,7 +294,7 @@ static bool inputPaintBackground(Panel *panel, void *renderer, void *cmdBuffer,
     if (w <= 0.0f || h <= 0.0f)
         return false;
     Component *c = &(*panel).component;
-    float op = Component_getOpacity(c);
+    float op = GraphicsComponent_getOpacity(c);
     if (op <= 0.0f)
         return false;
     uint32_t bg = Panel_getBackgroundColor(panel);
@@ -321,7 +321,7 @@ static bool inputPaintText(Panel *panel, void *renderer, void *cmdBuffer,
     if (w <= 0.0f || h <= 0.0f)
         return false;
     Component *c = &(*panel).component;
-    float op = Component_getOpacity(c);
+    float op = GraphicsComponent_getOpacity(c);
     if (op <= 0.0f)
         return false;
     const char *displayText = (*inp).text;
@@ -370,7 +370,7 @@ static bool inputPaintBorder(Panel *panel, void *renderer, void *cmdBuffer,
     if (w <= 0.0f || h <= 0.0f)
         return false;
     Component *c = &(*panel).component;
-    float op = Component_getOpacity(c);
+    float op = GraphicsComponent_getOpacity(c);
     if (op <= 0.0f)
         return false;
     uint32_t borderColor = (*inp).focused ? 0xFF3B82F6u : 0xFF3F3F46u;
@@ -399,7 +399,7 @@ static bool inputPaintCaret(Panel *panel, void *renderer, void *cmdBuffer,
     if (!(*inp).focused || !(*inp).caretShown)
         return false;
     Component *c = &(*panel).component;
-    float op = Component_getOpacity(c);
+    float op = GraphicsComponent_getOpacity(c);
     if (op <= 0.0f)
         return false;
     float padX = 8.0f;
@@ -949,7 +949,7 @@ void Input_caret_placeView(Input *inp, Panel *view, float centerY) {
     Component *c = &(*view).component;
     float w = Component_getWidth(c);
     float h = Component_getHeight(c);
-    Component_setLocation(c, (*inp).caretX - w * 0.5f, centerY - h * 0.5f);
+    GraphicsComponent_setLocation(c, (*inp).caretX - w * 0.5f, centerY - h * 0.5f);
 }
 
 void Input_caret_tick(Input *inp, double dt) {

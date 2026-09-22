@@ -324,7 +324,7 @@ static bool richPaintText(Panel *panel, void *renderer, void *cmdBuffer,
     if (!rl || !cmdBuffer)
         return false;
     Component *c = &(*panel).component;
-    float op = Component_getOpacity(c);
+    float op = GraphicsComponent_getOpacity(c);
     if (op <= 0.0f)
         return false;
     RichText *tm = (*rl).textModel;

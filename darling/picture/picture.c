@@ -103,7 +103,7 @@ static bool picturePaintImage(Panel *panel, void *renderer, void *cmdBuffer,
     uint32_t imgW = 1, imgH = 1;
     Texture_getSize(texId, &imgW, &imgH);
     Component *c = &(*panel).component;
-    float op = Component_getOpacity(c);
+    float op = GraphicsComponent_getOpacity(c);
     if (op <= 0.0f)
         return false;
     Vk_drawTexture(cmdBuffer, surfaceW, surfaceH, x, y, w, h,

@@ -557,7 +557,7 @@ static void drawSdfFallback(Panel *panel, void *cmdBuffer, float surfaceW, float
     Label *lbl = (Label*) panel;
     (void) w;
     (void) h;
-    float op = Component_getOpacity(&(*panel).component);
+    float op = GraphicsComponent_getOpacity(&(*panel).component);
     if (op <= 0.0f)
         return;
     // Background is stage 0 (Panel default) — never repainted here.
@@ -723,7 +723,7 @@ static bool labelPaintText(Panel *panel, void *renderer, void *cmdBuffer,
     (void) renderer;
     if (!lbl || !cmdBuffer)
         return false;
-    float op = Component_getOpacity(&(*panel).component);
+    float op = GraphicsComponent_getOpacity(&(*panel).component);
     if (op <= 0.0f)
         return false;
     if (!(*lbl).text || (*lbl).text[0] == '\0' || (*lbl).fontSize <= 0.0f)
@@ -774,7 +774,7 @@ static bool labelPaintHighlight(Panel *panel, void *renderer, void *cmdBuffer,
         return false;
     if ((*lbl).rasterTex < 0 || (*lbl).rasterW <= 0 || (*lbl).rasterH <= 0)
         return false;
-    float op = Component_getOpacity(&(*panel).component);
+    float op = GraphicsComponent_getOpacity(&(*panel).component);
     if (op <= 0.0f)
         return false;
     float backing = (*lbl).rasterBacking;

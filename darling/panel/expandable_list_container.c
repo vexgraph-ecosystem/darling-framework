@@ -298,29 +298,29 @@ static float layoutWalk(ExpandableListContainer *self, uint32_t idx, float yInPa
     ExpandableNode *node = &(*self).nodes[idx];
     Panel *row = (*node).row;
     Component *rowC = &(*row).component;
-    Component_setLocation(rowC, 0.0f, yInParent);
-    Component_setSize(rowC, Component_getWidth(&(*self).base.component), (*self).rowHeight);
+    GraphicsComponent_setLocation(rowC, 0.0f, yInParent);
+    GraphicsComponent_setSize(rowC, Component_getWidth(&(*self).base.component), (*self).rowHeight);
     Label *txt = rowLabel(row);
     if (txt) {
         float labelX = (*self).checklistMode ? 34.0f : 16.0f;
-        Component_setLocation(&(*txt).base.component, labelX, 0.0f);
-        Component_setSize(&(*txt).base.component, Component_getWidth(rowC) - labelX, (*self).rowHeight);
+        GraphicsComponent_setLocation(&(*txt).base.component, labelX, 0.0f);
+        GraphicsComponent_setSize(&(*txt).base.component, Component_getWidth(rowC) - labelX, (*self).rowHeight);
     }
     float h = (*self).rowHeight;
     if ((*node).expanded) {
         Panel *childPanel = (*node).childPanel;
-        Component_setVisible(&(*childPanel).component, true);
-        Component_setLocation(&(*childPanel).component, (*self).indentSpacing, yInParent + (*self).rowHeight);
+        GraphicsComponent_setVisible(&(*childPanel).component, true);
+        GraphicsComponent_setLocation(&(*childPanel).component, (*self).indentSpacing, yInParent + (*self).rowHeight);
         float yy = 0.0f;
         for (uint32_t i = 0; i < (*node).childCount; i++) {
             uint32_t c = (*node).childStart + i;
             yy += layoutWalk(self, c, yy);
         }
-        Component_setSize(&(*childPanel).component, Component_getWidth(&(*self).base.component) - (*self).indentSpacing, yy);
+        GraphicsComponent_setSize(&(*childPanel).component, Component_getWidth(&(*self).base.component) - (*self).indentSpacing, yy);
         h += yy;
     } else {
         Panel *childPanel = (*node).childPanel;
-        Component_setVisible(&(*childPanel).component, false);
+        GraphicsComponent_setVisible(&(*childPanel).component, false);
     }
     return h;
 }
@@ -397,17 +397,17 @@ static Panel *buildRow(ExpandableListContainer *self, const char *label) {
     if (chev) {
         Label_setFontSize(chev, 12.0f);
         Label_setTextColor(chev, (*self).chevronColor);
-        Component_setLocation(&(*chev).base.component, 0.0f, 0.0f);
-        Component_setSize(&(*chev).base.component, 16.0f, (*self).rowHeight);
+        GraphicsComponent_setLocation(&(*chev).base.component, 0.0f, 0.0f);
+        GraphicsComponent_setSize(&(*chev).base.component, 16.0f, (*self).rowHeight);
     }
     if (box) {
-        Component_setLocation(&(*box).base.component, 16.0f, 0.0f);
-        Component_setSize(&(*box).base.component, 18.0f, (*self).rowHeight);
+        GraphicsComponent_setLocation(&(*box).base.component, 16.0f, 0.0f);
+        GraphicsComponent_setSize(&(*box).base.component, 18.0f, (*self).rowHeight);
     }
     if (txt) {
         float labelX = (*self).checklistMode ? 34.0f : 16.0f;
-        Component_setLocation(&(*txt).base.component, labelX, 0.0f);
-        Component_setSize(&(*txt).base.component, 120.0f, (*self).rowHeight);
+        GraphicsComponent_setLocation(&(*txt).base.component, labelX, 0.0f);
+        GraphicsComponent_setSize(&(*txt).base.component, 120.0f, (*self).rowHeight);
     }
     return row;
 }
@@ -459,7 +459,7 @@ uint32_t ExpandableListContainer_addNode(ExpandableListContainer *self, uint32_t
     (*self).nodes[nadd].row = row;
     (*self).nodes[nadd].childPanel = childPanel;
     (*self).nodeCount++;
-    Component_setVisible(&(*childPanel).component, false);
+    GraphicsComponent_setVisible(&(*childPanel).component, false);
     Panel_addContainer(holder, row);
     Panel_addContainer(holder, childPanel);
     compHierarchy(self);
@@ -535,7 +535,7 @@ void ExpandableListContainer_layout(ExpandableListContainer *self) {
         if ((*self).nodes[i].parentIndex == EXPANDABLE_LIST_ROOT)
             yy += layoutWalk(self, i, yy);
     }
-    Component_setHeight(baseC, yy);
+    GraphicsComponent_setHeight(baseC, yy);
 }
 
 size_t ExpandableListContainer_nodeCount(const ExpandableListContainer *self) {
@@ -577,8 +577,8 @@ void ExpandableListContainer_setChecklistMode(ExpandableListContainer *self, boo
                 Checkbox_setBox(box, (*self).boxColor);
                 Checkbox_setCheck(box, (*self).checkColor);
                 Checkbox_setChecked(box, (*self).nodes[i].checked);
-                Component_setLocation(&(*box).base.component, 16.0f, 0.0f);
-                Component_setSize(&(*box).base.component, 18.0f, (*self).rowHeight);
+                GraphicsComponent_setLocation(&(*box).base.component, 16.0f, 0.0f);
+                GraphicsComponent_setSize(&(*box).base.component, 18.0f, (*self).rowHeight);
             }
         } else {
             // child 1 is the checkbox when checklistMode was true

@@ -214,7 +214,7 @@ ScrollContainer *ScrollContainer_2(float viewW, float viewH) {
     (*sp).natural = true;
     Panel *self = &(*sp).base;
     Component *c = &(*self).component;
-    Component_setSize(c, viewW, viewH);
+    GraphicsComponent_setSize(c, viewW, viewH);
     ScrollBar *bar = ScrollBar_0();
     if (!bar) {
         Memory_free(sp);
@@ -260,11 +260,11 @@ static void layoutBar(ScrollContainer *sp) {
     float vh = Component_getHeight(&(*self).component);
     Panel *thumb = &(*(*sp).bar).base;
     Component *bc = &(*thumb).component;
-    Component_setAnchor(bc, COMPONENT_ANCHOR_TOP_RIGHT);
-    Component_setPivot(bc, COMPONENT_PIVOT_TOP_RIGHT);
-    Component_setLocation(bc, 0.0f, 0.0f);
-    Component_setMaxSize(bc, SCROLLBAR_THICKNESS, vh);
-    Component_setSize(bc, SCROLLBAR_THICKNESS, vh);
+    GraphicsComponent_setAnchor(bc, COMPONENT_ANCHOR_TOP_RIGHT);
+    GraphicsComponent_setPivot(bc, COMPONENT_PIVOT_TOP_RIGHT);
+    GraphicsComponent_setLocation(bc, 0.0f, 0.0f);
+    GraphicsComponent_setMaxSize(bc, SCROLLBAR_THICKNESS, vh);
+    GraphicsComponent_setSize(bc, SCROLLBAR_THICKNESS, vh);
     raiseBar(sp);
 }
 
@@ -342,8 +342,8 @@ void ScrollContainer_setViewportSize(ScrollContainer *sp, float w, float h) {
     Component *vc = &(*self).component;
     // Lift the first-size ceiling: the viewport follows the window, so its
     // max IS the window. Content is untouched — its size is its own business.
-    Component_setMaxSize(vc, w, h);
-    Component_setSize(vc, w, h);
+    GraphicsComponent_setMaxSize(vc, w, h);
+    GraphicsComponent_setSize(vc, w, h);
     layoutBar(sp); // re-dock: same 10px, new right edge, full new height
     ScrollContainer_setOffset(sp, (*sp).offsetX, (*sp).offsetY); // re-clamp
 }
@@ -411,7 +411,7 @@ static void applyBarVisible(ScrollContainer *sp) {
         return;
     Panel *thumb = &(*(*sp).bar).base;
     Component *c = &(*thumb).component;
-    Component_setVisible(c, (*sp).barVisible);
+    GraphicsComponent_setVisible(c, (*sp).barVisible);
 }
 
 void ScrollContainer_scrollbar_setVisible(ScrollContainer *sp, bool visible) {
@@ -557,7 +557,7 @@ void ScrollContainer_tick(ScrollContainer *sp, double dt) {
 void ScrollContainer_panel_setSize(ScrollContainer *sp, float w, float h) {
     if (!sp || !(*sp).content)
         return;
-    Component_setSize(&(*(*sp).content).component, w, h);
+    GraphicsComponent_setSize(&(*(*sp).content).component, w, h);
     ScrollContainer_setOffset(sp, (*sp).offsetX, (*sp).offsetY);
 }
 
@@ -696,8 +696,8 @@ void ScrollContainer_childFrame(const ScrollContainer *sp, const Panel *child, f
         float vw = Component_getWidth(&(*self).component);
         float vh = Component_getHeight(&(*self).component);
         Component *kidMeta = &((Panel*) child)->component;
-        Component_setParentAbs(kidMeta, 0.0f, 0.0f, vw, vh);
-        Component_getAbsRect(kidMeta, &rect);
+        GraphicsComponent_setParentAbs(kidMeta, 0.0f, 0.0f, vw, vh);
+        GraphicsComponent_getAbsRect(kidMeta, &rect);
         x = rect.x;
         y = rect.y;
         w = rect.z;

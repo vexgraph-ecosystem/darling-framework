@@ -12,7 +12,7 @@
 // it stores the element metadata list. All geometry, anchor/pivot/origin,
 // constraints, margin/padding, and presentation state live on each Component.
 // Owners (Panel trees, boards) feed each item its parent box via
-// Component_setParentAbs once per layout; Components recompute eagerly.
+// GraphicsComponent_setParentAbs once per layout; Components recompute eagerly.
 //
 // Growth doubles capacity per the Dynamic Scalability & Anti-Hardcoding Law.
 // Items are values (memcpy on add); Container_get returns a borrowed pointer

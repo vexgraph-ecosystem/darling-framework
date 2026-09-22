@@ -75,8 +75,8 @@
  *   - GridContainer_layout(g)
  *
  * Setters:
- *   - GridComponent_setLocation(g, x, y)
- *   - GridComponent_setSize(g, w, h)
+ *   - GridGraphicsComponent_setLocation(g, x, y)
+ *   - GridGraphicsComponent_setSize(g, w, h)
  *   - GridContainer_setGap(g, gx, gy)
  *   - GridContainer_setHeaderRows(g, count)
  *   - GridContainer_setHeaderCols(g, count)
@@ -248,15 +248,15 @@ void GridContainer_layout(GridContainer *g) {
             Panel *cell = cells[(size_t) r * (size_t) cols + (size_t) q];
             if (cell) {
                 Component *cb = &(*cell).component;
-                Component_setLocation(cb, x, y);
+                GraphicsComponent_setLocation(cb, x, y);
             }
             x += cw + gx;
         }
         totalW = x - gx;
         y += rh + gy;
     }
-    Component_setWidth(c, totalW);
-    Component_setHeight(c, y - gy);
+    GraphicsComponent_setWidth(c, totalW);
+    GraphicsComponent_setHeight(c, y - gy);
 }
 
 void GridContainer_setCell(GridContainer *g, int32_t row, int32_t col, Panel *cell) {

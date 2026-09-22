@@ -69,8 +69,8 @@
  *   - ListContainer_layout(lp)
  *
  * Setters:
- *   - ListComponent_setLocation(lp, x, y)
- *   - ListComponent_setSize(lp, w, h)
+ *   - ListGraphicsComponent_setLocation(lp, x, y)
+ *   - ListGraphicsComponent_setSize(lp, w, h)
  *   - ListContainer_setSpacing(lp, spacing)
  *   - ListContainer_setDirection(lp, direction)
  *   - ListContainer_setFillCross(lp, fill)
@@ -132,16 +132,16 @@ static void layoutVertical(Panel *b, Component *c, size_t n, float spacing, bool
         if (kw > maxW)
             maxW = kw;
         if (fill)
-            Component_setWidth(kb, selfW);
-        Component_setLocation(kb, 0.0f, cursor);
+            GraphicsComponent_setWidth(kb, selfW);
+        GraphicsComponent_setLocation(kb, 0.0f, cursor);
         cursor += kh + spacing;
         placed++;
     }
     if (placed == 0)
         return;
     if (!fill)
-        Component_setWidth(c, maxW);
-    Component_setHeight(c, cursor - spacing);
+        GraphicsComponent_setWidth(c, maxW);
+    GraphicsComponent_setHeight(c, cursor - spacing);
 }
 
 static void layoutHorizontal(Panel *b, Component *c, size_t n, float spacing, bool fill) {
@@ -159,16 +159,16 @@ static void layoutHorizontal(Panel *b, Component *c, size_t n, float spacing, bo
         if (kh > maxH)
             maxH = kh;
         if (fill)
-            Component_setHeight(kb, selfH);
-        Component_setLocation(kb, cursor, 0.0f);
+            GraphicsComponent_setHeight(kb, selfH);
+        GraphicsComponent_setLocation(kb, cursor, 0.0f);
         cursor += kw + spacing;
         placed++;
     }
     if (placed == 0)
         return;
-    Component_setWidth(c, cursor - spacing);
+    GraphicsComponent_setWidth(c, cursor - spacing);
     if (!fill)
-        Component_setHeight(c, maxH);
+        GraphicsComponent_setHeight(c, maxH);
 }
 
 void ListContainer_layout(ListContainer *lp) {

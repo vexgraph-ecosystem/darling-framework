@@ -18,7 +18,7 @@
  * percent, no dirty, no lock. It stores element metadata values in a flat
  * doubling array; every Component carries its own geometry, constraints,
  * spacing, presentation state, and eager absolute rect. Owners feed each
- * item its parent box via Component_setParentAbs once per layout.
+ * item its parent box via GraphicsComponent_setParentAbs once per layout.
  * ============================================================================
  */
 

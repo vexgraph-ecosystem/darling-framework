@@ -200,7 +200,7 @@
  *     resize / layer-registry work stays settled-only, so no target is ever
  *     created or destroyed mid-drag.
  *     Settled ticks run the full path
- *     (Component_setSize + layer attaches in step with the border per
+ *     (GraphicsComponent_setSize + layer attaches in step with the border per
  *     the Native Pixel Law + the Window Board Root Lock Law; board VkLayers
  *     register ONCE at the seam's fixed monitor extent
  *     (Darling_attachPanelBoards via Vk_seamMaxExtent — the board image and
@@ -402,8 +402,8 @@ static bool paintChildIntoPass(void *cmdBuffer, Panel *child,
         return false;
     Vec4 rect;
     Component *meta = &(*child).component;
-    Component_setParentAbs(meta, 0.0f, 0.0f, parentW, parentH);
-    Component_getAbsRect(meta, &rect);
+    GraphicsComponent_setParentAbs(meta, 0.0f, 0.0f, parentW, parentH);
+    GraphicsComponent_getAbsRect(meta, &rect);
     if (rect.z <= 0.0f || rect.w <= 0.0f)
         return false;
 
@@ -680,8 +680,8 @@ static void paintBoardSubtree(void *cmdBuffer, int w, int h, Panel *panel,
         if (childLayer >= 0) {
             Vec4 crect;
             Component *childMeta = &(*child).component;
-            Component_setParentAbs(childMeta, 0.0f, 0.0f, (float) panelW, (float) panelH);
-            Component_getAbsRect(childMeta, &crect);
+            GraphicsComponent_setParentAbs(childMeta, 0.0f, 0.0f, (float) panelW, (float) panelH);
+            GraphicsComponent_getAbsRect(childMeta, &crect);
             float cx = compositorSnapEdge(crect.x * kx);
             float cy = compositorSnapEdge(crect.y * ky);
             float cr = compositorSnapEdge((crect.x + crect.z) * kx);
@@ -797,18 +797,18 @@ void Darling_preFrame(Window *window, int drawW, int drawH, void *userdata) {
     if (live) {
         if (root) {
             Component *rootMeta = &(*root).component;
-            Component_setSize(rootMeta, rootW, rootH);
-            Component_setParentAbs(rootMeta, 0.0f, 0.0f, rootW, rootH);
+            GraphicsComponent_setSize(rootMeta, rootW, rootH);
+            GraphicsComponent_setParentAbs(rootMeta, 0.0f, 0.0f, rootW, rootH);
         }
         if (contentPanel) {
             Component *contentMeta = &(*contentPanel).component;
-            Component_setSize(contentMeta, rootW, rootH);
-            Component_setParentAbs(contentMeta, 0.0f, 0.0f, rootW, rootH);
+            GraphicsComponent_setSize(contentMeta, rootW, rootH);
+            GraphicsComponent_setParentAbs(contentMeta, 0.0f, 0.0f, rootW, rootH);
         }
         if (scenePanel) {
             Component *sceneMeta = &(*scenePanel).component;
-            Component_setSize(sceneMeta, rootW, rootH);
-            Component_setParentAbs(sceneMeta, 0.0f, 0.0f, rootW, rootH);
+            GraphicsComponent_setSize(sceneMeta, rootW, rootH);
+            GraphicsComponent_setParentAbs(sceneMeta, 0.0f, 0.0f, rootW, rootH);
         }
         if (drawW > 0 && drawH > 0) {
             extern void Vk_seamSetExtent(int32_t widthPx, int32_t heightPx);
@@ -819,18 +819,18 @@ void Darling_preFrame(Window *window, int drawW, int drawH, void *userdata) {
     }
     if (root) {
         Component *rootMeta = &(*root).component;
-        Component_setSize(rootMeta, rootW, rootH);
-        Component_setParentAbs(rootMeta, 0.0f, 0.0f, rootW, rootH);
+        GraphicsComponent_setSize(rootMeta, rootW, rootH);
+        GraphicsComponent_setParentAbs(rootMeta, 0.0f, 0.0f, rootW, rootH);
     }
     if (contentPanel) {
         Component *contentMeta = &(*contentPanel).component;
-        Component_setSize(contentMeta, rootW, rootH);
-        Component_setParentAbs(contentMeta, 0.0f, 0.0f, rootW, rootH);
+        GraphicsComponent_setSize(contentMeta, rootW, rootH);
+        GraphicsComponent_setParentAbs(contentMeta, 0.0f, 0.0f, rootW, rootH);
     }
     if (scenePanel) {
         Component *sceneMeta = &(*scenePanel).component;
-        Component_setSize(sceneMeta, rootW, rootH);
-        Component_setParentAbs(sceneMeta, 0.0f, 0.0f, rootW, rootH);
+        GraphicsComponent_setSize(sceneMeta, rootW, rootH);
+        GraphicsComponent_setParentAbs(sceneMeta, 0.0f, 0.0f, rootW, rootH);
     }
     refreshClearColor(scenePanel, root, contentPanel);
     // Boards first: scene + content panels attach their full-window Metal
@@ -861,8 +861,8 @@ void Darling_preFrame(Window *window, int drawW, int drawH, void *userdata) {
             }
         }
         Component *contentMeta = &(*contentPanel).component;
-        Component_setSize(contentMeta, rootW, rootH);
-        Component_setParentAbs(contentMeta, 0.0f, 0.0f, rootW, rootH);
+        GraphicsComponent_setSize(contentMeta, rootW, rootH);
+        GraphicsComponent_setParentAbs(contentMeta, 0.0f, 0.0f, rootW, rootH);
         // Children are Vulkan rects:
         Window_attachPanes(window, contentPanel, winW, winH);
         extern int Darling_attachLayers(Window *window, Panel *contentPanel, int width, int height);
@@ -903,8 +903,8 @@ void Darling_preFrame(Window *window, int drawW, int drawH, void *userdata) {
 
     if (scenePanel) {
         Component *sceneMeta = &(*scenePanel).component;
-        Component_setSize(sceneMeta, rootW, rootH);
-        Component_setParentAbs(sceneMeta, 0.0f, 0.0f, rootW, rootH);
+        GraphicsComponent_setSize(sceneMeta, rootW, rootH);
+        GraphicsComponent_setParentAbs(sceneMeta, 0.0f, 0.0f, rootW, rootH);
     }
 
     // Every settled tick: clear-color refresh (uniform update only, zero
@@ -1005,8 +1005,8 @@ void Darling_renderFrame(void *cmdBuffer, int drawW, int drawH, void *userdata) 
         if (!board)
             continue;
         Component *boardMeta = &(*board).component;
-        Component_setSize(boardMeta, curW, curH);
-        Component_setParentAbs(boardMeta, 0.0f, 0.0f, curW, curH);
+        GraphicsComponent_setSize(boardMeta, curW, curH);
+        GraphicsComponent_setParentAbs(boardMeta, 0.0f, 0.0f, curW, curH);
         int idx = VkLayer_find(board);
         if (idx >= 0)
             VkLayer_composite(cmdBuffer, compW, compH, idx, 0.0f, 0.0f, compW, compH,
@@ -1445,17 +1445,17 @@ bool Darling_hitTest(Panel *p, float px, float py) {
     float ph = Component_getHeight(meta);
     size_t childCount = Panel_childCount(p);
     if (childCount == 0) {
-        Component_setParentAbs(meta, 0.0f, 0.0f, pw, ph);
-        return Component_hitTest(meta, px, py);
+        GraphicsComponent_setParentAbs(meta, 0.0f, 0.0f, pw, ph);
+        return GraphicsComponent_hitTest(meta, px, py);
     }
     Vec4 rect;
     for (size_t i = 0; i < childCount; i++) {
         Panel *child = Panel_getChild(p, i);
-        if (!child || !Component_isVisible(&(*child).component))
+        if (!child || !GraphicsComponent_isVisible(&(*child).component))
             continue;
         Component *childMeta = &(*child).component;
-        Component_setParentAbs(childMeta, 0.0f, 0.0f, pw, ph);
-        Component_getAbsRect(childMeta, &rect);
+        GraphicsComponent_setParentAbs(childMeta, 0.0f, 0.0f, pw, ph);
+        GraphicsComponent_getAbsRect(childMeta, &rect);
         if (px >= rect.x && px < rect.x + rect.z && py >= rect.y && py < rect.y + rect.w)
             return true;
     }
