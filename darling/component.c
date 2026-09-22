@@ -1,16 +1,9 @@
 #include "darling/component.h"
 
 #include <math.h>
-#include <string.h>
 
 #include "../c23/darling-type.h"
-#include "graphics/graphics.h"
-#include "buffer/buffer.h"
-#include "image/image.h"
-#include "raster/raster_graphics.h"
 #include "lang/rect/rectangle.h"
-#include "paint/brush.h"
-#include "paint/stroke.h"
 #include "nio/mem.h"
 #include "oop/type.h"
 #include "annotation/definition.h"
@@ -21,43 +14,19 @@
  * ============================================================================
  * DEFINITION: Component
  * ============================================================================
- * The renderable leaf of the new darling architecture: geometry +
- * presentation state + an ABSOLUTE rect recomputed eagerly on every geometry
- * setter, so a renderer consumes ((*self).absX..absH) directly — no resolve
- * phase, no parent-size threading, no stale reads. A Component is a leaf on
- * its own: containment is optional by construction — an element that does
- * not want to be added is exactly a Component without a Container. It DOES
- * own an optional children list (the tree form): the parent cascades its
- * CONTENT box (abs inset by padding — padding insets children) into each
- * child eagerly, and Component_render walks the tree in order.
- * The eager abs cascade is O(1) per leaf: setters recompute this component's
- * abs immediately against the parent's abs box (stored via
- * Component_setParentAbs), and setters never layout, so the whole tree cost
- * equals one interleaved resolve pass. The anchor+pivot system mirrors
- * Container's exactly for a value-identical migration.
- * Component_render takes a ComponentView — the active unified Graphics row
- * plus the point-to-native-pixel scale of the current present — instead of a
- * bare pointer, so the seam renders the tree directly in device pixels and
- * the same view flows to every node and hook. The view also carries an
- * abs-space origin offset: samples map as (abs - origin) * scale, so the
- * identical currency serves shifted (scroll/pan) views and the retained
- * sub-pass view of a deferred component's bake. A process-wide generation
- * counter (Component_gen) bumps on every recompute and every visual/content
- * mutation; the compositor latches it per frame to re-arm present demand
- * (the Present-On-Demand Law) when a component tree changes without a
- * board/panel paint.
- * OPT-IN DEFERRED SUBTREES: a node flagged with Component_setDeferred stops
- * painting its subtree per frame — the render pass bakes it once into a
- * retained RGBA8 tile (ceil(absW*scale) x ceil(absH*scale)
- * native px, byte0=red..byte3=alpha per the Strict 0xRRGGBBAA Color Law)
- * whenever its mapped size, the view scale, or the generation
- * counter drifts, then blits the tile with Graphics_drawImage. The bake
- * swaps the Raster row's framebuffer (RasterGraphics_setFramebuffer),
- * paints the subtree through a bake view shifted to the node's abs origin,
- * reads the target back into the Image shadow, and restores the outer
- * target — so nested deferred children bake into the parent's tile cleanly.
- * Rows without a live drawImage (Vk/Metal draft today) degrade the subtree
- * back to inline rendering.
+ * The element metadata of the darling architecture: everything one element
+ * needs — placement, size, scale, origin/anchor/pivot, constraints,
+ * margin/padding, presentation state (border, background, radius, opacity,
+ * z, visible) — plus an ABSOLUTE rect recomputed eagerly on every geometry
+ * setter, so a reader consumes ((*self).absX..absH) directly with no resolve
+ * phase and no stale reads. A Container is just a node of Component[]: it
+ * owns the list, Components own no tree, no hooks, no retained targets, no
+ * generation counter. Abs resolves against the parent abs box stored via
+ * Component_setParentAbs (fed by the owning Container/Panel once per
+ * layout); a parentless component resolves against (0,0,0,0). Setters never
+ * layout beyond this component's own abs — cascading is the owner's job.
+ * ComponentView is pure math (scale + origin): points map to device pixels
+ * as (abs - origin) * scale with gapless floor/ceil rounding.
  * ============================================================================
  */
 
@@ -65,168 +34,83 @@
 /**
  * ============================================================================
  * CLASS: Component
- * LEVEL: L2 — Behavior (immediate on-demand rendering leaf)
+ * LEVEL: L2 — Behavior (element metadata)
  * ============================================================================
- * The renderable leaf of the new darling architecture: geometry +
- * presentation state + an ABSOLUTE rect computed eagerly on every geometry
- * setter, so a renderer consumes ((*self).absX..absH) directly — no resolve
- * phase, no parent-size threading, no stale reads. A Component is a leaf on
- * its own: containment is optional by construction — an element that does
- * not want to be added is exactly a Component without a Container — but it
- * DOES own an optional children list (the tree form), cascades its content
- * box (abs inset by padding) into each child eagerly, and renders the whole
- * tree in order under one ComponentView (unified Graphics row + device
- * scale). The generation counter (Component_gen) re-arms the compositor's
- * present demand on any component mutation.
- *
- * ;;INTENTION("eager abs cascade per the Present-On-Demand Law: geometry
- * setters recompute abs immediately; parent containers cascade via
- * Component_setParentAbs; setters never layout, so recompute is O(1) per
- * leaf and the whole tree cost equals one resolve pass, interleaved")
+ * SUMMARY:
+ *   Pure metadata for one element plus its eager absolute rect. No tree, no
+ *   hooks, no retained targets. Owned in arrays by Container nodes.
  *
  * STRUCT FIELDS (Mirroring darling/component.h):
  * ----------------------------------------------------------------------------
- *   float x, y, w, h;      // Placement + size in parent units; x/y direction
- *                          // governed by origin (4 corners)
- *   float scaleX, scaleY;  // Axis scale multipliers (1 = unscaled; shifted from Container)
- *   uint8_t origin;        // COMPONENT_ORIGIN_* 0..3 (4 corners: coordinate frame)
- *   uint8_t anchor;        // COMPONENT_ANCHOR_* 0..8 (9-grid docking point on parent)
- *   int32_t pivot;         // COMPONENT_PIVOT_* 0..4 (5 child points: 4 corners + center)
- *   float minW, minH;      // Size constraints (0 = unset)
- *   float maxW, maxH;      // Size constraints (0 = unset)
- *   float minX, minY;      // Location constraints (0 = unset both ends)
+ *   float x, y, w, h;        // Placement + size in parent units
+ *   float scaleX, scaleY;    // Axis scale multipliers (1 = unscaled)
+ *   uint8_t origin;          // COMPONENT_ORIGIN_* 0..3
+ *   uint8_t anchor;          // COMPONENT_ANCHOR_* 0..8
+ *   int32_t pivot;           // COMPONENT_PIVOT_* 0..4
+ *   float minW, minH;        // Size constraints (0 = unset)
+ *   float maxW, maxH;        // Size constraints (0 = unset)
+ *   float minX, minY;        // Location constraints (0 = unset both ends)
  *   float maxX, maxY;
- *   float marginL, marginT; // Additive placement: final = resolved + margin
- *   float marginR, marginB; // Right/bottom edges stored for sibling layout
+ *   float marginL, marginT;  // Additive placement offsets
+ *   float marginR, marginB;  // Right/bottom edges stored for sibling layout
  *   float paddingL, paddingT; // Inward content insets (content box = abs + padding)
  *   float paddingR, paddingB;
- *   float borderWidth;     // 0 = no border
- *   uint32_t borderColor;  // 0xRRGGBBAA
- *   uint32_t backgroundColor; // 0xRRGGBBAA (consumed by render hooks)
- *   float radius;          // Corner radius (0 = square)
- *   int radiusMode;        // COMPONENT_CORNER_ARC (0) / COMPONENT_CORNER_SUPERELLIPSE (1)
- *   float opacity;         // 0..1 alpha multiplier (1 = opaque)
- *   int32_t z;             // Z-order
- *   uint8_t visible;       // Visibility gate for render/hitTest
- *   Component *parent;     // Borrowed view, nullptr = root; NEVER owned
- *   Component **children;  // Child components owned or attached
- *   uint32_t childCount;
- *   uint32_t childCapacity;
- *   float absX, absY;      // Absolute left/top in the rendering space (eager)
- *   float absW, absH;      // Absolute extent (eager)
+ *   float borderWidth;       // 0 = no border
+ *   uint32_t borderColor;    // 0xRRGGBBAA
+ *   uint32_t backgroundColor; // 0xRRGGBBAA
+ *   float radius;            // Corner radius (0 = square)
+ *   int radiusMode;          // COMPONENT_CORNER_ARC (0) / COMPONENT_CORNER_SUPERELLIPSE (1)
+ *   float opacity;           // 0..1 alpha multiplier (1 = opaque)
+ *   int32_t z;               // Z-order
+ *   uint8_t visible;         // Visibility gate for paint/hitTest
+ *   float absX, absY;        // Absolute left/top (eager)
+ *   float absW, absH;        // Absolute extent (eager)
  *   float parentAbsX, parentAbsY; // Parent abs box at last recompute
  *   float parentAbsW, parentAbsH;
- *   Component_RenderFn backgroundRender; // Stage 0 render hook
- *   Component_RenderFn foregroundRender; // Stage 1 render hook
- *   void *renderUserdata;  // Opaque arg handed to both hooks
- *   uint8_t deferred;      // Opt-in retained subtree: bake on drift, then blit
- *   struct Image *retainImage;    // Owned RGBA8 artifact blitted by the render pass
- *   struct Buffer *retainBuffer;  // Owned raster target painted during bake (framebuffer sub-pass)
- *   uint32_t retainW;      // ceil(absW * viewScaleX), native px, at last bake
- *   uint32_t retainH;      // ceil(absH * viewScaleY), native px, at last bake
- *   float retainScaleX;    // Point->px scale at last bake (drift check)
- *   float retainScaleY;    // Point->px scale at last bake (drift check)
- *   uint64_t retainGen;    // Component_gen() latched at last bake (content drift check)
  *
  * FUNCTION REGISTRY:
  * ----------------------------------------------------------------------------
- * Constructors:
+ * Public Constructors: (.h)
  *   - Component_0(void)
- *   - Component_init(self)                   : in-place defaults for embedded members
+ *   - Component_init(self)
  *
- * Core Functions:
+ * Private Constructors: (.c static)
+ *   - (none)
+ *
+ * Public Core Functions: (.h)
  *   - Component_recompute(self)
  *   - Component_setParentAbs(self, px, py, pw, ph)
- *   - Component_render(self, view)
- *   - Component_bake(self, view)              : rebuild retain target iff drift (dims/scale/content); true when current
- *   - Component_viewMap(view, ax, ay, aw, ah, outX, outY, outW, outH) : points -> native px (origin-translated, provably gapless)
  *   - Component_hitTest(self, pointX, pointY)
  *   - Component_getContentRect(self, outX, outY, outW, outH)
- *   - Component_addChild(self, child)
- *   - Component_removeChild(self, child)
- *   - Component_gen(void)
+ *   - Component_viewMap(view, ax, ay, aw, ah, outX, outY, outW, outH)
  *
  * Private Core Functions: (.c static)
- *   - touchGen(void)                           : bump the process-wide generation counter
- *   - contentBox(self, outX, outY, outW, outH) : abs rect inset by padding (children cascade box)
- *   - renderInline(self, view)                 : the immediate subtree paint (bg, hooks, children, border)
- *   - renderDeferred(self, view)               : bake-if-dirty then blit the retained tile
+ *   - contentBox(self, outX, outY, outW, outH)
  *
- * Setters:
- *   - Component_setX/Y(self, v)               // clamps [min, max] location
- *   - Component_setWidth/Height(self, v)
- *   - Component_setScale(self, sx, sy)
- *   - Component_setLocation(self, x, y)
- *   - Component_setSize(self, w, h)          // clamps [min, max]
- *   - Component_setMinSize/MaxSize(self, w, h) // re-clamps current size
- *   - Component_setMinLocation/MaxLocation(self, x, y) // re-clamps current location
- *   - Component_setOrigin(self, origin)
- *   - Component_setAnchor(self, anchor)
- *   - Component_setPivot(self, pivot)
- *   - Component_setCenter(self)
- *   - Component_setMargin(self, l, t, r, b)
- *   - Component_setPadding(self, l, t, r, b)
- *   - Component_setBorderWidth(self, w)
- *   - Component_setBorderColor(self, color)
- *   - Component_setBackgroundColor(self, color)
- *   - Component_setRadius(self, r)
- *   - Component_setRadiusMode(self, mode)
- *   - Component_setOpacity(self, opacity)
- *   - Component_setZ(self, z)
- *   - Component_setVisible(self, visible)
- *   - Component_setParent(self, parent)
- *   - Component_setBackgroundRender(self, fn)
- *   - Component_setForegroundRender(self, fn)
- *   - Component_setRenderUserdata(self, userdata)
- *   - Component_setDeferred(self, deferred)    // opt-in retained subtree (drift-rebaked)
+ * Public Setters: (.h)
+ *   - Component_setX/Y/Width/Height/Scale/Location/Size/MinSize/MaxSize/MinLocation/MaxLocation(self, ...)
+ *   - Component_setOrigin/Anchor/Pivot/Center/Margin/Padding(self, ...)
+ *   - Component_setBorderWidth/BorderColor/BackgroundColor/Radius/RadiusMode/Opacity/Z/Visible(self, ...)
  *
- * Getters:
- *   - Component_getX/Y/Width/Height(self)
- *   - Component_getScaleX/ScaleY(self)
- *   - Component_getAbsX/Y/W/H(self)
- *   - Component_getAbsRect(self, outRect)
- *   - Component_getParentAbsRect(self, outRect)
- *   - Component_getOrigin(self)
- *   - Component_getAnchor(self)
- *   - Component_getPivot(self)
- *   - Component_getMinWidth/MinHeight/MaxWidth/MaxHeight(self)
- *   - Component_getMinX/MinY/MaxX/MaxY(self)
- *   - Component_getMargin(self, outL, outT, outR, outB)
- *   - Component_getPadding(self, outL, outT, outR, outB)
- *   - Component_getBorderWidth/BorderColor/BackgroundColor(self)
- *   - Component_getRadius/RadiusMode(self)
- *   - Component_getOpacity/Z(self)
+ * Private Setters: (.c static)
+ *   - (none)
+ *
+ * Public Getters: (.h)
+ *   - Component_getX/Y/Width/Height/ScaleX/ScaleY/AbsX/AbsY/AbsW/AbsH(self)
+ *   - Component_getAbsRect/ParentAbsRect(self, outRect)
+ *   - Component_getOrigin/Anchor/Pivot/MinWidth/MinHeight/MaxWidth/MaxHeight/MinX/MinY/MaxX/MaxY(self)
+ *   - Component_getMargin/Padding/BorderWidth/BorderColor/BackgroundColor/Radius/RadiusMode/Opacity/Z(self)
  *   - Component_isVisible(self)
- *   - Component_isDeferred(self)
- *   - Component_getRetainWidth(self)
- *   - Component_getRetainHeight(self)
- *   - Component_getParent(self)
- *   - Component_getChildCount(self)
- *   - Component_getChild(self, index)
- *   - Component_getBackgroundRender/ForegroundRender(self)
- *   - Component_getRenderUserdata(self)
+ *
+ * Private Getters: (.c static)
+ *   - (none)
  * ============================================================================
  */
 
-// darling/component.c — immediate on-demand rendering leaf (new architecture).
+// darling/component.c — pure element metadata with an eager absolute rect.
 
-// FILE-LOCAL STATE & HELPERS
+// FILE-LOCAL HELPERS
 
-// s_componentGen — the process-wide Component generation counter. Every
-// geometry recompute and every visual/content mutation (padding, hooks,
-// visibility, membership) bumps it once. The compositor's probe compares
-// Component_gen() against the frame's latched lastComponentGen to re-arm
-// present demand (the Present-On-Demand Law) when a component tree changed
-// without a board/panel paint.
-static uint64_t s_componentGen = 0u;
-
-static void touchGen(void) {
-    s_componentGen++;
-}
-
-// The eager content box: abs rect inset by padding (clamped >= 0). Children
-// cascade against THIS box, never the raw abs box, so padding insets child
-// placement (the padding-insets-children decision).
 static void contentBox(const Component *self, float *outX, float *outY,
                        float *outW, float *outH) {
     float cx = (*self).absX + (*self).paddingL;
@@ -247,7 +131,7 @@ static void contentBox(const Component *self, float *outX, float *outY,
         *outH = ch;
 }
 
-// CONSTRUCTORS
+// CONSTRUCTORS (PUBLIC & PRIVATE)
 
 void Component_init(Component *self) {
     if (!self)
@@ -285,10 +169,6 @@ void Component_init(Component *self) {
     (*self).opacity = 1.0f;
     (*self).z = 0;
     (*self).visible = 1;
-    (*self).parent = nullptr;
-    (*self).children = nullptr;
-    (*self).childCount = 0;
-    (*self).childCapacity = 0;
     (*self).absX = 0.0f;
     (*self).absY = 0.0f;
     (*self).absW = 0.0f;
@@ -297,17 +177,6 @@ void Component_init(Component *self) {
     (*self).parentAbsY = 0.0f;
     (*self).parentAbsW = 0.0f;
     (*self).parentAbsH = 0.0f;
-    (*self).backgroundRender = nullptr;
-    (*self).foregroundRender = nullptr;
-    (*self).renderUserdata = nullptr;
-    (*self).deferred = 0;
-    (*self).retainImage = nullptr;
-    (*self).retainBuffer = nullptr;
-    (*self).retainW = 0;
-    (*self).retainH = 0;
-    (*self).retainScaleX = 0.0f;
-    (*self).retainScaleY = 0.0f;
-    (*self).retainGen = 0;
 }
 
 Component *Component_0(void) {
@@ -318,61 +187,52 @@ Component *Component_0(void) {
     return self;
 }
 
-// CORE FUNCTIONS
+// CORE FUNCTIONS (PUBLIC & PRIVATE)
 
 void Component_recompute(Component *self) {
     if (!self)
         return;
-    touchGen();
-
     float sw = (*self).w * (*self).scaleX;
     float sh = (*self).h * (*self).scaleY;
     float locX = (*self).x;
     float locY = (*self).y;
     float parentW = (*self).parentAbsW;
     float parentH = (*self).parentAbsH;
-
-    // 1. Anchor: 9-grid tether point on parent bounds (normalized Ua, Va)
     float Ua = 0.0f, Va = 0.0f;
     switch (Component_getAnchor(self)) {
-        case COMPONENT_ANCHOR_TOP_LEFT:       Ua = 0.0f; Va = 0.0f; break;
-        case COMPONENT_ANCHOR_TOP_CENTER:     Ua = 0.5f; Va = 0.0f; break;
-        case COMPONENT_ANCHOR_TOP_RIGHT:      Ua = 1.0f; Va = 0.0f; break;
-        case COMPONENT_ANCHOR_MIDDLE_LEFT:    Ua = 0.0f; Va = 0.5f; break;
-        case COMPONENT_ANCHOR_MIDDLE_CENTER:  Ua = 0.5f; Va = 0.5f; break;
-        case COMPONENT_ANCHOR_MIDDLE_RIGHT:   Ua = 1.0f; Va = 0.5f; break;
-        case COMPONENT_ANCHOR_BOTTOM_LEFT:    Ua = 0.0f; Va = 1.0f; break;
-        case COMPONENT_ANCHOR_BOTTOM_CENTER:  Ua = 0.5f; Va = 1.0f; break;
-        case COMPONENT_ANCHOR_BOTTOM_RIGHT:   Ua = 1.0f; Va = 1.0f; break;
+        case COMPONENT_ANCHOR_TOP_LEFT: Ua = 0.0f; Va = 0.0f; break;
+        case COMPONENT_ANCHOR_TOP_CENTER: Ua = 0.5f; Va = 0.0f; break;
+        case COMPONENT_ANCHOR_TOP_RIGHT: Ua = 1.0f; Va = 0.0f; break;
+        case COMPONENT_ANCHOR_MIDDLE_LEFT: Ua = 0.0f; Va = 0.5f; break;
+        case COMPONENT_ANCHOR_MIDDLE_CENTER: Ua = 0.5f; Va = 0.5f; break;
+        case COMPONENT_ANCHOR_MIDDLE_RIGHT: Ua = 1.0f; Va = 0.5f; break;
+        case COMPONENT_ANCHOR_BOTTOM_LEFT: Ua = 0.0f; Va = 1.0f; break;
+        case COMPONENT_ANCHOR_BOTTOM_CENTER: Ua = 0.5f; Va = 1.0f; break;
+        case COMPONENT_ANCHOR_BOTTOM_RIGHT: Ua = 1.0f; Va = 1.0f; break;
         default: break;
     }
     float anchorX = (*self).parentAbsX + Ua * parentW;
     float anchorY = (*self).parentAbsY + Va * parentH;
-
-    // 2. Pivot: 5 alignment points on child component (normalized Up, Vp)
     float Up = 0.0f, Vp = 0.0f;
     switch (Component_getPivot(self)) {
-        case COMPONENT_PIVOT_TOP_LEFT:      Up = 0.0f; Vp = 0.0f; break;
-        case COMPONENT_PIVOT_TOP_RIGHT:     Up = 1.0f; Vp = 0.0f; break;
-        case COMPONENT_PIVOT_BOTTOM_LEFT:   Up = 0.0f; Vp = 1.0f; break;
-        case COMPONENT_PIVOT_BOTTOM_RIGHT:  Up = 1.0f; Vp = 1.0f; break;
-        case COMPONENT_PIVOT_CENTER:        Up = 0.5f; Vp = 0.5f; break;
+        case COMPONENT_PIVOT_TOP_LEFT: Up = 0.0f; Vp = 0.0f; break;
+        case COMPONENT_PIVOT_TOP_RIGHT: Up = 1.0f; Vp = 0.0f; break;
+        case COMPONENT_PIVOT_BOTTOM_LEFT: Up = 0.0f; Vp = 1.0f; break;
+        case COMPONENT_PIVOT_BOTTOM_RIGHT: Up = 1.0f; Vp = 1.0f; break;
+        case COMPONENT_PIVOT_CENTER: Up = 0.5f; Vp = 0.5f; break;
         default: break;
     }
     float pivotX = Up * sw;
     float pivotY = Vp * sh;
-
-    // 3. Origin: 4-corner coordinate system orientation
-    // Determines axis direction (+ or -) for location offsets (x, y)
     float dirX = 1.0f;
     float dirY = 1.0f;
     switch (Component_getOrigin(self)) {
         case COMPONENT_ORIGIN_TOP_RIGHT:
             dirX = -1.0f;
-            dirY =  1.0f;
+            dirY = 1.0f;
             break;
         case COMPONENT_ORIGIN_BOTTOM_LEFT:
-            dirX =  1.0f;
+            dirX = 1.0f;
             dirY = -1.0f;
             break;
         case COMPONENT_ORIGIN_BOTTOM_RIGHT:
@@ -381,30 +241,16 @@ void Component_recompute(Component *self) {
             break;
         case COMPONENT_ORIGIN_TOP_LEFT:
         default:
-            dirX =  1.0f;
-            dirY =  1.0f;
+            dirX = 1.0f;
+            dirY = 1.0f;
             break;
     }
-
-    // Universal resolution: Anchor - Pivot + (dir * offset) + margin
     float screenX = anchorX - pivotX + (dirX * locX) + (*self).marginL;
     float screenY = anchorY - pivotY + (dirY * locY) + (*self).marginT;
-
     (*self).absX = screenX;
     (*self).absY = screenY;
     (*self).absW = sw;
     (*self).absH = sh;
-
-    // Eager Cascade Law: cascade the CONTENT box (abs inset by padding —
-    // padding insets children) to all children immediately
-    float contentX = 0.0f, contentY = 0.0f, contentW = 0.0f, contentH = 0.0f;
-    contentBox(self, &contentX, &contentY, &contentW, &contentH);
-    for (uint32_t i = 0; i < (*self).childCount; ++i) {
-        Component *child = (*self).children[i];
-        if (child) {
-            Component_setParentAbs(child, contentX, contentY, contentW, contentH);
-        }
-    }
 }
 
 void Component_setParentAbs(Component *self, float px, float py, float pw, float ph) {
@@ -415,184 +261,6 @@ void Component_setParentAbs(Component *self, float px, float py, float pw, float
     (*self).parentAbsW = pw;
     (*self).parentAbsH = ph;
     Component_recompute(self);
-}
-
-// renderInline — the immediate subtree paint: native background fill,
-// background hook, children (each through Component_render, so a deferred
-// child bakes INTO this pass's target — nested bakes swap targets and
-// restore), border stroke, foreground hook. Shared by the non-deferred
-// render path and the deferred bake's sub-pass.
-static bool renderInline(Component *self, const ComponentView *view) {
-    if (!self || !(*self).visible)
-        return false;
-    bool ran = false;
-
-    // 1. Native background fill through unified Graphics seam (device-mapped)
-    if ((*self).backgroundColor != COMPONENT_COLOR_CLEAR && (*self).opacity > 0.0f
-        && (*self).absW > 0.0f && (*self).absH > 0.0f) {
-        Rectangle rect;
-        Component_viewMap(view, (*self).absX, (*self).absY, (*self).absW, (*self).absH,
-                          &rect.x, &rect.y, &rect.width, &rect.height);
-        Brush brush = {(*self).backgroundColor, (*self).opacity, 0u};
-        Graphics_fillRect(&rect, &brush);
-        ran = true;
-    }
-
-    // 2. Background custom hook (receives the view; maps its own rects)
-    if ((*self).backgroundRender) {
-        (*self).backgroundRender(self, view, (*self).renderUserdata);
-        ran = true;
-    }
-
-    // 3. Render children in order (same view; abs live in the same point space)
-    for (uint32_t i = 0; i < (*self).childCount; ++i) {
-        Component *child = (*self).children[i];
-        if (child && (*child).visible) {
-            if (Component_render(child, view))
-                ran = true;
-        }
-    }
-
-    // 4. Native border stroke through unified Graphics seam (device-mapped)
-    if ((*self).borderWidth > 0.0f && (*self).borderColor != COMPONENT_COLOR_CLEAR
-        && (*self).absW > 0.0f && (*self).absH > 0.0f) {
-        Rectangle rect;
-        Component_viewMap(view, (*self).absX, (*self).absY, (*self).absW, (*self).absH,
-                          &rect.x, &rect.y, &rect.width, &rect.height);
-        Stroke stroke = {(*self).borderWidth, 0.0f, STROKE_CAP_BUTT, STROKE_JOIN_MITER, (*self).borderColor, 0u};
-        Graphics_drawRect(&rect, &stroke);
-        ran = true;
-    }
-
-    // 5. Foreground custom hook (receives the view)
-    if ((*self).foregroundRender) {
-        (*self).foregroundRender(self, view, (*self).renderUserdata);
-        ran = true;
-    }
-    return ran;
-}
-
-// renderDeferred — the retained path: bake the subtree when its mapped size,
-// view scale, or process-wide generation drifted, then blit the retained
-// tile at the node's mapped rect (1:1 nearest: the target is ceil-mapped at
-// the very same scale). A failed bake (cold row, degenerate extent, OOM)
-// degrades to the inline paint so pixels stay correct.
-static bool renderDeferred(Component *self, const ComponentView *view) {
-    if (!Component_bake(self, view))
-        return renderInline(self, view);
-    if (!(*self).retainImage || !(*self).retainBuffer)
-        return false; // cold guard: bake reports current only with a target
-    Rectangle rect;
-    Component_viewMap(view, (*self).absX, (*self).absY, (*self).absW, (*self).absH,
-                      &rect.x, &rect.y, &rect.width, &rect.height);
-    if (rect.width <= 0.0f || rect.height <= 0.0f)
-        return false;
-    return Graphics_drawImage((*self).retainImage, &rect);
-}
-
-bool Component_render(Component *self, const ComponentView *view) {
-    if (!self || !(*self).visible)
-        return false;
-    // ;;INTENTION("deferred retain needs a live drawImage row: RASTER is live today; Vk/Metal rows draft-false, so the subtree degrades to inline rendering until their samplers land")
-    if ((*self).deferred && view && Graphics_getGraphicsId() == GRAPHICS_BACKEND_RASTER)
-        return renderDeferred(self, view);
-    return renderInline(self, view);
-}
-
-bool Component_bake(Component *self, const ComponentView *view) {
-    if (!self || !view || !(*self).visible)
-        return false;
-    if (Graphics_getGraphicsId() != GRAPHICS_BACKEND_RASTER)
-        return false; // the sub-pass swaps the Raster row's target — cold elsewhere
-    if (!RasterGraphics_getFramebuffer())
-        return false; // no outer target to restore — the swap would orphan the singleton
-
-    // Mapped retain extent: ceil(abs * scale), the gapless tile size. NaN
-    // and infinity fail the comparisons below (cold-strict, no crash paths).
-    float fw = ceilf((*self).absW * (*view).scaleX);
-    float fh = ceilf((*self).absH * (*view).scaleY);
-    if (fw >= (float) UINT32_MAX || fh >= (float) UINT32_MAX)
-        return false;
-    if (!(fw >= 1.0f) || !(fh >= 1.0f))
-        return false; // degenerate extent — nothing to retain
-    uint32_t rw = (uint32_t) fw;
-    uint32_t rh = (uint32_t) fh;
-
-    // Current? Retain is valid when the baked dims, view scale, and content
-    // generation all match — the O(1) demand check (per the Present-On-Demand
-    // Law: the seam repaints on Component_gen drift, so any subtree mutation
-    // lands here as a rebuild, and clean frames skip render entirely).
-    bool current = (*self).retainImage != nullptr && (*self).retainBuffer != nullptr
-        && (*self).retainW == rw && (*self).retainH == rh
-        && (*self).retainScaleX == (*view).scaleX
-        && (*self).retainScaleY == (*view).scaleY
-        && (*self).retainGen == Component_gen();
-    if (current)
-        return true;
-
-    // Rebuild the target pair (cold path, rare): free the old artifacts and
-    // allocate the ceil-mapped raster target + its RGBA8 image shadow.
-    if ((*self).retainBuffer)
-        Buffer_free((*self).retainBuffer);
-    if ((*self).retainImage)
-        Image_free((*self).retainImage);
-    (*self).retainBuffer = nullptr;
-    (*self).retainImage = nullptr;
-    Buffer *buf = Buffer_4(ID_COMPONENT, rw, rh, 4u);
-    Image *img = Image_2(rw, rh);
-    if (buf == nullptr || img == nullptr) {
-        if (buf)
-            Buffer_free(buf);
-        if (img)
-            Image_free(img);
-        return false; // cold-strict: OOM leaves the retain cleared
-    }
-    (*self).retainBuffer = buf;
-    (*self).retainImage = img;
-    (*self).retainW = rw;
-    (*self).retainH = rh;
-    (*self).retainScaleX = (*view).scaleX;
-    (*self).retainScaleY = (*view).scaleY;
-
-    // Sub-pass: swap the Raster row's target to the retain buffer, clear to
-    // transparent, paint the subtree through a bake view that shifts the
-    // origin to this node's abs top-left (children map (abs - origin)*scale
-    // into target device px), then restore the outer target.
-    Buffer *savedFb = RasterGraphics_getFramebuffer();
-    uint32_t savedW = RasterGraphics_getWidth();
-    uint32_t savedH = RasterGraphics_getHeight();
-    if (!RasterGraphics_setFramebuffer(buf, rw, rh))
-        return false; // unexpected swap rejection — cold state untouched below
-    Graphics_clip(nullptr); // the bake sub-pass owns its scissor space
-    Graphics_clear(COMPONENT_COLOR_CLEAR); // transparent base for the tile
-    ComponentView bakeView = {
-        .graphics = (*view).graphics,
-        .scaleX = (*view).scaleX,
-        .scaleY = (*view).scaleY,
-        .originX = (*self).absX,
-        .originY = (*self).absY,
-    };
-    renderInline(self, &bakeView);
-    RasterGraphics_setFramebuffer(savedFb, savedW, savedH);
-    Graphics_clip(nullptr); // ;;INTENTION("bake leaves clip disabled: nothing on the seam uses clip today")
-
-    // Read back the painted target into the RGBA8 shadow:
-    // Buffer channels 0=R 1=G 2=B 3=A (ColorBuffer RGBA), image bytes
-    // [R,G,B,A] per the Strict 0xRRGGBBAA Color Law.
-    uint8_t *shadow = (*img).rgba;
-    if (shadow) {
-        for (uint32_t y = 0; y < rh; ++y) {
-            for (uint32_t x = 0; x < rw; ++x) {
-                size_t p = ((size_t) y * (size_t) rw + (size_t) x) * 4u;
-                shadow[p + 0u] = (uint8_t) Buffer_getPixel(buf, x, y, 0u);
-                shadow[p + 1u] = (uint8_t) Buffer_getPixel(buf, x, y, 1u);
-                shadow[p + 2u] = (uint8_t) Buffer_getPixel(buf, x, y, 2u);
-                shadow[p + 3u] = (uint8_t) Buffer_getPixel(buf, x, y, 3u);
-            }
-        }
-    }
-    (*self).retainGen = Component_gen();
-    return true;
 }
 
 bool Component_hitTest(const Component *self, float pointX, float pointY) {
@@ -625,11 +293,6 @@ void Component_viewMap(const ComponentView *view, float ax, float ay, float aw, 
     float w = aw;
     float h = ah;
     if (view) {
-        // Provably gapless device mapping: translate (abs - origin), then
-        // floor leading edges, ceil trailing edges, so adjacent cells never
-        // leave a pixel gap and never overlap across a boundary — the seam's
-        // single rounding currency (no drift vs Board surfaces). A null view
-        // maps identity (point space, origin 0).
         x0 = floorf((ax - (*view).originX) * (*view).scaleX);
         y0 = floorf((ay - (*view).originY) * (*view).scaleY);
         float x1 = ceilf((ax + aw - (*view).originX) * (*view).scaleX);
@@ -651,11 +314,7 @@ void Component_viewMap(const ComponentView *view, float ax, float ay, float aw, 
         *outH = h;
 }
 
-uint64_t Component_gen(void) {
-    return s_componentGen;
-}
-
-// SETTERS
+// SETTERS (PUBLIC & PRIVATE)
 
 void Component_setX(Component *self, float x) {
     if (!self)
@@ -847,8 +506,6 @@ void Component_setPadding(Component *self, float l, float t, float r, float b) {
     (*self).paddingT = pt;
     (*self).paddingR = pr;
     (*self).paddingB = pb;
-    // Padding insets children: re-cascade the content box to every child
-    // immediately (recompute bumps the generation counter).
     Component_recompute(self);
 }
 
@@ -856,28 +513,24 @@ void Component_setBorderWidth(Component *self, float w) {
     if (!self)
         return;
     (*self).borderWidth = w < 0.0f ? 0.0f : w;
-    touchGen();
 }
 
 void Component_setBorderColor(Component *self, uint32_t color) {
     if (!self)
         return;
     (*self).borderColor = color;
-    touchGen();
 }
 
 void Component_setBackgroundColor(Component *self, uint32_t color) {
     if (!self)
         return;
     (*self).backgroundColor = color;
-    touchGen();
 }
 
 void Component_setRadius(Component *self, float r) {
     if (!self)
         return;
     (*self).radius = r < 0.0f ? 0.0f : r;
-    touchGen();
 }
 
 void Component_setRadiusMode(Component *self, int mode) {
@@ -886,125 +539,27 @@ void Component_setRadiusMode(Component *self, int mode) {
     if (mode != COMPONENT_CORNER_ARC && mode != COMPONENT_CORNER_SUPERELLIPSE)
         return;
     (*self).radiusMode = mode;
-    touchGen();
 }
 
 void Component_setOpacity(Component *self, float opacity) {
     if (!self)
         return;
     (*self).opacity = opacity < 0.0f ? 0.0f : (opacity > 1.0f ? 1.0f : opacity);
-    touchGen();
 }
 
 void Component_setZ(Component *self, int z) {
     if (!self)
         return;
     (*self).z = z;
-    touchGen();
 }
 
 void Component_setVisible(Component *self, bool visible) {
     if (!self)
         return;
     (*self).visible = visible ? 1 : 0;
-    touchGen();
 }
 
-void Component_setParent(Component *self, Component *parent) {
-    if (!self)
-        return;
-    (*self).parent = parent;
-    touchGen();
-}
-
-bool Component_addChild(Component *self, Component *child) {
-    if (!self || !child || child == self)
-        return false;
-
-    // Check if already present
-    for (uint32_t i = 0; i < (*self).childCount; ++i) {
-        if ((*self).children[i] == child)
-            return true;
-    }
-
-    if ((*self).childCount >= (*self).childCapacity) {
-        uint32_t newCap = (*self).childCapacity == 0 ? 8 : (*self).childCapacity * 2;
-        Component **newArr = (Component**) Memory_alloc(TYPE_COMPONENT_SINGLETON, sizeof(Component*) * newCap);
-        if (!newArr)
-            return false;
-        if ((*self).children && (*self).childCount > 0) {
-            memcpy(newArr, (*self).children, sizeof(Component*) * (*self).childCount);
-        }
-        (*self).children = newArr;
-        (*self).childCapacity = newCap;
-    }
-
-    (*self).children[(*self).childCount++] = child;
-    (*child).parent = self;
-    touchGen();
-
-    // Eager Cascade: update child abs immediately with the parent's CONTENT
-    // box (abs inset by padding — padding insets children)
-    float contentX = 0.0f, contentY = 0.0f, contentW = 0.0f, contentH = 0.0f;
-    contentBox(self, &contentX, &contentY, &contentW, &contentH);
-    Component_setParentAbs(child, contentX, contentY, contentW, contentH);
-    return true;
-}
-
-bool Component_removeChild(Component *self, Component *child) {
-    if (!self || !child || (*self).childCount == 0 || !(*self).children)
-        return false;
-
-    int foundIdx = -1;
-    for (uint32_t i = 0; i < (*self).childCount; ++i) {
-        if ((*self).children[i] == child) {
-            foundIdx = (int) i;
-            break;
-        }
-    }
-    if (foundIdx < 0)
-        return false;
-
-    for (uint32_t i = (uint32_t) foundIdx; i + 1 < (*self).childCount; ++i) {
-        (*self).children[i] = (*self).children[i + 1];
-    }
-    (*self).childCount--;
-    if ((*child).parent == self) {
-        (*child).parent = nullptr;
-    }
-    touchGen();
-    return true;
-}
-
-void Component_setBackgroundRender(Component *self, Component_RenderFn fn) {
-    if (!self)
-        return;
-    (*self).backgroundRender = fn;
-    touchGen();
-}
-
-void Component_setForegroundRender(Component *self, Component_RenderFn fn) {
-    if (!self)
-        return;
-    (*self).foregroundRender = fn;
-    touchGen();
-}
-
-void Component_setRenderUserdata(Component *self, void *userdata) {
-    if (!self)
-        return;
-    (*self).renderUserdata = userdata;
-    touchGen();
-}
-
-void Component_setDeferred(Component *self, bool deferred) {
-    if (!self)
-        return;
-    (*self).deferred = deferred ? 1 : 0;
-    touchGen(); // mode flip drifts the retain: the next bake re-renders the subtree
-}
-
-// GETTERS
+// GETTERS (PUBLIC & PRIVATE)
 
 float Component_getX(const Component *self) { return self ? (*self).x : 0.0f; }
 float Component_getY(const Component *self) { return self ? (*self).y : 0.0f; }
@@ -1097,16 +652,3 @@ int Component_getRadiusMode(const Component *self) { return self ? (*self).radiu
 float Component_getOpacity(const Component *self) { return self ? (*self).opacity : 1.0f; }
 int Component_getZ(const Component *self) { return self ? (*self).z : 0; }
 bool Component_isVisible(const Component *self) { return self && (*self).visible != 0; }
-bool Component_isDeferred(const Component *self) { return self && (*self).deferred != 0; }
-uint32_t Component_getRetainWidth(const Component *self) { return self ? (*self).retainW : 0u; }
-uint32_t Component_getRetainHeight(const Component *self) { return self ? (*self).retainH : 0u; }
-Component *Component_getParent(const Component *self) { return self ? (*self).parent : nullptr; }
-uint32_t Component_getChildCount(const Component *self) { return self ? (*self).childCount : 0; }
-Component *Component_getChild(const Component *self, uint32_t index) {
-    if (!self || index >= (*self).childCount || !(*self).children)
-        return nullptr;
-    return (*self).children[index];
-}
-Component_RenderFn Component_getBackgroundRender(const Component *self) { return self ? (*self).backgroundRender : nullptr; }
-Component_RenderFn Component_getForegroundRender(const Component *self) { return self ? (*self).foregroundRender : nullptr; }
-void *Component_getRenderUserdata(const Component *self) { return self ? (*self).renderUserdata : nullptr; }

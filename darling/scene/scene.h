@@ -61,7 +61,7 @@ float Scene_getVirtualHeight(const Scene *s);
 
 // Layout facade — the delegation chain's middle link:
 //   Scene3D_setLocation -> Scene_setLocation -> Panel_setLocation
-//   -> Container_setLocation(&(*panel).base)
+//   -> Component_setLocation(&(*panel).component)
 // Each level re-exports the common accessors over ITS OWN embedded prefix,
 // so callers never spell .base.base.base. Static inline: Java-style
 // inherited methods with static binding and zero runtime cost.

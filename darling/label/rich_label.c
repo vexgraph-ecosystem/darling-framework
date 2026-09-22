@@ -159,7 +159,7 @@ void RichLabel_handlePointer(RichLabel *label, int kind, float localX, float loc
     if (!label)
         return;
     Panel *p = &(*label).base;
-    Container *c = &(*p).base;
+    Component *c = &(*p).component;
     float w = (*c).w;
     float h = (*c).h;
     const RichText *tm = (*label).textModel;
@@ -176,7 +176,6 @@ void RichLabel_handlePointer(RichLabel *label, int kind, float localX, float loc
                 Cursor *defCursor = Cursor_getPredefined(CURSOR_DEFAULT);
                 Cursor_apply(defCursor, window);
             }
-            Container_markDirty(&(*label).base.base);
         }
         return;
     }
@@ -185,7 +184,6 @@ void RichLabel_handlePointer(RichLabel *label, int kind, float localX, float loc
         if (TextSelect_setHovered(&(*label).select, true)) {
             if ((*label).highlightable && window)
                 Cursor_apply((*label).cursor, window);
-            Container_markDirty(&(*label).base.base);
         } else if ((*label).highlightable && window) {
             Cursor_apply((*label).cursor, window);
         }
@@ -197,7 +195,6 @@ void RichLabel_handlePointer(RichLabel *label, int kind, float localX, float loc
             if (!inside) {
                 if (TextSelect_isActive(&(*label).select)) {
                     TextSelect_cancel(&(*label).select);
-                    Container_markDirty(&(*label).base.base);
                 }
                 return;
             }
@@ -206,15 +203,12 @@ void RichLabel_handlePointer(RichLabel *label, int kind, float localX, float loc
             // selects exactly [anchor, active] — never a rolling union.
             int32_t idx = RichLabel_charIndexAt(label, localX, localY);
             TextSelect_begin(&(*label).select, idx);
-            Container_markDirty(&(*label).base.base);
         } else if (kind == PTR_DRAG) {
             if (TextSelect_drag(&(*label).select, RichLabel_charIndexAt(label, localX, localY))) {
-                Container_markDirty(&(*label).base.base);
             }
         } else if (kind == PTR_UP) {
             int32_t lo = -1, hi = -1;
             TextSelect_end(&(*label).select, &lo, &hi);
-            Container_markDirty(&(*label).base.base);
         }
     }
 }
@@ -329,8 +323,8 @@ static bool richPaintText(Panel *panel, void *renderer, void *cmdBuffer,
     (void) h;
     if (!rl || !cmdBuffer)
         return false;
-    Container *c = &(*panel).base;
-    float op = Container_getOpacity(c);
+    Component *c = &(*panel).component;
+    float op = Component_getOpacity(c);
     if (op <= 0.0f)
         return false;
     RichText *tm = (*rl).textModel;
@@ -426,7 +420,6 @@ void RichLabel_free(RichLabel *label) {
 void RichLabel_setTextModel(RichLabel *label, RichText *model) {
     if (!label) return;
     (*label).textModel = model;
-    Container_markDirty(&(*label).base.base);
 }
 
 void RichLabel_setWrapMode(RichLabel *label, WrapMode mode) {
@@ -435,13 +428,11 @@ void RichLabel_setWrapMode(RichLabel *label, WrapMode mode) {
     if ((*label).textModel) {
         RichText_setWrapMode((*label).textModel, mode);
     }
-    Container_markDirty(&(*label).base.base);
 }
 
 void RichLabel_setTextAlign(RichLabel *label, TextAlign align) {
     if (!label) return;
     (*label).textAlign = align;
-    Container_markDirty(&(*label).base.base);
 }
 
 TextAlign RichLabel_getTextAlign(const RichLabel *label) {
@@ -451,7 +442,6 @@ TextAlign RichLabel_getTextAlign(const RichLabel *label) {
 void RichLabel_setSpacingWidth(RichLabel *label, float width) {
     if (!label) return;
     (*label).spacingWidth = width;
-    Container_markDirty(&(*label).base.base);
 }
 
 float RichLabel_getSpacingWidth(const RichLabel *label) {
@@ -461,7 +451,6 @@ float RichLabel_getSpacingWidth(const RichLabel *label) {
 void RichLabel_setSpacingHeight(RichLabel *label, float height) {
     if (!label) return;
     (*label).spacingHeight = height;
-    Container_markDirty(&(*label).base.base);
 }
 
 float RichLabel_getSpacingHeight(const RichLabel *label) {
@@ -471,7 +460,6 @@ float RichLabel_getSpacingHeight(const RichLabel *label) {
 void RichLabel_setLigatures(RichLabel *label, bool flag) {
     if (!label) return;
     (*label).ligatures = flag;
-    Container_markDirty(&(*label).base.base);
 }
 
 bool RichLabel_hasLigatures(const RichLabel *label) {
@@ -487,7 +475,6 @@ void RichLabel_setHighlightable(RichLabel *label, bool flag) {
         (*label).cursor = Cursor_getPredefined(CURSOR_DEFAULT);
         TextSelect_reset(&(*label).select);
     }
-    Container_markDirty(&(*label).base.base);
 }
 
 void RichLabel_setSelection(RichLabel *label, int32_t start, int32_t end) {
@@ -498,13 +485,11 @@ void RichLabel_setSelection(RichLabel *label, int32_t start, int32_t end) {
         TextSelect_begin(&(*label).select, start);
         TextSelect_drag(&(*label).select, end);
     }
-    Container_markDirty(&(*label).base.base);
 }
 
 void RichLabel_setHighlightColor(RichLabel *label, uint32_t color) {
     if (!label) return;
     (*label).highlightColor = color;
-    Container_markDirty(&(*label).base.base);
 }
 
 void RichLabel_setHighlightColorRGBA(RichLabel *label, uint8_t r, uint8_t g, uint8_t b, uint8_t a) {
@@ -516,7 +501,6 @@ void RichLabel_setHighlightColorRGBA(RichLabel *label, uint8_t r, uint8_t g, uin
 void RichLabel_setHovered(RichLabel *label, bool hovered) {
     if (!label) return;
     TextSelect_setHovered(&(*label).select, hovered);
-    Container_markDirty(&(*label).base.base);
 }
 
 void RichLabel_setCursor(RichLabel *label, Cursor *cursor) {

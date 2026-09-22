@@ -118,7 +118,7 @@ static void markDirty(InputOTP *otp) {
     if (!otp)
         return;
     Panel *bp = &(*otp).base;
-    Container_markDirty(&(*bp).base);
+    (void) bp;
 }
 
 static void ensureBoxRaster(InputOTP *otp, int32_t idx, char ch) {
@@ -209,8 +209,8 @@ static bool otpPaintBackground(Panel *panel, void *renderer, void *cmdBuffer,
         return false;
     if (w <= 0.0f || h <= 0.0f)
         return false;
-    Container *c = &(*panel).base;
-    float op = Container_getOpacity(c);
+    Component *c = &(*panel).component;
+    float op = Component_getOpacity(c);
     if (op <= 0.0f)
         return false;
     int32_t len = 0;
@@ -246,8 +246,8 @@ static bool otpPaintBorder(Panel *panel, void *renderer, void *cmdBuffer,
         return false;
     if (w <= 0.0f || h <= 0.0f)
         return false;
-    Container *c = &(*panel).base;
-    float op = Container_getOpacity(c);
+    Component *c = &(*panel).component;
+    float op = Component_getOpacity(c);
     if (op <= 0.0f)
         return false;
     int32_t len = 0;
@@ -288,8 +288,8 @@ static bool otpPaintText(Panel *panel, void *renderer, void *cmdBuffer,
         return false;
     if (w <= 0.0f || h <= 0.0f)
         return false;
-    Container *c = &(*panel).base;
-    float op = Container_getOpacity(c);
+    Component *c = &(*panel).component;
+    float op = Component_getOpacity(c);
     if (op <= 0.0f)
         return false;
     int32_t len = 0;
@@ -331,8 +331,8 @@ static bool otpPaintCaret(Panel *panel, void *renderer, void *cmdBuffer,
         return false;
     if (!(*otp).focused)
         return false;
-    Container *c = &(*panel).base;
-    float op = Container_getOpacity(c);
+    Component *c = &(*panel).component;
+    float op = Component_getOpacity(c);
     if (op <= 0.0f)
         return false;
     int32_t len = 0;
@@ -488,7 +488,7 @@ void InputOTP_handlePointer(InputOTP *self, int kind, float localX, float localY
     if (kind == PTR_DOWN) {
         (*self).focused = true;
         Panel *p = &(*self).base;
-        float w = Container_getWidth(&(*p).base);
+        float w = Component_getWidth(&(*p).component);
         float bs = (*self).boxSize > 0.0f ? (*self).boxSize : INPUTOTP_DEFAULT_BOX;
         float gap = (*self).gap >= 0.0f ? (*self).gap : INPUTOTP_DEFAULT_GAP;
         int32_t len = (*self).length;

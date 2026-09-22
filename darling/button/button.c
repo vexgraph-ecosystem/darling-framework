@@ -198,11 +198,8 @@ Button *Button_2(Panel *parent, const char *label) {
 // ============================================================================
 
 static void markDirty(Button *b) {
-    if (!b)
-        return;
-    Panel *p = &(*b).base;
-    Container *c = &(*p).base;
-    Container_markDirty(c);
+    (void) b;
+    (void) 0;
 }
 
 // Re-raster demand: text-shape inputs (label/font/size/color) stale the
@@ -283,8 +280,8 @@ static bool buttonPaintBackground(Panel *panel, void *renderer, void *cmdBuffer,
         return false;
     if (w <= 0.0f || h <= 0.0f)
         return false;
-    Container *c = &(*panel).base;
-    float op = Container_getOpacity(c);
+    Component *c = &(*panel).component;
+    float op = Component_getOpacity(c);
     if (op <= 0.0f)
         return false;
     uint32_t fill = (*b).bg;
@@ -315,8 +312,8 @@ static bool buttonPaintBorder(Panel *panel, void *renderer, void *cmdBuffer,
         return false;
     if (w <= 0.0f || h <= 0.0f)
         return false;
-    Container *c = &(*panel).base;
-    float op = Container_getOpacity(c);
+    Component *c = &(*panel).component;
+    float op = Component_getOpacity(c);
     if (op <= 0.0f)
         return false;
     float btw = (*b).borderWidth > 0.0f ? (*b).borderWidth : 1.0f;
@@ -344,8 +341,8 @@ static bool buttonPaintText(Panel *panel, void *renderer, void *cmdBuffer,
         return false;
     if (w <= 0.0f || h <= 0.0f)
         return false;
-    Container *c = &(*panel).base;
-    float op = Container_getOpacity(c);
+    Component *c = &(*panel).component;
+    float op = Component_getOpacity(c);
     if (op <= 0.0f)
         return false;
     if (!(*b).label || (*b).label[0] == '\0')
@@ -384,7 +381,7 @@ void Button_handlePointer(Button *b, int kind, float localX, float localY) {
     if (!b || (*b).disabled)
         return;
     Panel *p = &(*b).base;
-    Container *c = &(*p).base;
+    Component *c = &(*p).component;
     float w = (*c).w > 0.0f ? (*c).w : 80.0f;
     float h = (*c).h > 0.0f ? (*c).h : 30.0f;
     bool inside = (localX >= 0.0f && localX <= w && localY >= 0.0f && localY <= h);

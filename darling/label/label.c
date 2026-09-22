@@ -193,7 +193,7 @@ static void markDirty(Label *lbl) {
     if (!lbl)
         return;
     Panel *p = &(*lbl).base;
-    Container_markDirty(&(*p).base);
+    (void) p;
 }
 
 int32_t Label_charIndexAt(const Label *label, float localX) {
@@ -230,7 +230,7 @@ int32_t Label_charIndexAt(const Label *label, float localX) {
         return lo;
     }
     const Panel *p = &(*label).base;
-    const Container *c = &(*p).base;
+    const Component *c = &(*p).component;
     float qw = (*c).w;
     if ((*label).rasterW > 0) {
         float backing = (*label).rasterBacking > 0.0f ? (*label).rasterBacking : 1.0f;
@@ -261,7 +261,7 @@ void Label_handlePointer(Label *label, int kind, float localX, float localY, voi
     if (!label)
         return;
     Panel *p = &(*label).base;
-    Container *c = &(*p).base;
+    Component *c = &(*p).component;
     float w = (*c).w;
     float h = (*c).h;
     if (w <= 0.0f && (*label).rasterW > 0) {
@@ -460,7 +460,7 @@ static bool ensureRaster(Label *lbl) {
                                         (*lbl).spacingWidth, cleanOff, 512);
 
     Panel *rasterPanel = &(*lbl).base;
-    Container *rasterBox = &(*rasterPanel).base;
+    Component *rasterBox = &(*rasterPanel).component;
     float boundsW = (*rasterBox).w;
     TextStyleDescriptor style = {
         .ligatures = (*lbl).ligatures,
@@ -557,7 +557,7 @@ static void drawSdfFallback(Panel *panel, void *cmdBuffer, float surfaceW, float
     Label *lbl = (Label*) panel;
     (void) w;
     (void) h;
-    float op = Container_getOpacity(&(*panel).base);
+    float op = Component_getOpacity(&(*panel).component);
     if (op <= 0.0f)
         return;
     // Background is stage 0 (Panel default) — never repainted here.
@@ -723,7 +723,7 @@ static bool labelPaintText(Panel *panel, void *renderer, void *cmdBuffer,
     (void) renderer;
     if (!lbl || !cmdBuffer)
         return false;
-    float op = Container_getOpacity(&(*panel).base);
+    float op = Component_getOpacity(&(*panel).component);
     if (op <= 0.0f)
         return false;
     if (!(*lbl).text || (*lbl).text[0] == '\0' || (*lbl).fontSize <= 0.0f)
@@ -738,7 +738,7 @@ static bool labelPaintText(Panel *panel, void *renderer, void *cmdBuffer,
         float qw = (float) (*lbl).rasterW;
         float qh = (float) (*lbl).rasterH;
         Panel *basePanel = &(*lbl).base;
-        Container *container = &(*basePanel).base;
+        Component *container = &(*basePanel).component;
         if (w <= (*container).w * 1.25f && backing > 1.0f) {
             qw /= backing;
             qh /= backing;
@@ -774,7 +774,7 @@ static bool labelPaintHighlight(Panel *panel, void *renderer, void *cmdBuffer,
         return false;
     if ((*lbl).rasterTex < 0 || (*lbl).rasterW <= 0 || (*lbl).rasterH <= 0)
         return false;
-    float op = Container_getOpacity(&(*panel).base);
+    float op = Component_getOpacity(&(*panel).component);
     if (op <= 0.0f)
         return false;
     float backing = (*lbl).rasterBacking;
@@ -782,7 +782,7 @@ static bool labelPaintHighlight(Panel *panel, void *renderer, void *cmdBuffer,
         backing = 1.0f;
     float qh = (float) (*lbl).rasterH;
     Panel *basePanel = &(*lbl).base;
-    Container *container = &(*basePanel).base;
+    Component *container = &(*basePanel).component;
     if (w <= (*container).w * 1.25f && backing > 1.0f)
         qh /= backing;
     float qx = x;

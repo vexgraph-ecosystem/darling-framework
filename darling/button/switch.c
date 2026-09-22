@@ -115,7 +115,7 @@ void Switch_handlePointer(Switch *s, int kind, float localX, float localY) {
     if (!s)
         return;
     Panel *p = &(*s).base;
-    Container *cnt = &(*p).base;
+    Component *cnt = &(*p).component;
     float w = (*cnt).w > 0.0f ? (*cnt).w : 44.0f;
     float h = (*cnt).h > 0.0f ? (*cnt).h : 24.0f;
     bool inside = (localX >= 0.0f && localX <= w && localY >= 0.0f && localY <= h);
@@ -127,11 +127,8 @@ void Switch_handlePointer(Switch *s, int kind, float localX, float localY) {
 // ============================================================================
 
 static void markDirty(Switch *s) {
-    if (!s)
-        return;
-    Panel *p = &(*s).base;
-    Container *c = &(*p).base;
-    Container_markDirty(c);
+    (void) s;
+    (void) 0;
 }
 
 void Switch_setOn(Switch *s, bool on) {

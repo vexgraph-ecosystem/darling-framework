@@ -1,6 +1,7 @@
 #include "darling/anim/anim.h"
 
 #include <math.h>
+#include <stddef.h>
 #include <stdlib.h>
 #include <string.h>
 
@@ -381,7 +382,7 @@ void *Anim_getDoneContext(const Anim *a) {
 // --- player -----------------------------------------------------------------
 
 typedef struct AnimBinding {
-    Container *c;
+    Component *c;
     Anim *a;
     int kind;
     double elapsed;
@@ -540,38 +541,41 @@ static float sampleAlpha(const Anim *a, float from, float t) {
     return clamp01(v);
 }
 
-// State-safe apply: direct field writes + dirty=1. Public setters are NOT
-// used here — they invalidateBase (recapture the resize reference), which
-// would make anchored panels jump mid-animation (the subtle law).
+// State-safe apply: Component setters recompute abs eagerly (no dirty
+// flags, no invalidateBase). Owner recovery: the bound Component is the
+// embedded (*owner).component, so the owner sits offsetof(Panel, component)
+// bytes below (all widgets embed Panel with Component at the same offset).
 static void animApply(AnimBinding *b, float t) {
-    Container *c = (*b).c;
+    Component *c = (*b).c;
     Anim *a = (*b).a;
-    (*c).x = sampleLocX(a, (*b).fromX, t);
-    (*c).y = sampleLocY(a, (*b).fromY, t);
-    (*c).w = sampleSizeW(a, (*b).fromW, t);
-    (*c).h = sampleSizeH(a, (*b).fromH, t);
-    (*c).scaleX = sampleScaleX(a, (*b).fromSX, t);
-    (*c).scaleY = sampleScaleY(a, (*b).fromSY, t);
-    (*c).dirty = 1;
+    float nx = sampleLocX(a, (*b).fromX, t);
+    float ny = sampleLocY(a, (*b).fromY, t);
+    float nw = sampleSizeW(a, (*b).fromW, t);
+    float nh = sampleSizeH(a, (*b).fromH, t);
+    float nsx = sampleScaleX(a, (*b).fromSX, t);
+    float nsy = sampleScaleY(a, (*b).fromSY, t);
+    Component_setLocation(c, nx, ny);
+    Component_setSize(c, nw, nh);
+    Component_setScale(c, nsx, nsy);
     if ((*b).kind == ANIM_KIND_PANEL || (*b).kind == ANIM_KIND_LABEL || (*b).kind == ANIM_KIND_BUTTON) {
-        Panel *p = (Panel *)c;
+        Panel *p = (Panel*) ((char*) c - offsetof(Panel, component));
         uint32_t col = (*p).color;
         // darling colors are 0xAARRGGBB: alpha lives in the HIGH byte.
         uint8_t na = (uint8_t)(sampleAlpha(a, (*b).fromAlpha, t) * 255.0f + 0.5f);
         (*p).color = (col & 0x00FFFFFFu) | ((uint32_t)na << 24);
     }
     if ((*b).kind == ANIM_KIND_LABEL) {
-        Label *l = (Label *)c;
+        Label *l = (Label*) ((char*) c - offsetof(Panel, component));
         (*l).fontSize = sampleFont(a, (*b).fromFont, t);
         (*l).rasterDirty = true;
     } else if ((*b).kind == ANIM_KIND_BUTTON) {
-        Button *btn = (Button *)c;
+        Button *btn = (Button*) ((char*) c - offsetof(Panel, component));
         float s = sampleFont(a, (*b).fromFont, t);
         (*btn).fontSize = s < 0.5f ? 0.5f : s;
     }
 }
 
-static int animFind(const Container *c) {
+static int animFind(const Component *c) {
     for (size_t i = 0; i < s_bindingCount; i++) {
         if (s_bindings[i].c == c)
             return (int)i;
@@ -579,7 +583,7 @@ static int animFind(const Container *c) {
     return -1;
 }
 
-void Anim_play(Container *c, Anim *a, int kind) {
+void Anim_play(Component *c, Anim *a, int kind) {
     if (!c)
         return;
     if (!a) {
@@ -612,11 +616,11 @@ void Anim_play(Container *c, Anim *a, int kind) {
     (*b).fromFont = 12.0f;
     (*b).fromAlpha = 1.0f;
     if (kind == ANIM_KIND_LABEL)
-        (*b).fromFont = ((const Label *)c)->fontSize;
+        (*b).fromFont = ((const Label*) ((const char*) c - offsetof(Panel, component)))->fontSize;
     else if (kind == ANIM_KIND_BUTTON)
-        (*b).fromFont = ((const Button *)c)->fontSize;
+        (*b).fromFont = ((const Button*) ((const char*) c - offsetof(Panel, component)))->fontSize;
     if (kind == ANIM_KIND_PANEL || kind == ANIM_KIND_LABEL || kind == ANIM_KIND_BUTTON)
-        (*b).fromAlpha = (float)((((const Panel *)c)->color >> 24) & 0xFFu) / 255.0f;
+        (*b).fromAlpha = (float)((((const Panel*) ((const char*) c - offsetof(Panel, component)))->color >> 24) & 0xFFu) / 255.0f;
     float dur = Anim_duration(a);
     if (dur <= 0.0f) {
         animApply(b, 0.0f);
@@ -656,7 +660,7 @@ void Anim_tick(double dt) {
     }
 }
 
-void Anim_cancel(Container *c) {
+void Anim_cancel(Component *c) {
     if (!c)
         return;
     int idx = animFind(c);
@@ -668,7 +672,7 @@ void Anim_cancelAll(void) {
     s_bindingCount = 0;
 }
 
-bool Anim_isPlaying(const Container *c) {
+bool Anim_isPlaying(const Component *c) {
     return c && animFind(c) >= 0;
 }
 
@@ -678,30 +682,40 @@ size_t Anim_liveCount(void) {
 
 // --- per-class facades ------------------------------------------------------
 
-void Container_animate(Container *c, Anim *a) {
+void Component_animate(Component *c, Anim *a) {
     if (c)
         Anim_play(c, a, ANIM_KIND_CONTAINER);
 }
 
+void Container_animate(Component *c, Anim *a) {
+    Component_animate(c, a);
+}
+
 void Panel_animate(struct Panel *p, Anim *a) {
     if (p)
-        Anim_play((Container *)p, a, ANIM_KIND_PANEL);
+        Anim_play(&(*p).component, a, ANIM_KIND_PANEL);
 }
 
 void Label_animate(struct Label *l, Anim *a) {
-    if (l)
-        Anim_play((Container *)l, a, ANIM_KIND_LABEL);
+    if (l) {
+        Panel *pb = &(*l).base;
+        Anim_play(&(*pb).component, a, ANIM_KIND_LABEL);
+    }
 }
 
 void Button_animate(struct Button *b, Anim *a) {
-    if (b)
-        Anim_play((Container *)b, a, ANIM_KIND_BUTTON);
+    if (b) {
+        Panel *pb = &(*b).base;
+        Anim_play(&(*pb).component, a, ANIM_KIND_BUTTON);
+    }
 }
 
 #define ANIM_PANEL_FACADE(Name, Type)                       \
     void Name##_animate(struct Type *p, Anim *a) {           \
-        if (p)                                              \
-            Anim_play((Container *)p, a, ANIM_KIND_PANEL);   \
+        if (p) {                                            \
+            Panel *pb = (Panel*) p;                         \
+            Anim_play(&(*pb).component, a, ANIM_KIND_PANEL); \
+        }                                                   \
     }
 
 ANIM_PANEL_FACADE(ListContainer, ListContainer)

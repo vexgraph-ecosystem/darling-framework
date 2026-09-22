@@ -1,5 +1,7 @@
 #include "darling/scene/canvas.h"
 
+#include "darling/component.h"
+#include "darling/panel/panel.h"
 #include "darling/picture/picture.h"
 #include "nio/mem.h"
 #include "oop/type.h"
@@ -192,9 +194,14 @@ void Canvas_resolveRoot(const Canvas *c, void *node, float fbW, float fbH, Vec4 
     if (classId == ID_PICTURE) {
         Picture *pic = (Picture*) node;
         Panel *panel = &(*pic).base;
-        Container_resolve(&(*panel).base, 0.0f, 0.0f, cw, ch, outRect);
+        Component *meta = &(*panel).component;
+        Component_setParentAbs(meta, 0.0f, 0.0f, cw, ch);
+        Component_getAbsRect(meta, outRect);
     } else {
-        Container_resolve((Container*) node, 0.0f, 0.0f, cw, ch, outRect);
+        Panel *panel = (Panel*) node;
+        Component *meta = &(*panel).component;
+        Component_setParentAbs(meta, 0.0f, 0.0f, cw, ch);
+        Component_getAbsRect(meta, outRect);
     }
 }
 

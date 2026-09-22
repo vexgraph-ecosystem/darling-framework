@@ -106,11 +106,8 @@ RichTextPanel *RichTextPanel_2(RichText *rt, float maxWidth) {
 // ============================================================================
 
 static void markDirty(RichTextPanel *s) {
-    if (!s)
-        return;
-    Panel *b = &(*s).base;
-    Container *c = &(*b).base;
-    Container_markDirty(c);
+    (void) s;
+    (void) 0;
 }
 
 static void relayout(RichTextPanel *s) {
@@ -121,8 +118,8 @@ static void relayout(RichTextPanel *s) {
         return;
     RichText_layout(src, (*s).maxWidth);
     Panel *b = &(*s).base;
-    Container *c = &(*b).base;
-    float w = Container_getWidth(c);
+    Component *c = &(*b).component;
+    float w = Component_getWidth(c);
     if (w < 0.0f)
         w = 0.0f;
     Panel_setSize(b, w, (*src).layoutHeight);

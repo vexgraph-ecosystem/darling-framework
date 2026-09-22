@@ -102,8 +102,8 @@ static bool picturePaintImage(Panel *panel, void *renderer, void *cmdBuffer,
     }
     uint32_t imgW = 1, imgH = 1;
     Texture_getSize(texId, &imgW, &imgH);
-    Container *c = &(*panel).base;
-    float op = Container_getOpacity(c);
+    Component *c = &(*panel).component;
+    float op = Component_getOpacity(c);
     if (op <= 0.0f)
         return false;
     Vk_drawTexture(cmdBuffer, surfaceW, surfaceH, x, y, w, h,
@@ -183,7 +183,7 @@ bool Picture_load(Picture *p, const char *vfsPath) {
     }
 
     Panel *basePanel = &(*p).base;
-    Container_markDirty(&(*basePanel).base);
+    (void) basePanel;
     return true;
 }
 
@@ -204,7 +204,7 @@ void Picture_setImage(Picture *p, void *image) {
     if (p) {
         (*p).image = image;
         Panel *basePanel = &(*p).base;
-        Container_markDirty(&(*basePanel).base);
+        (void) basePanel;
     }
 }
 
@@ -215,7 +215,7 @@ void Picture_setTexture(Picture *p, int32_t textureId) {
         (*p).textureId = textureId;
         (*p).ownsTexture = false;
         Panel *basePanel = &(*p).base;
-        Container_markDirty(&(*basePanel).base);
+        (void) basePanel;
     }
 }
 
@@ -223,7 +223,7 @@ void Picture_setMode(Picture *p, PictureMode mode) {
     if (p) {
         (*p).mode = mode;
         Panel *basePanel = &(*p).base;
-        Container_markDirty(&(*basePanel).base);
+        (void) basePanel;
     }
 }
 
@@ -231,7 +231,7 @@ void Picture_cycleMode(Picture *p) {
     if (p) {
         (*p).mode = (PictureMode)(((*p).mode + 1) % 8);
         Panel *basePanel = &(*p).base;
-        Container_markDirty(&(*basePanel).base);
+        (void) basePanel;
     }
 }
 
@@ -255,7 +255,7 @@ void Picture_setImageSize(Picture *p, float w, float h) {
         (*p).imageSizeH = h;
         (*p).hasImageSize = true;
         Panel *basePanel = &(*p).base;
-        Container_markDirty(&(*basePanel).base);
+        (void) basePanel;
     }
 }
 
@@ -267,7 +267,7 @@ void Picture_setCrop(Picture *p, float x1, float y1, float x2, float y2) {
         (*p).cropY2 = y2;
         (*p).hasCrop = true;
         Panel *basePanel = &(*p).base;
-        Container_markDirty(&(*basePanel).base);
+        (void) basePanel;
     }
 }
 

@@ -108,7 +108,7 @@ static void markDirty(Typography *t) {
     if (!t)
         return;
     Panel *b = &(*t).base;
-    Container_markDirty(&(*b).base);
+    (void) b;
 }
 
 void Typography_setText(Typography *t, const char *text) {

@@ -42,9 +42,9 @@ GridContainer *GridContainer_2(int32_t rows, int32_t cols);
 #define GridContainer(...) CONSTRUCTOR_DISPATCH(GridContainer, __VA_ARGS__)
 
 // Layout facade (same pattern as Panel_* shims: forward over the prefix).
-static inline void GridContainer_setLocation(GridContainer *g, float x, float y)
+static inline void GridComponent_setLocation(GridContainer *g, float x, float y)
     { if (g) Panel_setLocation(&(*g).base, x, y); }
-static inline void GridContainer_setSize(GridContainer *g, float w, float h)
+static inline void GridComponent_setSize(GridContainer *g, float w, float h)
     { if (g) Panel_setSize(&(*g).base, w, h); }
 
 // Core (cells are slots: nullptr clears; overwrite drops without freeing;

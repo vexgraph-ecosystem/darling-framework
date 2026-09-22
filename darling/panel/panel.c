@@ -146,8 +146,7 @@ static bool paintBackground(Panel *panel, void *renderer, void *cmdBuffer,
     uint32_t color = (*panel).color;
     if ((color >> 24) == 0)
         return false;
-    Container *base = &(*panel).base;
-    float op = Container_getOpacity(base);
+    float op = Component_getOpacity(&(*panel).component);
     if (op <= 0.0f)
         return false;
     float r = (float) ((color >> 16) & 0xFF) / 255.0f;
@@ -205,7 +204,6 @@ void Panel_setBackgroundColor(Panel *p, uint32_t color) {
     if (!p)
         return;
     (*p).color = color;
-    Container_markDirty(&(*p).base);
 }
 
 void Panel_setBackgroundColorRGBA(Panel *p, uint8_t r, uint8_t g, uint8_t b, uint8_t a) {
@@ -223,7 +221,6 @@ void Panel_setRenderHandler(Panel *p, Panel_RenderFn fn) {
     if (!p)
         return;
     (*p).renderHandler = fn;
-    Container_markDirty(&(*p).base);
 }
 
 // Opaque handler state (e.g. per-pane animation structs). Pure slot — never
@@ -239,10 +236,7 @@ void Panel_setRenderUserdata(Panel *p, void *userdata) {
 }
 
 static void markPartDirty(Panel *p) {
-    if (!p)
-        return;
-    Container *c = &(*p).base;
-    Container_markDirty(c);
+    (void) p;
 }
 
 Panel_PartFn Panel_getBackgroundFn(const Panel *p) {
@@ -347,20 +341,10 @@ void Panel_setImage(Panel *p, Image *image) {
         return;
     Panel *src = (*p).source;
     if (src) {
-        // write-through to canonical, fan _out dirt to every holder
         (*src).image = image;
-        Container_markDirty(&(*src).base);
-        if ((*src).children) {
-            size_t n = List_size((*src).children);
-            for (size_t i = 0; i < n; i++) {
-                Panel *holder = (Panel*) List_get((*src).children, i);
-                Container_markDirty(&(*holder).base);
-            }
-        }
         return;
     }
     (*p).image = image;
-    Container_markDirty(&(*p).base);
 }
 
 void *Panel_getFilters(const Panel *p) {
@@ -378,7 +362,6 @@ void Panel_setFilters(Panel *p, void *filters) {
         Panel_setFilters(src, filters);
     else
         (*p).filters = filters;
-    Container_markDirty(&(*p).base);
 }
 
 const Panel *Panel_getSource(const Panel *p) {
@@ -447,13 +430,9 @@ void Panel_addContainer(Panel *p, Panel *child) {
         return;
     }
     List_add((*p).children, (uint64_t)(uintptr_t)child);
-    Container_markDirty(&(*p).base);
-    Container_markDirty(&(*child).base);
-    // Node connect: mirror the edge into the embedded Component tree so a
-    // panel stack IS a component stack (Shift 2b). addChild cascades the
-    // parent content box into the child eagerly; a false return is arena
-    // OOM — the Panel edge stays authoritative until Shift 2c.
-    Component_addChild(&(*p).component, &(*child).component);
+    float contentX = 0.0f, contentY = 0.0f, contentW = 0.0f, contentH = 0.0f;
+    Component_getContentRect(&(*p).component, &contentX, &contentY, &contentW, &contentH);
+    Component_setParentAbs(&(*child).component, contentX, contentY, contentW, contentH);
 }
 
 bool Panel_removeChild(Panel *p, Panel *child) {
@@ -465,11 +444,6 @@ bool Panel_removeChild(Panel *p, Panel *child) {
             List_remove((*p).children, i);
             if ((*child).parent == p)
                 (*child).parent = nullptr;
-            Container_markDirty(&(*p).base);
-            Container_markDirty(&(*child).base);
-            // Node disconnect: mirror into the Component tree (false = the
-            // edge was never wired; the Panel edge stays authoritative).
-            Component_removeChild(&(*p).component, &(*child).component);
             return true;
         }
     }
@@ -484,33 +458,8 @@ Panel *Panel_add(Panel *parent, const Panel *node) {
     if (!copy)
         return nullptr;
 
-    // structural deep copy: layout is its own
-    Container *cb = &(*copy).base;
-    const Container *nb = &(*((Panel*) node)).base;
-    (*cb).x = (*nb).x;
-    (*cb).y = (*nb).y;
-    (*cb).w = (*nb).w;
-    (*cb).h = (*nb).h;
-    (*cb).scaleX = (*nb).scaleX;
-    (*cb).scaleY = (*nb).scaleY;
-    (*cb).anchor = (*nb).anchor;
-    (*cb).pivot = (*nb).pivot;
-    (*cb).z = (*nb).z;
-    (*cb).visible = (*nb).visible;
-    (*cb).enabled = (*nb).enabled;
-    (*cb).clipping = (*nb).clipping;
-    (*cb).percentX = (*nb).percentX;
-    (*cb).percentY = (*nb).percentY;
-    // replay the copied geometry into the embedded Component metadata (the
-    // same dual-write the facades perform; percent/enabled/clipping have no
-    // Component counterpart and stay Container-only until the cascade wires).
-    Component *dst = &(*copy).component;
-    Component_setLocation(dst, (*nb).x, (*nb).y);
-    Component_setSize(dst, (*nb).w, (*nb).h);
-    Component_setAnchor(dst, (*nb).anchor);
-    Component_setPivot(dst, (*nb).pivot);
-    Component_setVisible(dst, (*nb).visible != 0);
-    Component_setZ(dst, (*nb).z);
+    // structural deep copy: the Component metadata is its own layout
+    (*copy).component = (*node).component;
     (*copy).color = (*node).color;
     // behavior travels with structure: a view renders exactly like its source
     (*copy).renderHandler = (*node).renderHandler;
@@ -531,7 +480,6 @@ Panel *Panel_add(Panel *parent, const Panel *node) {
         Panel_add(copy, Panel_getChild(node, i));
 
     Panel_addContainer(parent, copy);
-    Container_markDirty(cb);
     return copy;
 }
 
@@ -539,28 +487,10 @@ Panel *Panel_add(Panel *parent, const Panel *node) {
 // pool-wide walker. Deferred to the scene teardown pass.
 
 bool Panel_isTreeDirty(const Panel *p) {
-    if (!p)
-        return false;
-    const Container *c = &(*p).base;
-    if (Container_isDirty(c))
-        return true;
-    size_t n = Panel_childCount(p);
-    for (size_t i = 0; i < n; i++) {
-        Panel *child = Panel_getChild(p, i);
-        if (Panel_isTreeDirty(child))
-            return true;
-    }
+    (void) p;
     return false;
 }
 
 void Panel_clearTreeDirty(Panel *p) {
-    if (!p)
-        return;
-    Container *c = &(*p).base;
-    Container_clearDirty(c);
-    size_t n = Panel_childCount(p);
-    for (size_t i = 0; i < n; i++) {
-        Panel *child = Panel_getChild(p, i);
-        Panel_clearTreeDirty(child);
-    }
+    (void) p;
 }

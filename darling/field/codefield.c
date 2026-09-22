@@ -94,7 +94,7 @@ static void onEditorChange(void *ctx) {
     CodeField *cf = (CodeField*) ctx;
     if (!cf) return;
     Panel *bp = &(*cf).base;
-    Container_markDirty(&(*bp).base);
+    (void) bp;
     if (cf->onChange) {
         cf->onChange(cf->ctx);
     }
@@ -103,7 +103,7 @@ static void onEditorChange(void *ctx) {
 static void markDirty(CodeField *self) {
     if (!self) return;
     Panel *bp = &(*self).base;
-    Container_markDirty(&(*bp).base);
+    (void) bp;
 }
 
 // Ordered part pipeline: background (gutter + divider + layout) -> text
@@ -121,8 +121,8 @@ static bool codePaintBackground(Panel *panel, void *renderer, void *cmdBuffer,
         return false;
     if (w <= 0.0f || h <= 0.0f)
         return false;
-    Container *c = &(*panel).base;
-    float op = Container_getOpacity(c);
+    Component *c = &(*panel).component;
+    float op = Component_getOpacity(c);
     if (op <= 0.0f)
         return false;
     float gw = (*cf).gutterWidth > 0.0f ? (*cf).gutterWidth : CODEFIELD_DEFAULT_GUTTER_W;
@@ -132,9 +132,9 @@ static bool codePaintBackground(Panel *panel, void *renderer, void *cmdBuffer,
         if (edW < 10.0f)
             edW = 10.0f;
         Panel *ebp = &(*ed).base;
-        Container *ec = &(*ebp).base;
-        Container_setLocation(ec, gw, 0.0f);
-        Container_setSize(ec, edW, h);
+        Component *ec = &(*ebp).component;
+        Component_setLocation(ec, gw, 0.0f);
+        Component_setSize(ec, edW, h);
     }
     uint32_t gbg = (*cf).gutterBackground;
     float gr = ((gbg >> 16) & 0xFF) / 255.0f;
@@ -158,8 +158,8 @@ static bool codePaintText(Panel *panel, void *renderer, void *cmdBuffer,
         return false;
     if (w <= 0.0f || h <= 0.0f)
         return false;
-    Container *c = &(*panel).base;
-    float op = Container_getOpacity(c);
+    Component *c = &(*panel).component;
+    float op = Component_getOpacity(c);
     if (op <= 0.0f)
         return false;
     Textarea *ed = (*cf).editor;

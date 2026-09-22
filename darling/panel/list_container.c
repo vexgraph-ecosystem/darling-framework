@@ -69,8 +69,8 @@
  *   - ListContainer_layout(lp)
  *
  * Setters:
- *   - ListContainer_setLocation(lp, x, y)
- *   - ListContainer_setSize(lp, w, h)
+ *   - ListComponent_setLocation(lp, x, y)
+ *   - ListComponent_setSize(lp, w, h)
  *   - ListContainer_setSpacing(lp, spacing)
  *   - ListContainer_setDirection(lp, direction)
  *   - ListContainer_setFillCross(lp, fill)
@@ -113,15 +113,12 @@ ListContainer *ListContainer_1(int32_t direction) {
 // ============================================================================
 
 static void markDirty(ListContainer *lp) {
-    if (!lp)
-        return;
-    Panel *b = &(*lp).base;
-    Container *c = &(*b).base;
-    Container_markDirty(c);
+    (void) lp;
+    (void) 0;
 }
 
-static void layoutVertical(Panel *b, Container *c, size_t n, float spacing, bool fill) {
-    float selfW = Container_getWidth(c);
+static void layoutVertical(Panel *b, Component *c, size_t n, float spacing, bool fill) {
+    float selfW = Component_getWidth(c);
     float cursor = 0.0f;
     float maxW = 0.0f;
     size_t placed = 0;
@@ -129,26 +126,26 @@ static void layoutVertical(Panel *b, Container *c, size_t n, float spacing, bool
         Panel *kid = Panel_getChild(b, i);
         if (!kid)
             continue;
-        Container *kb = &(*kid).base;
-        float kw = Container_getWidth(kb);
-        float kh = Container_getHeight(kb);
+        Component *kb = &(*kid).component;
+        float kw = Component_getWidth(kb);
+        float kh = Component_getHeight(kb);
         if (kw > maxW)
             maxW = kw;
         if (fill)
-            Container_setWidth(kb, selfW);
-        Container_setLocation(kb, 0.0f, cursor);
+            Component_setWidth(kb, selfW);
+        Component_setLocation(kb, 0.0f, cursor);
         cursor += kh + spacing;
         placed++;
     }
     if (placed == 0)
         return;
     if (!fill)
-        Container_setWidth(c, maxW);
-    Container_setHeight(c, cursor - spacing);
+        Component_setWidth(c, maxW);
+    Component_setHeight(c, cursor - spacing);
 }
 
-static void layoutHorizontal(Panel *b, Container *c, size_t n, float spacing, bool fill) {
-    float selfH = Container_getHeight(c);
+static void layoutHorizontal(Panel *b, Component *c, size_t n, float spacing, bool fill) {
+    float selfH = Component_getHeight(c);
     float cursor = 0.0f;
     float maxH = 0.0f;
     size_t placed = 0;
@@ -156,30 +153,29 @@ static void layoutHorizontal(Panel *b, Container *c, size_t n, float spacing, bo
         Panel *kid = Panel_getChild(b, i);
         if (!kid)
             continue;
-        Container *kb = &(*kid).base;
-        float kw = Container_getWidth(kb);
-        float kh = Container_getHeight(kb);
+        Component *kb = &(*kid).component;
+        float kw = Component_getWidth(kb);
+        float kh = Component_getHeight(kb);
         if (kh > maxH)
             maxH = kh;
         if (fill)
-            Container_setHeight(kb, selfH);
-        Container_setLocation(kb, cursor, 0.0f);
+            Component_setHeight(kb, selfH);
+        Component_setLocation(kb, cursor, 0.0f);
         cursor += kw + spacing;
         placed++;
     }
     if (placed == 0)
         return;
-    Container_setWidth(c, cursor - spacing);
+    Component_setWidth(c, cursor - spacing);
     if (!fill)
-        Container_setHeight(c, maxH);
+        Component_setHeight(c, maxH);
 }
 
 void ListContainer_layout(ListContainer *lp) {
     if (!lp)
         return;
     Panel *b = &(*lp).base;
-    Container *c = &(*b).base;
-    Container_markDirty(c);
+    Component *c = &(*b).component;
     size_t n = Panel_childCount(b);
     if (n == 0)
         return;
@@ -190,7 +186,6 @@ void ListContainer_layout(ListContainer *lp) {
         layoutHorizontal(b, c, n, spacing, fill);
     else
         layoutVertical(b, c, n, spacing, fill);
-    Container_markDirty(c);
 }
 
 void ListContainer_add(ListContainer *lp, Panel *child) {

@@ -123,11 +123,8 @@ void SectionContainer_prev(SectionContainer *s) {
 // ============================================================================
 
 static void markDirty(SectionContainer *s) {
-    if (!s)
-        return;
-    Panel *b = &(*s).base;
-    Container *c = &(*b).base;
-    Container_markDirty(c);
+    (void) s;
+    (void) 0;
 }
 
 void SectionContainer_setCurrent(SectionContainer *s, int32_t index) {

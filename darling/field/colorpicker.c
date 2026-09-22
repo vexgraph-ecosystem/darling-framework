@@ -119,7 +119,7 @@ static void markDirty(ColorPicker *c) {
     if (!c)
         return;
     Panel *b = &(*c).base;
-    Container_markDirty(&(*b).base);
+    (void) b;
 }
 
 void ColorPicker_setColor(ColorPicker *c, uint32_t color) {

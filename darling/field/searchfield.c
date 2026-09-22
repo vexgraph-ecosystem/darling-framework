@@ -88,7 +88,7 @@ static void onInnerChange(void *ctx) {
     SearchField *sf = (SearchField*) ctx;
     if (!sf) return;
     Panel *bp = &(*sf).base;
-    Container_markDirty(&(*bp).base);
+    (void) bp;
 }
 
 // Ordered part pipeline: background (+ inner layout) -> image (icon + badge)
@@ -107,8 +107,8 @@ static bool searchPaintBackground(Panel *panel, void *renderer, void *cmdBuffer,
         return false;
     if (w <= 0.0f || h <= 0.0f)
         return false;
-    Container *c = &(*panel).base;
-    float op = Container_getOpacity(c);
+    Component *c = &(*panel).component;
+    float op = Component_getOpacity(c);
     if (op <= 0.0f)
         return false;
     Input *field = (*sf).input;
@@ -119,9 +119,9 @@ static bool searchPaintBackground(Panel *panel, void *renderer, void *cmdBuffer,
         if (inW < 10.0f)
             inW = 10.0f;
         Panel *inner = &(*field).base;
-        Container *ic = &(*inner).base;
-        Container_setLocation(ic, 28.0f, 0.0f);
-        Container_setSize(ic, inW, h);
+        Component *ic = &(*inner).component;
+        Component_setLocation(ic, 28.0f, 0.0f);
+        Component_setSize(ic, inW, h);
     }
     uint32_t bg = Panel_getBackgroundColor(panel);
     if ((bg >> 24) == 0)
@@ -146,8 +146,8 @@ static bool searchPaintImage(Panel *panel, void *renderer, void *cmdBuffer,
         return false;
     if (w <= 0.0f || h <= 0.0f)
         return false;
-    Container *c = &(*panel).base;
-    float op = Container_getOpacity(c);
+    Component *c = &(*panel).component;
+    float op = Component_getOpacity(c);
     if (op <= 0.0f)
         return false;
     float iconCx = x + 14.0f;
@@ -179,8 +179,8 @@ static bool searchPaintBorder(Panel *panel, void *renderer, void *cmdBuffer,
         return false;
     if (w <= 0.0f || h <= 0.0f)
         return false;
-    Container *c = &(*panel).base;
-    float op = Container_getOpacity(c);
+    Component *c = &(*panel).component;
+    float op = Component_getOpacity(c);
     if (op <= 0.0f)
         return false;
     Input *inner = (*sf).input;
@@ -202,7 +202,7 @@ static bool searchPaintBorder(Panel *panel, void *renderer, void *cmdBuffer,
 static void markDirty(SearchField *self) {
     if (!self) return;
     Panel *bp = &(*self).base;
-    Container_markDirty(&(*bp).base);
+    (void) bp;
 }
 
 SearchField *SearchField_0(void) {

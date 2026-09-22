@@ -20,6 +20,7 @@ static int edgeSnapPx(float deviceEdge) {
 #include "nio/mem.h"
 #include "lang/vec4.h"
 #include "darling/container.h"
+#include "darling/component.h"
 #include "darling/panel/panel.h"
 #include "darling/scene/scene.h"
 #include "vulkan/vk_layer.h"
@@ -132,23 +133,55 @@ static int edgeSnapPx(float deviceEdge) {
 // natively (autoresizingMask); boards keep their fixed pixel extent (the
 // Single-Seam Canvas Law).
 
-// Update board dimensions to track the live window width and height.
+// Update board dimensions to track the live window width and height —
+// and, on the first settle, REGISTER each board as a retained VkLayer
+// target at the seam's FIXED monitor-native extent (Vk_seamMaxExtent), never
+// the window's drawable px: the board image and the seam buffer/IOSurface are
+// the same thing at the same size (the Single-Seam Canvas Law), so the seam
+// pass composites them at the full chain rect and the window crops its
+// top-left region 1:1. Registration is idempotent (VkLayer_find gate) and the
+// targets are NEVER resized — even mid-drag, live points re-render into the
+// fixed targets (no per-step rebuild, no fence churn). VkLayer_resize stays a
+// no-op on unchanged size, so settled re-attaches cost nothing.
 // Returns the number of boards sized.
 int Darling_attachPanelBoards(Window *window, Panel *scenePane, Panel *contentPane, int width, int height, int drawW, int drawH) {
     (void) window;
-    (void) drawW;
-    (void) drawH;
     if (width <= 0 || height <= 0)
         return 0;
     int done = 0;
     if (scenePane) {
-        Container_forceSize(&(*scenePane).base, (float) width, (float) height);
+        Component *sceneMeta = &(*scenePane).component;
+        Component_setSize(sceneMeta, (float) width, (float) height);
+        Component_setParentAbs(sceneMeta, 0.0f, 0.0f, (float) width, (float) height);
         done++;
     }
     if (contentPane) {
-        Container_forceSize(&(*contentPane).base, (float) width, (float) height);
+        Component *contentMeta = &(*contentPane).component;
+        Component_setSize(contentMeta, (float) width, (float) height);
+        Component_setParentAbs(contentMeta, 0.0f, 0.0f, (float) width, (float) height);
         done++;
     }
+
+    extern int VkLayer_register(int width, int height, void *owner);
+    extern int VkLayer_find(void *owner);
+    extern void Vk_seamMaxExtent(int32_t *outW, int32_t *outH);
+    int32_t maxW = 0;
+    int32_t maxH = 0;
+    Vk_seamMaxExtent(&maxW, &maxH);
+    if (maxW <= 0 || maxH <= 0) {
+        // Degenerate seam: no display-backed extent published yet (headless
+        // probe, chain not built). Fall back to the drawable px so the board
+        // targets still exist; the seam composite falls back to inline paint
+        // until the chain carries a real monitor extent.
+        maxW = (int32_t) drawW;
+        maxH = (int32_t) drawH;
+    }
+    if (maxW <= 0 || maxH <= 0)
+        return done;
+    if (scenePane && VkLayer_find(scenePane) < 0)
+        VkLayer_register(maxW, maxH, scenePane);
+    if (contentPane && VkLayer_find(contentPane) < 0)
+        VkLayer_register(maxW, maxH, contentPane);
     return done;
 }
 
@@ -240,8 +273,9 @@ int Darling_attachLayers(Window *window, Panel *contentPanel, int width, int hei
         }
 
         Vec4 rect;
-        Container *childBase = &(*child).base;
-        Container_resolve(childBase, 0.0f, 0.0f, (float) width, (float) height, &rect);
+        Component *childMeta = &(*child).component;
+        Component_setParentAbs(childMeta, 0.0f, 0.0f, (float) width, (float) height);
+        Component_getAbsRect(childMeta, &rect);
         // Edge-snapped alloc px (edgeSnapPx above): same device grid as the
         // paint pass's quads, no double-round at .5 fractional boundaries.
         int allocW = edgeSnapPx((rect.x + rect.z) * scale) - edgeSnapPx(rect.x * scale);
@@ -362,11 +396,12 @@ void Darling_propagatePaneDirty(Window *window, Panel *scenePane, Panel *content
 // Get panel's current display size.
 void Darling_getPanelSize(Panel *p, int *outW, int *outH) {
     if (!p || !outW || !outH) return;
-    *outW = (int) lroundf((*p).base.w);
-    *outH = (int) lroundf((*p).base.h);
+    Component *meta = &(*p).component;
+    *outW = (int) lroundf(Component_getWidth(meta));
+    *outH = (int) lroundf(Component_getHeight(meta));
 }
 
 void Darling_setPanelSize(Panel *p, float w, float h) {
     if (!p) return;
-    Container_setSize(&(*p).base, w, h);
+    Component_setSize(&(*p).component, w, h);
 }

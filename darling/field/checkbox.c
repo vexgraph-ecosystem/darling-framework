@@ -103,8 +103,8 @@ static void markDirty(Checkbox *c) {
     if (!c)
         return;
     Panel *p = &(*c).base;
-    Container *cnt = &(*p).base;
-    Container_markDirty(cnt);
+    Component *cnt = &(*p).component;
+    (void) cnt;
 }
 
 void Checkbox_toggle(Checkbox *c) {
@@ -123,7 +123,7 @@ void Checkbox_handlePointer(Checkbox *c, int kind, float localX, float localY) {
     if (!c)
         return;
     Panel *p = &(*c).base;
-    Container *cnt = &(*p).base;
+    Component *cnt = &(*p).component;
     float w = (*cnt).w > 0.0f ? (*cnt).w : 20.0f;
     float h = (*cnt).h > 0.0f ? (*cnt).h : 20.0f;
     bool inside = (localX >= 0.0f && localX <= w && localY >= 0.0f && localY <= h);

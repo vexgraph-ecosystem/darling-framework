@@ -104,7 +104,7 @@ static void markDirty(Kbd *k) {
     if (!k)
         return;
     Panel *b = &(*k).base;
-    Container_markDirty(&(*b).base);
+    (void) b;
 }
 
 void Kbd_setKeys(Kbd *k, const char *keys) {

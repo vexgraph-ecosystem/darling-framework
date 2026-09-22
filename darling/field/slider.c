@@ -127,7 +127,7 @@ Slider *Slider_1(Panel *parent) {
 static void markDirty(Slider *s) {
     if (!s) return;
     Panel *b = &(*s).base;
-    Container_markDirty(&(*b).base);
+    (void) b;
 }
 
 void Slider_setRange(Slider *s, float min, float max) {
@@ -142,7 +142,7 @@ void Slider_setRange(Slider *s, float min, float max) {
 void Slider_handlePointer(Slider *s, int kind, float localX, float localY) {
     if (!s) return;
     Panel *p = &(*s).base;
-    Container *cnt = &(*p).base;
+    Component *cnt = &(*p).component;
     float w = (*cnt).w;
     float h = (*cnt).h;
     if (w <= 0.0f) w = 100.0f;

@@ -101,9 +101,9 @@ static Scene *allocScene(uint64_t typeId) {
 }
 
 // The scene's Container sits two prefixes deep; rule 10 wants it hoisted.
-static Container *sceneLayout(const Scene *s) {
+static Component *sceneLayout(const Scene *s) {
     Panel *p = s ? (Panel*) &(*s).base : nullptr;
-    return p ? &(*p).base : nullptr;
+    return p ? &(*p).component : nullptr;
 }
 
 Scene *Scene_0(void) {
@@ -113,7 +113,7 @@ Scene *Scene_0(void) {
 Scene *Scene_2(float width, float height) {
     Scene *s = Scene_0();
     if (s)
-        Container_setSize(sceneLayout(s), width, height);
+        Component_setSize(sceneLayout(s), width, height);
     return s;
 }
 
@@ -140,7 +140,6 @@ void Scene_setMode(Scene *s, int mode) {
     if (!s || mode < SCENE_MODE_STRETCH || mode > SCENE_MODE_PIXEL)
         return;
     (*s).mode = mode;
-    Container_markDirty(sceneLayout(s));
 }
 
 int Scene_getPresentMode(const Scene *s) {
@@ -151,13 +150,12 @@ void Scene_setPresentMode(Scene *s, int presentMode) {
     if (!s || (presentMode != SCENE_PRESENT_COMPOSITED && presentMode != SCENE_PRESENT_INLINE))
         return;
     (*s).presentMode = presentMode;
-    Container_markDirty(sceneLayout(s));
 }
 
 float Scene_getVirtualWidth(const Scene *s) {
-    return Container_getWidth(sceneLayout(s));
+    return Component_getWidth(sceneLayout(s));
 }
 
 float Scene_getVirtualHeight(const Scene *s) {
-    return Container_getHeight(sceneLayout(s));
+    return Component_getHeight(sceneLayout(s));
 }

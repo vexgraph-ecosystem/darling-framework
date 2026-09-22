@@ -113,7 +113,7 @@ static void markDirty(DatePicker *dp) {
     if (!dp)
         return;
     Panel *bp = &(*dp).base;
-    Container_markDirty(&(*bp).base);
+    (void) bp;
 }
 
 void DatePicker_setEpochMillis(DatePicker *dp, int64_t millis) {

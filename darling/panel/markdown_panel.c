@@ -233,11 +233,8 @@ MarkdownPanel *MarkdownPanel_1(const char *text) {
 // ============================================================================
 
 static void markDirty(MarkdownPanel *s) {
-    if (!s)
-        return;
-    Panel *b = &(*s).base;
-    Container *c = &(*b).base;
-    Container_markDirty(c);
+    (void) s;
+    (void) 0;
 }
 
 static bool pushSlot(MarkdownPanel *s, Panel *row, RichText *model, uint8_t isRich, float height, uint32_t cellStart, uint32_t textLen) {
@@ -426,9 +423,9 @@ void MarkdownPanel_handlePointer(MarkdownPanel *s, int32_t kind, float localX, f
     if ((*s).rowCount == 0)
         return;
     Panel *b = &(*s).base;
-    Container *c = &(*b).base;
-    float w = Container_getWidth(c);
-    float h = Container_getHeight(c);
+    Component *c = &(*b).component;
+    float w = Component_getWidth(c);
+    float h = Component_getHeight(c);
     bool inside = localX >= 0.0f && localY >= 0.0f && localX <= w && localY <= h;
 
     // Shared hover caret-cursor lifecycle (TextSelect part): flip the hovered
@@ -676,8 +673,8 @@ static void fillStripped(const char *line, size_t len, char *dest) {
 static float stackRow(MarkdownPanel *s, Panel *row, float cursor, float height) {
     // Y positions belong to the ListContainer now; rows only take their size.
     Panel *b = &(*s).base;
-    Container *c = &(*b).base;
-    float w = Container_getWidth(c);
+    Component *c = &(*b).component;
+    float w = Component_getWidth(c);
     if (w < 0.0f)
         w = 0.0f;
     Panel_setSize(row, w, height);
@@ -875,8 +872,8 @@ static void rebuild(MarkdownPanel *s) {
     if (cursor > 0.0f)
         cursor -= (*s).rowSpacing;
     Panel *b = &(*s).base;
-    Container *c = &(*b).base;
-    float w = Container_getWidth(c);
+    Component *c = &(*b).component;
+    float w = Component_getWidth(c);
     if (w < 0.0f)
         w = 0.0f;
     Panel_setSize(b, w, cursor);

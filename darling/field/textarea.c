@@ -231,8 +231,8 @@ static bool textareaPaintBackground(Panel *panel, void *renderer, void *cmdBuffe
         return false;
     if (w <= 0.0f || h <= 0.0f)
         return false;
-    Container *c = &(*panel).base;
-    float op = Container_getOpacity(c);
+    Component *c = &(*panel).component;
+    float op = Component_getOpacity(c);
     if (op <= 0.0f)
         return false;
     uint32_t bg = Panel_getBackgroundColor(panel);
@@ -258,8 +258,8 @@ static bool textareaPaintText(Panel *panel, void *renderer, void *cmdBuffer,
         return false;
     if (w <= 0.0f || h <= 0.0f)
         return false;
-    Container *c = &(*panel).base;
-    float op = Container_getOpacity(c);
+    Component *c = &(*panel).component;
+    float op = Component_getOpacity(c);
     if (op <= 0.0f)
         return false;
     if (!(*ta).text || (*ta).text[0] == '\0')
@@ -293,8 +293,8 @@ static bool textareaPaintBorder(Panel *panel, void *renderer, void *cmdBuffer,
         return false;
     if (w <= 0.0f || h <= 0.0f)
         return false;
-    Container *c = &(*panel).base;
-    float op = Container_getOpacity(c);
+    Component *c = &(*panel).component;
+    float op = Component_getOpacity(c);
     if (op <= 0.0f)
         return false;
     uint32_t borderColor = (*ta).focused ? 0xFF3B82F6u : 0xFF3F3F46u;
@@ -321,8 +321,8 @@ static bool textareaPaintCaret(Panel *panel, void *renderer, void *cmdBuffer,
         return false;
     if (!(*ta).focused)
         return false;
-    Container *c = &(*panel).base;
-    float op = Container_getOpacity(c);
+    Component *c = &(*panel).component;
+    float op = Component_getOpacity(c);
     if (op <= 0.0f)
         return false;
     float padX = 8.0f;
@@ -435,7 +435,7 @@ static void markDirty(Textarea *ta) {
     if (!ta)
         return;
     Panel *bp = &(*ta).base;
-    Container_markDirty(&(*bp).base);
+    (void) bp;
 }
 
 void Textarea_setText(Textarea *ta, const char *text) {
@@ -647,8 +647,8 @@ void Textarea_handlePointer(Textarea *self, int kind, float localX, float localY
     float padX = 8.0f;
     float padY = 8.0f;
     Panel *p = &(*self).base;
-    float h = Container_getHeight(&(*p).base);
-    float w = Container_getWidth(&(*p).base);
+    float h = Component_getHeight(&(*p).component);
+    float w = Component_getWidth(&(*p).component);
     float innerW = w - padX * 2.0f;
     if (innerW < 10.0f) innerW = 10.0f;
 

@@ -75,8 +75,8 @@
  *   - GridContainer_layout(g)
  *
  * Setters:
- *   - GridContainer_setLocation(g, x, y)
- *   - GridContainer_setSize(g, w, h)
+ *   - GridComponent_setLocation(g, x, y)
+ *   - GridComponent_setSize(g, w, h)
  *   - GridContainer_setGap(g, gx, gy)
  *   - GridContainer_setHeaderRows(g, count)
  *   - GridContainer_setHeaderCols(g, count)
@@ -183,11 +183,8 @@ GridContainer *GridContainer_2(int32_t rows, int32_t cols) {
 // ============================================================================
 
 static void markDirty(GridContainer *g) {
-    if (!g)
-        return;
-    Panel *b = &(*g).base;
-    Container *c = &(*b).base;
-    Container_markDirty(c);
+    (void) g;
+    (void) 0;
 }
 
 static float colWidth(const GridContainer *g, int32_t col) {
@@ -200,8 +197,8 @@ static float colWidth(const GridContainer *g, int32_t col) {
         if (!cell)
             continue;
         const Panel *cp = cell;
-        const Container *cb = &(*cp).base;
-        float cw = Container_getWidth(cb);
+        const Component *cb = &(*cp).component;
+        float cw = Component_getWidth(cb);
         if (cw > w)
             w = cw;
     }
@@ -221,8 +218,8 @@ static float rowHeightOf(const GridContainer *g, int32_t row) {
         if (!cell)
             continue;
         const Panel *cp = cell;
-        const Container *cb = &(*cp).base;
-        float ch = Container_getHeight(cb);
+        const Component *cb = &(*cp).component;
+        float ch = Component_getHeight(cb);
         if (ch > h)
             h = ch;
     }
@@ -233,8 +230,7 @@ void GridContainer_layout(GridContainer *g) {
     if (!g)
         return;
     Panel *b = &(*g).base;
-    Container *c = &(*b).base;
-    Container_markDirty(c);
+    Component *c = &(*b).component;
     int32_t rows = (*g).rows;
     int32_t cols = (*g).cols;
     Panel **cells = (*g).cells;
@@ -251,17 +247,16 @@ void GridContainer_layout(GridContainer *g) {
             float cw = colWidth(g, q);
             Panel *cell = cells[(size_t) r * (size_t) cols + (size_t) q];
             if (cell) {
-                Container *cb = &(*cell).base;
-                Container_setLocation(cb, x, y);
+                Component *cb = &(*cell).component;
+                Component_setLocation(cb, x, y);
             }
             x += cw + gx;
         }
         totalW = x - gx;
         y += rh + gy;
     }
-    Container_setWidth(c, totalW);
-    Container_setHeight(c, y - gy);
-    Container_markDirty(c);
+    Component_setWidth(c, totalW);
+    Component_setHeight(c, y - gy);
 }
 
 void GridContainer_setCell(GridContainer *g, int32_t row, int32_t col, Panel *cell) {

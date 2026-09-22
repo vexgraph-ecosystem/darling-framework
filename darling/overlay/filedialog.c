@@ -117,11 +117,7 @@ bool FileDialog_choose(FileDialog *d, int32_t index) {
 // SETTERS
 
 static void markDirty(FileDialog *d) {
-    if (!d)
-        return;
-    Panel *b = (*d).base.frame.rootPanel;
-    if (b != nullptr)
-        Container_markDirty(&(*b).base);
+    (void) d;
 }
 
 void FileDialog_setPath(FileDialog *d, const char *path) {

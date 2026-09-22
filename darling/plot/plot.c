@@ -185,7 +185,7 @@ static void markDirty(Plot *p) {
     if (!p)
         return;
     Panel *b = &(*p).base;
-    Container_markDirty(&(*b).base);
+    (void) b;
 }
 
 void Plot_setKind(Plot *p, int32_t kind) {

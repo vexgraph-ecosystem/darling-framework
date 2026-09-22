@@ -126,7 +126,7 @@ static void markDirty(Select *sel) {
     if (!sel)
         return;
     Panel *bp = &(*sel).base;
-    Container_markDirty(&(*bp).base);
+    (void) bp;
 }
 
 void Select_setSelected(Select *sel, int32_t index) {

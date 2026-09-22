@@ -1,5 +1,7 @@
 #include "darling/container.h"
 
+#include <string.h>
+
 #include "../c23/darling-type.h"
 #include "nio/mem.h"
 #include "oop/type.h"
@@ -11,16 +13,12 @@
  * ============================================================================
  * DEFINITION: Container
  * ============================================================================
- * Layout base of every darling node: position, size, scale, the anchor+pivot
- * system, percentage placement, z-order, and the visible/enabled/dirty/
- * clipping flags. Subclasses EMBED this struct as their first member so a
- * subclass pointer's prefix lines up — pass &(*panel).base to any Container
- * accessor. Per the Container-vs-Panel Law, Container is the multi-child
- * layer owner: it holds the layout state that Panel and every darling node
- * inherit, resolves children against parent bounds (dest-last), and
- * marks/clears the dirty flag that drives the layout pass; the lockedRoot
- * flag makes board-root panes immune to setSize/setLocation (Window Board
- * Root Lock Law).
+ * A node of Component[]: the only container in the darling architecture. It
+ * owns no layout of its own — no x/y/w/h, no anchor/pivot, no resolve, no
+ * percent, no dirty, no lock. It stores element metadata values in a flat
+ * doubling array; every Component carries its own geometry, constraints,
+ * spacing, presentation state, and eager absolute rect. Owners feed each
+ * item its parent box via Component_setParentAbs once per layout.
  * ============================================================================
  */
 
@@ -28,440 +26,121 @@
 /**
  * ============================================================================
  * CLASS: Container
- * LEVEL: L2 — Behavior (UI layout base behavior API)
+ * LEVEL: L2 — Behavior (Component array node)
  * ============================================================================
- * Layout base of every darling node: position, size, scale, the anchor+pivot
- * system, percentage placement, z-order and the visible/enabled/dirty flags.
+ * SUMMARY:
+ *   Just a Component[] node. Flat value storage, doubling growth, borrowed
+ *   item pointers. No layout state of its own.
  *
  * STRUCT FIELDS (Mirroring darling/container.h):
  * ----------------------------------------------------------------------------
- *   float x, y, w, h;      // Position + size in parent units
- *   float scaleX, scaleY;  // Axis scale multipliers
- *   uint8_t anchor;        // CONTAINER_ANCHOR_* 0..8: where on parent during resize
- *   int32_t pivot;         // CONTAINER_PIVOT_* 0..4: element's reference point
- *   float percentX, percentY; // Percentage placement (-1 = unset)
- *   int32_t z;             // Z-order within parent
- *   uint8_t visible;       // Visibility flag
- *   uint8_t enabled;       // Enabled flag
- *   uint8_t dirty;         // Layout-dirty flag
-  *   uint8_t clipping;      // Clip-children flag
-  *   uint8_t lockedRoot;    // 1 = board-root pane: setSize/setLocation are no-ops (Window Board Root Lock Law)
-  *   float opacity;         // 0..1 alpha multiplier over every paint (default 1)
- *   float baseW, baseH;    // Parent size at last layout (resize-delta reference)
- *   float minW, minH;      // Size constraints (default 0,0)
- *   float maxW, maxH;      // Size constraints (default 0 = unset)
- *   float marginL, marginT; // Additive margin: final = location + margin
- *   float marginR, marginB; // Right/bottom edges stored for sibling layout
- *   float radius;          // Corner radius in parent units (0 = square)
- *   int radiusMode;        // CORNER_ARC (0) or CORNER_SUPERELLIPSE (1)
+ *   Component *items;    // Flat Component values (null = empty)
+ *   uint32_t count;      // Live item count
+ *   uint32_t capacity;   // Allocated slots (doubling growth)
  *
  * FUNCTION REGISTRY:
  * ----------------------------------------------------------------------------
- * Constructors:
+ * Public Constructors: (.h)
  *   - Container_0(void)
+ *   - Container_init(self)
  *
- * Core Functions:
- *   - Container_markDirty(c)
- *   - Container_clearDirty(c)
- *   - Container_resolve(c, parentX, parentY, parentW, parentH, outRect)
- *   - Container_hitTest(c, parentX, parentY, parentW, parentH, pointX, pointY)
+ * Private Constructors: (.c static)
+ *   - (none)
  *
- * Setters:
- *   - Container_setX(c, x)
- *   - Container_setY(c, y)
- *   - Container_setWidth(c, w)
- *   - Container_setHeight(c, h)
- *   - Container_setLocation(c, x, y)
- *   - Container_setSize(c, w, h)
- *   - Container_setMinSize(c, w, h)
- *   - Container_setMaxSize(c, w, h)
- *   - Container_setScale(c, sx, sy)
- *   - Container_setAnchor(c, anchor)
- *   - Container_setPivot(c, pivot)
- *   - Container_setCenter(c)
- *   - Container_setPercentX(c, pct)
- *   - Container_setPercentY(c, pct)
- *   - Container_setZ(c, z)
- *   - Container_setVisible(c, visible)
- *   - Container_setEnabled(c, enabled)
-  *   - Container_setClipChildren(c, clip)
-  *   - Container_setOpacity(c, opacity)
- *   - Container_setMargin(c, l, t, r, b)
- *   - Container_setRadius(c, r)
- *   - Container_setRadiusMode(c, mode)
+ * Public Core Functions: (.h)
+ *   - Container_reserve(self, capacity)
+ *   - Container_add(self, src)
+ *   - Container_removeAt(self, index)
+ *   - Container_clear(self)
+ *   - Container_count(self)
+ *   - Container_get(self, index)
  *
- * Getters:
- *   - Container_getX(c)
- *   - Container_getY(c)
- *   - Container_getWidth(c)
- *   - Container_getHeight(c)
- *   - Container_getScaleWidth(c)
- *   - Container_getScaleHeight(c)
- *   - Container_getAnchor(c)
- *   - Container_getPivot(c)
- *   - Container_getPercentX(c)
- *   - Container_getPercentY(c)
- *   - Container_hasPercentX(c)
- *   - Container_hasPercentY(c)
- *   - Container_getZ(c)
- *   - Container_isVisible(c)
- *   - Container_isEnabled(c)
-  *   - Container_isClipChildren(c)
-  *   - Container_getOpacity(c)
- *   - Container_isDirty(c)
- *   - Container_getMargin(c, l, t, r, b)
- *   - Container_getRadius(c)
- *   - Container_getRadiusMode(c)
+ * Private Core Functions: (.c static)
+ *   - (none)
  *
- * Root lock (Window Board Root Lock Law):
- *   - Container_isLockedRoot(c)
- *   - Container_setLockedRoot(c, locked)
- *   - Container_forceSize(c, w, h)      // internal: Frame_resize bypass only
- *   - Container_forceLocation(c, x, y)  // internal: Frame_resize bypass only
+ * Public Setters: (.h)
+ *   - (none — items mutate through their own Component setters)
+ *
+ * Private Setters: (.c static)
+ *   - (none)
+ *
+ * Public Getters: (.h)
+ *   - Container_count(self)
+ *   - Container_get(self, index)
+ *
+ * Private Getters: (.c static)
+ *   - (none)
  * ============================================================================
  */
 
+// darling/container.c — a node of Component[].
 
-// darling/container.c — layout core (Legacy: darling/Container.java).
+void Container_init(Container *self) {
+    if (!self)
+        return;
+    (*self).items = nullptr;
+    (*self).count = 0u;
+    (*self).capacity = 0u;
+}
 
 Container *Container_0(void) {
-    Container *c = (Container*) Memory_alloc(TYPE_CONTAINER_SINGLETON, sizeof(Container));
-    if (!c)
+    Container *self = (Container*) Memory_alloc(TYPE_CONTAINER_SINGLETON, sizeof(Container));
+    if (!self)
         return nullptr;
-    (*c).x = 0.0f;
-    (*c).y = 0.0f;
-    (*c).w = 0.0f;
-    (*c).h = 0.0f;
-    (*c).scaleX = 1.0f;
-    (*c).scaleY = 1.0f;
-    (*c).anchor = CONTAINER_ANCHOR_TOP_LEFT;
-    (*c).pivot = CONTAINER_PIVOT_TOP_LEFT;
-    (*c).percentX = CONTAINER_PERCENT_UNSET;
-    (*c).percentY = CONTAINER_PERCENT_UNSET;
-    (*c).z = 0;
-    (*c).visible = 1;
-    (*c).enabled = 1;
-    (*c).dirty = 0;
-    (*c).clipping = 0;
-    (*c).lockedRoot = 0;
-    (*c).opacity = 1.0f;
-    (*c).baseW = 0.0f; // unset -> first resolve captures the reference
-    (*c).baseH = 0.0f;
-    (*c).marginL = 0.0f;
-    (*c).marginT = 0.0f;
-    (*c).marginR = 0.0f;
-    (*c).marginB = 0.0f;
-    (*c).radius = 0.0f;
-    (*c).radiusMode = CORNER_ARC;
-    return c;
+    Container_init(self);
+    return self;
 }
 
-float Container_getX(const Container *c) { return c ? (*c).x : 0.0f; }
-float Container_getY(const Container *c) { return c ? (*c).y : 0.0f; }
-float Container_getWidth(const Container *c) { return c ? (*c).w : 0.0f; }
-float Container_getHeight(const Container *c) { return c ? (*c).h : 0.0f; }
-
-static void layoutEdited(Container *c) {
-    if (!c)
-        return;
-    (*c).dirty = 1;
-    (*c).baseW = 0.0f; // invalidateBase: recapture on next resolve
-    (*c).baseH = 0.0f;
-}
-
-void Container_setX(Container *c, float x) { if (c) { (*c).x = x; layoutEdited(c); } }
-void Container_setY(Container *c, float y) { if (c) { (*c).y = y; layoutEdited(c); } }
-void Container_setWidth(Container *c, float w) { if (c) { (*c).w = w; layoutEdited(c); } }
-void Container_setHeight(Container *c, float h) { if (c) { (*c).h = h; layoutEdited(c); } }
-
-void Container_setLocation(Container *c, float x, float y) {
-    // Window Board Root Lock Law: silently no-op when this node is a locked board root.
-    if (!c || (*c).lockedRoot)
-        return;
-    Container_setX(c, x);
-    Container_setY(c, y);
-}
-
-void Container_setSize(Container *c, float w, float h) {
-    if (!c) return;
-    // Window Board Root Lock Law: silently no-op when this node is a locked board root.
-    if ((*c).lockedRoot) return;
-    // Clamp to [min, max] if constraints are configured
-    if (w < (*c).minW) w = (*c).minW;
-    if (h < (*c).minH) h = (*c).minH;
-    if ((*c).maxW > 0.0f && w > (*c).maxW) w = (*c).maxW;
-    if ((*c).maxH > 0.0f && h > (*c).maxH) h = (*c).maxH;
-    Container_setWidth(c, w);
-    Container_setHeight(c, h);
-}
-
-void Container_setMinSize(Container *c, float w, float h) {
-    if (!c) return;
-    (*c).minW = w;
-    (*c).minH = h;
-    // Re-clamp current size
-    float cw = (*c).w;
-    float ch = (*c).h;
-    if (cw < w) cw = w;
-    if (ch < h) ch = h;
-    if ((*c).maxW > 0.0f && cw > (*c).maxW) cw = (*c).maxW;
-    if ((*c).maxH > 0.0f && ch > (*c).maxH) ch = (*c).maxH;
-    Container_setWidth(c, cw);
-    Container_setHeight(c, ch);
-}
-
-void Container_setMaxSize(Container *c, float w, float h) {
-    if (!c) return;
-    (*c).maxW = w;
-    (*c).maxH = h;
-    // Re-clamp current size
-    float cw = (*c).w;
-    float ch = (*c).h;
-    if (w > 0.0f && cw > w) cw = w;
-    if (h > 0.0f && ch > h) ch = h;
-    if (cw < (*c).minW) cw = (*c).minW;
-    if (ch < (*c).minH) ch = (*c).minH;
-    Container_setWidth(c, cw);
-    Container_setHeight(c, ch);
-}
-
-float Container_getScaleWidth(const Container *c) { return c ? (*c).scaleX : 1.0f; }
-float Container_getScaleHeight(const Container *c) { return c ? (*c).scaleY : 1.0f; }
-
-void Container_setScale(Container *c, float sx, float sy) {
-    if (!c)
-        return;
-    (*c).scaleX = sx;
-    (*c).scaleY = sy;
-    layoutEdited(c);
-}
-
-int Container_getAnchor(const Container *c) {
-    return c ? (*c).anchor : CONTAINER_ANCHOR_TOP_LEFT;
-}
-
-void Container_setAnchor(Container *c, int anchor) {
-    if (!c || anchor < CONTAINER_ANCHOR_TOP_LEFT || anchor > CONTAINER_ANCHOR_BOTTOM_RIGHT)
-        return;
-    (*c).anchor = (uint8_t)anchor;
-    layoutEdited(c);
-}
-
-int Container_getPivot(const Container *c) {
-    return c ? (*c).pivot : CONTAINER_PIVOT_TOP_LEFT;
-}
-
-void Container_setPivot(Container *c, int pivot) {
-    if (!c || pivot < CONTAINER_PIVOT_TOP_LEFT || pivot > CONTAINER_PIVOT_CENTER)
-        return;
-    (*c).pivot = pivot;
-    layoutEdited(c);
-}
-
-void Container_setCenter(Container *c) {
-    if (!c)
-        return;
-    Container_setPivot(c, CONTAINER_PIVOT_CENTER);
-    (*c).percentX = 0.5f;
-    (*c).percentY = 0.5f;
-    (*c).dirty = 1;
-}
-
-float Container_getPercentX(const Container *c) { return c ? (*c).percentX : CONTAINER_PERCENT_UNSET; }
-float Container_getPercentY(const Container *c) { return c ? (*c).percentY : CONTAINER_PERCENT_UNSET; }
-
-void Container_setPercentX(Container *c, float pct) { if (c) { (*c).percentX = pct; (*c).dirty = 1; } }
-void Container_setPercentY(Container *c, float pct) { if (c) { (*c).percentY = pct; (*c).dirty = 1; } }
-
-bool Container_hasPercentX(const Container *c) { return Container_getPercentX(c) >= 0.0f; }
-bool Container_hasPercentY(const Container *c) { return Container_getPercentY(c) >= 0.0f; }
-
-int Container_getZ(const Container *c) { return c ? (*c).z : 0; }
-void Container_setZ(Container *c, int z) { if (c) { (*c).z = z; (*c).dirty = 1; } }
-
-bool Container_isVisible(const Container *c) { return c && (*c).visible != 0; }
-bool Container_isEnabled(const Container *c) { return c && (*c).enabled != 0; }
-bool Container_isClipChildren(const Container *c) { return c && (*c).clipping != 0; }
-bool Container_isDirty(const Container *c) { return c && (*c).dirty != 0; }
-
-void Container_setVisible(Container *c, bool visible) { if (c) { (*c).visible = visible ? 1 : 0; (*c).dirty = 1; } }
-void Container_setEnabled(Container *c, bool enabled) { if (c) { (*c).enabled = enabled ? 1 : 0; } }
-void Container_setClipChildren(Container *c, bool clip) { if (c) { (*c).clipping = clip ? 1 : 0; (*c).dirty = 1; } }
-
-void Container_setOpacity(Container *c, float opacity) {
-    if (!c)
-        return;
-    (*c).opacity = opacity < 0.0f ? 0.0f : (opacity > 1.0f ? 1.0f : opacity);
-    (*c).dirty = 1;
-}
-
-float Container_getOpacity(const Container *c) { return c ? (*c).opacity : 1.0f; }
-
-void Container_markDirty(Container *c) {
-    if (c)
-        (*c).dirty = 1;
-}
-
-void Container_clearDirty(Container *c) {
-    if (c)
-        (*c).dirty = 0;
-}
-
-// --- Root lock (Window Board Root Lock Law) ---
-
-bool Container_isLockedRoot(const Container *c) {
-    return c && (*c).lockedRoot != 0;
-}
-
-void Container_setLockedRoot(Container *c, bool locked) {
-    if (c)
-        (*c).lockedRoot = locked ? 1 : 0;
-}
-
-// Internal force-setters: bypass lockedRoot guard.
-// Used ONLY by Frame_resize — NOT public API.
-void Container_forceSize(Container *c, float w, float h) {
-    if (!c) return;
-    (*c).w = w;
-    (*c).h = h;
-    layoutEdited(c);
-}
-
-void Container_forceLocation(Container *c, float x, float y) {
-    if (!c) return;
-    (*c).x = x;
-    (*c).y = y;
-    layoutEdited(c);
-}
-
-void Container_setMargin(Container *c, float l, float t, float r, float b) {
-    if (!c)
-        return;
-    (*c).marginL = l;
-    (*c).marginT = t;
-    (*c).marginR = r;
-    (*c).marginB = b;
-    (*c).dirty = 1;
-}
-
-void Container_getMargin(const Container *c, float *l, float *t, float *r, float *b) {
-    float ml = c ? (*c).marginL : 0.0f;
-    float mt = c ? (*c).marginT : 0.0f;
-    float mr = c ? (*c).marginR : 0.0f;
-    float mb = c ? (*c).marginB : 0.0f;
-    if (l)
-        *l = ml;
-    if (t)
-        *t = mt;
-    if (r)
-        *r = mr;
-    if (b)
-        *b = mb;
-}
-
-void Container_setRadius(Container *c, float r) {
-    if (!c)
-        return;
-    (*c).radius = r < 0.0f ? 0.0f : r;
-    (*c).dirty = 1;
-}
-
-float Container_getRadius(const Container *c) { return c ? (*c).radius : 0.0f; }
-
-void Container_setRadiusMode(Container *c, int mode) {
-    if (!c)
-        return;
-    if (mode != CORNER_ARC && mode != CORNER_SUPERELLIPSE)
-        return;
-    (*c).radiusMode = mode;
-    (*c).dirty = 1;
-}
-
-int Container_getRadiusMode(const Container *c) { return c ? (*c).radiusMode : CORNER_ARC; }
-
-void Container_resolve(Container *c, float parentX, float parentY,
-                       float parentW, float parentH, Vec4 *outRect) {
-    if (!c || !outRect)
-        return;
-
-    float sw = (*c).w * (*c).scaleX;
-    float sh = (*c).h * (*c).scaleY;
-
-    // Resize-delta reference: no longer needed for new clean layout!
-    (*c).dirty = 0;
-
-    float x = (*c).x;
-    float y = (*c).y;
-
-    // Anchor: find the absolute position on the parent bounds (9-grid)
-    // and self-anchor on scaled size (p - s)
-    float px = 0.0f, py = 0.0f;
-    float sx = 0.0f, sy = 0.0f;
-    switch (Container_getAnchor(c)) {
-        case CONTAINER_ANCHOR_TOP_CENTER:    px = parentW * 0.5f; sx = sw * 0.5f; break;
-        case CONTAINER_ANCHOR_TOP_RIGHT:     px = parentW;        sx = sw;        break;
-        case CONTAINER_ANCHOR_MIDDLE_LEFT:   py = parentH * 0.5f; sy = sh * 0.5f; break;
-        case CONTAINER_ANCHOR_MIDDLE_CENTER: px = parentW * 0.5f; py = parentH * 0.5f; sx = sw * 0.5f; sy = sh * 0.5f; break;
-        case CONTAINER_ANCHOR_MIDDLE_RIGHT:  px = parentW;        py = parentH * 0.5f; sx = sw;        sy = sh * 0.5f; break;
-        case CONTAINER_ANCHOR_BOTTOM_LEFT:   py = parentH;        sy = sh;        break;
-        case CONTAINER_ANCHOR_BOTTOM_CENTER: px = parentW * 0.5f; py = parentH;        sx = sw * 0.5f; sy = sh;        break;
-        case CONTAINER_ANCHOR_BOTTOM_RIGHT:  px = parentW;        py = parentH;        sx = sw;        sy = sh;        break;
-        default: break; // TOP_LEFT: px=0, py=0, sx=0, sy=0
-    }
-
-    // Margin direction based on anchor (pushes inward from the anchor edge)
-    float marginX = x;
-    float marginY = y;
-    int a = Container_getAnchor(c);
-    if (a == CONTAINER_ANCHOR_TOP_RIGHT || a == CONTAINER_ANCHOR_MIDDLE_RIGHT || a == CONTAINER_ANCHOR_BOTTOM_RIGHT)
-        marginX = -x; // right-anchored margins pull left
-    if (a == CONTAINER_ANCHOR_BOTTOM_LEFT || a == CONTAINER_ANCHOR_BOTTOM_CENTER || a == CONTAINER_ANCHOR_BOTTOM_RIGHT)
-        marginY = -y; // bottom-anchored margins pull up
-
-    float screenX = parentX + (px - sx) + marginX;
-    float screenY = parentY + (py - sy) + marginY;
-
-    // Phase 1 margin law: final = location + margin, applied at resolve time.
-    // Stored location is never rewritten; zero margins resolve bit-identically.
-    screenX += (*c).marginL;
-    screenY += (*c).marginT;
-
-    // Percent overrides placement against the LIVE parent size.
-    if (Container_hasPercentX(c))
-        screenX = parentX + (*c).percentX * parentW;
-    if (Container_hasPercentY(c))
-        screenY = parentY + (*c).percentY * parentH;
-
-    // Pivot shift (LEGACY FROZEN: TOP_LEFT-anchored only).
-    // Canonical resolve lives in Component_recompute (darling/component.c):
-    // screen = origin + anchor - pivot + offset, universal over all 9
-    // anchors, with padding-inset content-box cascade. This shim keeps the
-    // legacy Panel tree stable and gains no new math.
-    float offX = 0.0f;
-    float offY = 0.0f;
-    switch (Container_getPivot(c)) {
-        case CONTAINER_PIVOT_TOP_RIGHT:    offX = sw; break;
-        case CONTAINER_PIVOT_BOTTOM_LEFT:  offY = sh; break;
-        case CONTAINER_PIVOT_BOTTOM_RIGHT: offX = sw; offY = sh; break;
-        case CONTAINER_PIVOT_CENTER:       offX = sw * 0.5f; offY = sh * 0.5f; break;
-        default:
-            break; // TOP_LEFT
-    }
-    if (a == CONTAINER_ANCHOR_TOP_LEFT) {
-        screenX -= offX;
-        screenY -= offY;
-    }
-
-    Vec4_set(outRect, screenX, screenY, sw, sh);
-}
-
-bool Container_hitTest(Container *c, float parentX, float parentY,
-                       float parentW, float parentH, float pointX, float pointY) {
-    if (!Container_isVisible(c))
+bool Container_reserve(Container *self, uint32_t capacity) {
+    if (!self)
         return false;
-    Vec4 rect;
-    Container_resolve(c, parentX, parentY, parentW, parentH, &rect);
-    // legacy stores rects as [x, y, w, h] in Vec4 slots -> width=.z height=.w
-    return pointX >= rect.x && pointX < rect.x + rect.z
-        && pointY >= rect.y && pointY < rect.y + rect.w;
+    if (capacity <= (*self).capacity)
+        return true;
+    Component *next = (Component*) Memory_alloc(TYPE_CONTAINER_SINGLETON, sizeof(Component) * capacity);
+    if (!next)
+        return false;
+    if ((*self).items && (*self).count > 0u)
+        memcpy(next, (*self).items, sizeof(Component) * (*self).count);
+    (*self).items = next;
+    (*self).capacity = capacity;
+    return true;
+}
+
+bool Container_add(Container *self, const Component *src) {
+    if (!self || !src)
+        return false;
+    if ((*self).count >= (*self).capacity) {
+        uint32_t grown = (*self).capacity == 0u ? 8u : (*self).capacity * 2u;
+        if (!Container_reserve(self, grown))
+            return false;
+    }
+    Component *slot = &(*self).items[(*self).count];
+    memcpy(slot, src, sizeof(Component));
+    (*self).count++;
+    return true;
+}
+
+bool Container_removeAt(Container *self, uint32_t index) {
+    if (!self || index >= (*self).count || !(*self).items)
+        return false;
+    for (uint32_t i = index; i + 1u < (*self).count; ++i)
+        (*self).items[i] = (*self).items[i + 1u];
+    (*self).count--;
+    return true;
+}
+
+void Container_clear(Container *self) {
+    if (!self)
+        return;
+    (*self).count = 0u;
+}
+
+uint32_t Container_count(const Container *self) {
+    return self ? (*self).count : 0u;
+}
+
+Component *Container_get(const Container *self, uint32_t index) {
+    if (!self || index >= (*self).count || !(*self).items)
+        return nullptr;
+    return &(*self).items[index];
 }

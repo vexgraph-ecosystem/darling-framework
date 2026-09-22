@@ -104,7 +104,7 @@ static void markDirty(RadioGroup *g) {
     if (!g)
         return;
     Panel *b = &(*g).base;
-    Container_markDirty(&(*b).base);
+    (void) b;
 }
 
 // CORE FUNCTIONS
@@ -155,7 +155,7 @@ void RadioGroup_handlePointer(RadioGroup *g, int kind, float localX, float local
     if (!g)
         return;
     Panel *p = &(*g).base;
-    Container *cnt = &(*p).base;
+    Component *cnt = &(*p).component;
     float w = (*cnt).w;
     float h = (*cnt).h;
     if (w <= 0.0f)

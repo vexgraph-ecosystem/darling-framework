@@ -105,7 +105,7 @@ static void markDirty(ColorSwatch *s) {
     if (!s)
         return;
     Panel *b = &(*s).base;
-    Container_markDirty(&(*b).base);
+    (void) b;
 }
 
 void ColorSwatch_setSelected(ColorSwatch *s, int32_t index) {

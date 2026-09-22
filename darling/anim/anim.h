@@ -5,7 +5,7 @@
 #include <stddef.h>
 
 #include "c23/constructor.h"
-#include "darling/container.h"
+#include "darling/component.h"
 
 // darling/anim/anim.h — keyframed 2D animation: timestamps + easing.
 //
@@ -150,14 +150,14 @@ void Anim_setOnDone(Anim *a, Anim_DoneFn fn, void *ctx);
 Anim_DoneFn Anim_getOnDone(const Anim *a);
 void *Anim_getDoneContext(const Anim *a);
 
-// Player (Thread 0 only). Binds a borrowed Anim to a container; the first
+// Player (Thread 0 only). Binds a borrowed Anim to a component; the first
 // key of each section interpolates FROM the value captured at play time,
 // so one preset is reusable across widgets.
-void Anim_play(Container *c, Anim *a, int kind);
+void Anim_play(Component *c, Anim *a, int kind);
 void Anim_tick(double dt); // advance all live bindings; fires onDone on finish
-void Anim_cancel(Container *c);
+void Anim_cancel(Component *c);
 void Anim_cancelAll(void);
-bool Anim_isPlaying(const Container *c);
+bool Anim_isPlaying(const Component *c);
 size_t Anim_liveCount(void);
 
 // Forward declarations (defined in their own headers; declared here so the
@@ -200,7 +200,8 @@ struct Canvas;
 // Per-class facades: ContainerClass_animate(ptr, anim). Pointer casts to
 // the embedded base are safe (base is always the first member); kind
 // selects which sections apply.
-void Container_animate(Container *c, Anim *a);
+void Component_animate(Component *c, Anim *a);
+void Container_animate(Component *c, Anim *a);
 void Panel_animate(struct Panel *p, Anim *a);
 void Label_animate(struct Label *l, Anim *a);
 void Button_animate(struct Button *b, Anim *a);

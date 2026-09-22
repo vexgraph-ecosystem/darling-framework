@@ -111,7 +111,7 @@ Knob *Knob_1(Panel *parent) {
 static void markDirty(Knob *k) {
     if (!k) return;
     Panel *b = &(*k).base;
-    Container_markDirty(&(*b).base);
+    (void) b;
 }
 
 void Knob_setNormalized(Knob *k, float t) {
@@ -132,7 +132,7 @@ void Knob_handlePointer(Knob *k, int kind, float localX, float localY) {
     if (!k) return;
     if (kind != PTR_DOWN && kind != PTR_DRAG) return;
     Panel *p = &(*k).base;
-    Container *cnt = &(*p).base;
+    Component *cnt = &(*p).component;
     float d = (*k).diameter;
     if (d <= 0.0f) d = (*cnt).w > 0.0f ? (*cnt).w : 40.0f;
     float cx = d * 0.5f;

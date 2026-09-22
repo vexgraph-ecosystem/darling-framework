@@ -111,56 +111,49 @@ bool Panel_paintParts(Panel *panel, void *renderer, void *cmdBuffer,
                       float x, float y, float w, float h);
 
 // Layout facade — the delegation chain ends here. Every accessor below is a
-// one-hop static inline to the embedded Container, so call sites never write
-// &(*panel).base for common edits. Subclass levels re-export the same names
-// over their embedded prefix (Scene_setLocation -> Panel_setLocation ->
-// Container_setLocation), which is Java's inherited methods without a
-// vtable: static binding, zero runtime cost, type-checked at each level.
-// Dual-write: geometry setters mirror into the embedded Component metadata
-// (anchor/pivot values mirror CONTAINER_* exactly); readers stay on the
-// Container until the Component cascade wires up, so behavior is unchanged.
-// Panel Override Law: locked board roots (contentPane/scenePane) ignore
-// userland location/size on BOTH members — Container no-ops internally,
-// the Component write is guarded here.
+// one-hop static inline to the embedded Component metadata, so call sites
+// never pierce (*panel).component directly. The embedded Container base is
+// just a Component[] node (child metadata list) and carries no layout.
+// Subclass levels re-export the same names over their embedded prefix
+// (Scene_setLocation -> Panel_setLocation -> Component_setLocation), which
+// is Java's inherited methods without a vtable: static binding, zero
+// runtime cost, type-checked at each level.
 static inline void Panel_setLocation(Panel *p, float x, float y)
-    { if (p) { Container_setLocation(&(*p).base, x, y); if (!Container_isLockedRoot(&(*p).base)) Component_setLocation(&(*p).component, x, y); } }
+    { if (p) Component_setLocation(&(*p).component, x, y); }
 static inline void Panel_setSize(Panel *p, float w, float h)
-    { if (p) { Container_setSize(&(*p).base, w, h); if (!Container_isLockedRoot(&(*p).base)) Component_setSize(&(*p).component, w, h); } }
+    { if (p) Component_setSize(&(*p).component, w, h); }
 static inline void Panel_setMinSize(Panel *p, float w, float h)
-    { if (p) { Container_setMinSize(&(*p).base, w, h); Component_setMinSize(&(*p).component, w, h); } }
+    { if (p) Component_setMinSize(&(*p).component, w, h); }
 static inline void Panel_setMaxSize(Panel *p, float w, float h)
-    { if (p) { Container_setMaxSize(&(*p).base, w, h); Component_setMaxSize(&(*p).component, w, h); } }
+    { if (p) Component_setMaxSize(&(*p).component, w, h); }
 static inline void Panel_setAnchor(Panel *p, int anchor)
-    { if (p) { Container_setAnchor(&(*p).base, anchor); Component_setAnchor(&(*p).component, anchor); } }
+    { if (p) Component_setAnchor(&(*p).component, anchor); }
 static inline void Panel_setPivot(Panel *p, int pivot)
-    { if (p) { Container_setPivot(&(*p).base, pivot); Component_setPivot(&(*p).component, pivot); } }
-// Origin lives on the Component only (Container has no origin field): always
-// safe to write, nothing to diverge. Corner-anchored insets measure from
-// their own corner (TR + TOP_RIGHT origin + positive loc = inward inset).
+    { if (p) Component_setPivot(&(*p).component, pivot); }
 static inline void Panel_setOrigin(Panel *p, int origin)
     { if (p) Component_setOrigin(&(*p).component, origin); }
 static inline void Panel_setVisible(Panel *p, bool visible)
-    { if (p) { Container_setVisible(&(*p).base, visible); Component_setVisible(&(*p).component, visible); } }
+    { if (p) Component_setVisible(&(*p).component, visible); }
 static inline void Panel_setOpacity(Panel *p, float opacity)
-    { if (p) { Container_setOpacity(&(*p).base, opacity); Component_setOpacity(&(*p).component, opacity); } }
+    { if (p) Component_setOpacity(&(*p).component, opacity); }
 static inline float Panel_getOpacity(const Panel *p)
-    { return p ? Container_getOpacity(&(*p).base) : 1.0f; }
+    { return p ? Component_getOpacity(&(*p).component) : 1.0f; }
 static inline bool Panel_isVisible(const Panel *p)
-    { return p && Container_isVisible(&(*p).base); }
+    { return p && Component_isVisible(&(*p).component); }
 static inline void Panel_setZ(Panel *p, int z)
-    { if (p) { Container_setZ(&(*p).base, z); Component_setZ(&(*p).component, z); } }
+    { if (p) Component_setZ(&(*p).component, z); }
 static inline void Panel_setMargin(Panel *p, float l, float t, float r, float b)
-    { if (p) { Container_setMargin(&(*p).base, l, t, r, b); Component_setMargin(&(*p).component, l, t, r, b); } }
+    { if (p) Component_setMargin(&(*p).component, l, t, r, b); }
 static inline void Panel_getMargin(const Panel *p, float *l, float *t, float *r, float *b)
-    { if (p) Container_getMargin(&(*p).base, l, t, r, b); }
+    { if (p) Component_getMargin(&(*p).component, l, t, r, b); }
 static inline void Panel_setRadius(Panel *p, float r)
-    { if (p) { Container_setRadius(&(*p).base, r); Component_setRadius(&(*p).component, r); } }
+    { if (p) Component_setRadius(&(*p).component, r); }
 static inline float Panel_getRadius(const Panel *p)
-    { return p ? Container_getRadius(&(*p).base) : 0.0f; }
+    { return p ? Component_getRadius(&(*p).component) : 0.0f; }
 static inline void Panel_setRadiusMode(Panel *p, int mode)
-    { if (p) { Container_setRadiusMode(&(*p).base, mode); Component_setRadiusMode(&(*p).component, mode); } }
+    { if (p) Component_setRadiusMode(&(*p).component, mode); }
 static inline int Panel_getRadiusMode(const Panel *p)
-    { return p ? Container_getRadiusMode(&(*p).base) : CORNER_ARC; }
+    { return p ? Component_getRadiusMode(&(*p).component) : COMPONENT_CORNER_ARC; }
 
 // Shared payload slots (read/write-through to the canonical source on views).
 Image *Panel_getImage(const Panel *p);

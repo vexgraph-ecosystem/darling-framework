@@ -114,11 +114,8 @@ LayeredContainer *LayeredContainer_2(int32_t count) {
 // ============================================================================
 
 static void markDirty(LayeredContainer *p) {
-    if (!p)
-        return;
-    Panel *b = &(*p).base;
-    Container *c = &(*b).base;
-    Container_markDirty(c);
+    (void) p;
+    (void) 0;
 }
 
 void LayeredContainer_setPaneCount(LayeredContainer *p, int32_t count) {

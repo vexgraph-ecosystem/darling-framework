@@ -10,7 +10,7 @@
 #include "darling/panel/expandable_list_container.h"
 #include "darling/panel/scroll_container.h"
 #include "darling/compositor.h"
-#include "graphvex/graphics_loop.h"
+#include "../../graphvex/src/graphics/graphics_loop.h"
 #include "event/bridge.h"
 #include "input/key_map.h"
 #include "kernel/application.h"
@@ -596,10 +596,11 @@ static void relayoutSubtree(Panel *parent, float parentX, float parentY, float p
         if (!child)
             continue;
 
-        Vec4 rect;
-        Container *base = &(*child).base;
-        Container_resolve(base, parentX, parentY, parentW, parentH, &rect);
-        relayoutSubtree(child, rect.x, rect.y, rect.z, rect.w);
+        Component *meta = &(*child).component;
+        Component_setParentAbs(meta, parentX, parentY, parentW, parentH);
+        float contentX = 0.0f, contentY = 0.0f, contentW = 0.0f, contentH = 0.0f;
+        Component_getContentRect(meta, &contentX, &contentY, &contentW, &contentH);
+        relayoutSubtree(child, contentX, contentY, contentW, contentH);
     }
 }
 
@@ -681,26 +682,32 @@ bool Frame_syncResize(Frame *frame, int width, int height) {
         Component_setSize((*frame).rootComponent, liveW, liveH);
         Component_setParentAbs((*frame).rootComponent, 0.0f, 0.0f, liveW, liveH);
     }
-    if ((*frame).contentPane != nullptr)
-        Container_forceSize(&(*(*frame).contentPane).base, liveW, liveH);
-    if ((*frame).scenePane != nullptr)
-        Container_forceSize(&(*(*frame).scenePane).base, liveW, liveH);
-    if ((*frame).rootPanel != nullptr && (*frame).rootPanel != (*frame).contentPane)
-        Container_forceSize(&(*(*frame).rootPanel).base, liveW, liveH);
-    // Panel Override Law: the embedded Component metadata tracks the same
-    // forced size (plain setters ARE the force path — Component carries no
-    // lock flag; the Panel facades enforce it).
     if ((*frame).contentPane != nullptr) {
         Panel *board = (*frame).contentPane;
-        Component_setSize(&(*board).component, liveW, liveH);
+        Component *meta = &(*board).component;
+        Component_setAnchor(meta, COMPONENT_ANCHOR_TOP_LEFT);
+        Component_setPivot(meta, COMPONENT_PIVOT_TOP_LEFT);
+        Component_setLocation(meta, 0.0f, 0.0f);
+        Component_setSize(meta, liveW, liveH);
+        Component_setParentAbs(meta, 0.0f, 0.0f, liveW, liveH);
     }
     if ((*frame).scenePane != nullptr) {
         Panel *board = (*frame).scenePane;
-        Component_setSize(&(*board).component, liveW, liveH);
+        Component *meta = &(*board).component;
+        Component_setAnchor(meta, COMPONENT_ANCHOR_TOP_LEFT);
+        Component_setPivot(meta, COMPONENT_PIVOT_TOP_LEFT);
+        Component_setLocation(meta, 0.0f, 0.0f);
+        Component_setSize(meta, liveW, liveH);
+        Component_setParentAbs(meta, 0.0f, 0.0f, liveW, liveH);
     }
     if ((*frame).rootPanel != nullptr && (*frame).rootPanel != (*frame).contentPane) {
         Panel *board = (*frame).rootPanel;
-        Component_setSize(&(*board).component, liveW, liveH);
+        Component *meta = &(*board).component;
+        Component_setAnchor(meta, COMPONENT_ANCHOR_TOP_LEFT);
+        Component_setPivot(meta, COMPONENT_PIVOT_TOP_LEFT);
+        Component_setLocation(meta, 0.0f, 0.0f);
+        Component_setSize(meta, liveW, liveH);
+        Component_setParentAbs(meta, 0.0f, 0.0f, liveW, liveH);
     }
 
     // Edit layouts of the children & resolve anchors/locations
@@ -775,18 +782,6 @@ void Frame_setContentPane(Frame *frame, Panel *panel) {
         return;
     (*frame).contentPane = panel;
     if (panel != nullptr) {
-        // Window Board Root Lock Law (law 49): lock the board root to the window dimensions.
-        Container *base = &(*panel).base;
-        (*base).lockedRoot = 1;
-        (*base).anchor = CONTAINER_ANCHOR_TOP_LEFT;
-        (*base).pivot = CONTAINER_PIVOT_TOP_LEFT;
-        (*base).x = 0.0f;
-        (*base).y = 0.0f;
-        (*base).w = (float)(*frame).width;
-        (*base).h = (float)(*frame).height;
-        (*base).dirty = 1;
-        // Panel Override Law: mirror the override into the embedded
-        // Component metadata (anchor/pivot values mirror CONTAINER_*).
         Component *meta = &(*panel).component;
         Component_setAnchor(meta, COMPONENT_ANCHOR_TOP_LEFT);
         Component_setPivot(meta, COMPONENT_PIVOT_TOP_LEFT);
@@ -801,18 +796,6 @@ void Frame_setScenePane(Frame *frame, Panel *panel) {
         return;
     (*frame).scenePane = panel;
     if (panel != nullptr) {
-        // Window Board Root Lock Law (law 49): lock the board root to the window dimensions.
-        Container *base = &(*panel).base;
-        (*base).lockedRoot = 1;
-        (*base).anchor = CONTAINER_ANCHOR_TOP_LEFT;
-        (*base).pivot = CONTAINER_PIVOT_TOP_LEFT;
-        (*base).x = 0.0f;
-        (*base).y = 0.0f;
-        (*base).w = (float)(*frame).width;
-        (*base).h = (float)(*frame).height;
-        (*base).dirty = 1;
-        // Panel Override Law: mirror the override into the embedded
-        // Component metadata (anchor/pivot values mirror CONTAINER_*).
         Component *meta = &(*panel).component;
         Component_setAnchor(meta, COMPONENT_ANCHOR_TOP_LEFT);
         Component_setPivot(meta, COMPONENT_PIVOT_TOP_LEFT);

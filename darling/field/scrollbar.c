@@ -128,7 +128,7 @@ static void markDirty(ScrollBar *s) {
     if (!s)
         return;
     Panel *b = &(*s).base;
-    Container_markDirty(&(*b).base);
+    (void) b;
 }
 
 void ScrollBar_dragBy(ScrollBar *s, float deltaPx, float trackLen) {
@@ -180,7 +180,7 @@ void ScrollBar_handlePointer(ScrollBar *s, int kind, float localX, float localY)
     if (!s) return;
     if (kind != PTR_DOWN && kind != PTR_DRAG) return;
     Panel *p = &(*s).base;
-    Container *cnt = &(*p).base;
+    Component *cnt = &(*p).component;
     float h = (*cnt).h > 0.0f ? (*cnt).h : 100.0f;
     float fraction = localY / h;
     ScrollBar_clickAt(s, fraction);

@@ -293,8 +293,8 @@ static bool inputPaintBackground(Panel *panel, void *renderer, void *cmdBuffer,
         return false;
     if (w <= 0.0f || h <= 0.0f)
         return false;
-    Container *c = &(*panel).base;
-    float op = Container_getOpacity(c);
+    Component *c = &(*panel).component;
+    float op = Component_getOpacity(c);
     if (op <= 0.0f)
         return false;
     uint32_t bg = Panel_getBackgroundColor(panel);
@@ -320,8 +320,8 @@ static bool inputPaintText(Panel *panel, void *renderer, void *cmdBuffer,
         return false;
     if (w <= 0.0f || h <= 0.0f)
         return false;
-    Container *c = &(*panel).base;
-    float op = Container_getOpacity(c);
+    Component *c = &(*panel).component;
+    float op = Component_getOpacity(c);
     if (op <= 0.0f)
         return false;
     const char *displayText = (*inp).text;
@@ -369,8 +369,8 @@ static bool inputPaintBorder(Panel *panel, void *renderer, void *cmdBuffer,
         return false;
     if (w <= 0.0f || h <= 0.0f)
         return false;
-    Container *c = &(*panel).base;
-    float op = Container_getOpacity(c);
+    Component *c = &(*panel).component;
+    float op = Component_getOpacity(c);
     if (op <= 0.0f)
         return false;
     uint32_t borderColor = (*inp).focused ? 0xFF3B82F6u : 0xFF3F3F46u;
@@ -398,8 +398,8 @@ static bool inputPaintCaret(Panel *panel, void *renderer, void *cmdBuffer,
         return false;
     if (!(*inp).focused || !(*inp).caretShown)
         return false;
-    Container *c = &(*panel).base;
-    float op = Container_getOpacity(c);
+    Component *c = &(*panel).component;
+    float op = Component_getOpacity(c);
     if (op <= 0.0f)
         return false;
     float padX = 8.0f;
@@ -738,7 +738,7 @@ static void markDirty(Input *inp) {
     if (!inp)
         return;
     Panel *bp = &(*inp).base;
-    Container_markDirty(&(*bp).base);
+    (void) bp;
 }
 
 static int32_t clampCursor(size_t len, int32_t cursor) {
@@ -946,10 +946,10 @@ void Input_caret_placeView(Input *inp, Panel *view, float centerY) {
     if (!inp || !view)
         return;
     // Centered, of course: the view's middle lands on (caretX, centerY).
-    Container *c = &(*view).base;
-    float w = Container_getWidth(c);
-    float h = Container_getHeight(c);
-    Container_setLocation(c, (*inp).caretX - w * 0.5f, centerY - h * 0.5f);
+    Component *c = &(*view).component;
+    float w = Component_getWidth(c);
+    float h = Component_getHeight(c);
+    Component_setLocation(c, (*inp).caretX - w * 0.5f, centerY - h * 0.5f);
 }
 
 void Input_caret_tick(Input *inp, double dt) {
@@ -957,7 +957,6 @@ void Input_caret_tick(Input *inp, double dt) {
     // painted inside the Input child's own retained flight target at local
     // coords (no cross-loop geometry — the board pass only collages the
     // child's published frame). A blink phase change marks ONLY the Input
-    // child dirty via markDirty (Container_markDirty on the child's own
     // base) — never the board, never the tree — so a blink re-renders a tiny
     // target at ~2Hz and Loop1 re-collages. No path from here reaches
     // Panel_markTreeDirty or board dirty; board demand arms one hop through
