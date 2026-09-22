@@ -200,7 +200,7 @@ struct Canvas;
 // Per-class facades: ContainerClass_animate(ptr, anim). Pointer casts to
 // the embedded base are safe (base is always the first member); kind
 // selects which sections apply.
-void Component_animate(Component *c, Anim *a);
+void Anim_animate(Component *c, Anim *a);
 void Container_animate(Component *c, Anim *a);
 void Panel_animate(struct Panel *p, Anim *a);
 void Label_animate(struct Label *l, Anim *a);

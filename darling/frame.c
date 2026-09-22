@@ -43,7 +43,7 @@
  * geometry event), presentedFrames drives the compositor infancy gate,
  * emptyPresents caps consecutive empty seam presents, and lastPublishGen
  * re-arms present demand on fresh VkLayer publishes. lastComponentGen
- * latches the Component generation counter (Component_gen) so the
+ * latches the Component generation counter (GraphicsComponent_gen) so the
  * component seam re-arms demand when a component tree mutates without a
  * board/panel paint.
  * ============================================================================
@@ -597,9 +597,9 @@ static void relayoutSubtree(Panel *parent, float parentX, float parentY, float p
             continue;
 
         Component *meta = &(*child).component;
-        Component_setParentAbs(meta, parentX, parentY, parentW, parentH);
+        GraphicsComponent_setParentAbs(meta, parentX, parentY, parentW, parentH);
         float contentX = 0.0f, contentY = 0.0f, contentW = 0.0f, contentH = 0.0f;
-        Component_getContentRect(meta, &contentX, &contentY, &contentW, &contentH);
+        GraphicsComponent_getContentRect(meta, &contentX, &contentY, &contentW, &contentH);
         relayoutSubtree(child, contentX, contentY, contentW, contentH);
     }
 }
@@ -633,15 +633,15 @@ void Frame_relayoutChildren(Frame *frame) {
     // margin AND padding. Readers stay on Container until Shift 2c.
     if ((*frame).contentPane != nullptr) {
         Panel *board = (*frame).contentPane;
-        Component_setParentAbs(&(*board).component, 0.0f, 0.0f, w, h);
+        GraphicsComponent_setParentAbs(&(*board).component, 0.0f, 0.0f, w, h);
     }
     if ((*frame).scenePane != nullptr) {
         Panel *board = (*frame).scenePane;
-        Component_setParentAbs(&(*board).component, 0.0f, 0.0f, w, h);
+        GraphicsComponent_setParentAbs(&(*board).component, 0.0f, 0.0f, w, h);
     }
     if ((*frame).rootPanel != nullptr && (*frame).rootPanel != (*frame).contentPane) {
         Panel *board = (*frame).rootPanel;
-        Component_setParentAbs(&(*board).component, 0.0f, 0.0f, w, h);
+        GraphicsComponent_setParentAbs(&(*board).component, 0.0f, 0.0f, w, h);
     }
 }
 
@@ -679,35 +679,35 @@ bool Frame_syncResize(Frame *frame, int width, int height) {
     float liveW = (*frame).liveWidth > 0.0f ? (*frame).liveWidth : (float) width;
     float liveH = (*frame).liveHeight > 0.0f ? (*frame).liveHeight : (float) height;
     if ((*frame).rootComponent != nullptr) {
-        Component_setSize((*frame).rootComponent, liveW, liveH);
-        Component_setParentAbs((*frame).rootComponent, 0.0f, 0.0f, liveW, liveH);
+        GraphicsComponent_setSize((*frame).rootComponent, liveW, liveH);
+        GraphicsComponent_setParentAbs((*frame).rootComponent, 0.0f, 0.0f, liveW, liveH);
     }
     if ((*frame).contentPane != nullptr) {
         Panel *board = (*frame).contentPane;
         Component *meta = &(*board).component;
-        Component_setAnchor(meta, COMPONENT_ANCHOR_TOP_LEFT);
-        Component_setPivot(meta, COMPONENT_PIVOT_TOP_LEFT);
-        Component_setLocation(meta, 0.0f, 0.0f);
-        Component_setSize(meta, liveW, liveH);
-        Component_setParentAbs(meta, 0.0f, 0.0f, liveW, liveH);
+        GraphicsComponent_setAnchor(meta, COMPONENT_ANCHOR_TOP_LEFT);
+        GraphicsComponent_setPivot(meta, COMPONENT_PIVOT_TOP_LEFT);
+        GraphicsComponent_setLocation(meta, 0.0f, 0.0f);
+        GraphicsComponent_setSize(meta, liveW, liveH);
+        GraphicsComponent_setParentAbs(meta, 0.0f, 0.0f, liveW, liveH);
     }
     if ((*frame).scenePane != nullptr) {
         Panel *board = (*frame).scenePane;
         Component *meta = &(*board).component;
-        Component_setAnchor(meta, COMPONENT_ANCHOR_TOP_LEFT);
-        Component_setPivot(meta, COMPONENT_PIVOT_TOP_LEFT);
-        Component_setLocation(meta, 0.0f, 0.0f);
-        Component_setSize(meta, liveW, liveH);
-        Component_setParentAbs(meta, 0.0f, 0.0f, liveW, liveH);
+        GraphicsComponent_setAnchor(meta, COMPONENT_ANCHOR_TOP_LEFT);
+        GraphicsComponent_setPivot(meta, COMPONENT_PIVOT_TOP_LEFT);
+        GraphicsComponent_setLocation(meta, 0.0f, 0.0f);
+        GraphicsComponent_setSize(meta, liveW, liveH);
+        GraphicsComponent_setParentAbs(meta, 0.0f, 0.0f, liveW, liveH);
     }
     if ((*frame).rootPanel != nullptr && (*frame).rootPanel != (*frame).contentPane) {
         Panel *board = (*frame).rootPanel;
         Component *meta = &(*board).component;
-        Component_setAnchor(meta, COMPONENT_ANCHOR_TOP_LEFT);
-        Component_setPivot(meta, COMPONENT_PIVOT_TOP_LEFT);
-        Component_setLocation(meta, 0.0f, 0.0f);
-        Component_setSize(meta, liveW, liveH);
-        Component_setParentAbs(meta, 0.0f, 0.0f, liveW, liveH);
+        GraphicsComponent_setAnchor(meta, COMPONENT_ANCHOR_TOP_LEFT);
+        GraphicsComponent_setPivot(meta, COMPONENT_PIVOT_TOP_LEFT);
+        GraphicsComponent_setLocation(meta, 0.0f, 0.0f);
+        GraphicsComponent_setSize(meta, liveW, liveH);
+        GraphicsComponent_setParentAbs(meta, 0.0f, 0.0f, liveW, liveH);
     }
 
     // Edit layouts of the children & resolve anchors/locations
@@ -773,7 +773,7 @@ void Frame_setRootComponent(Frame *frame, Component *component) {
         return;
     (*frame).rootComponent = component;
     if (component != nullptr) {
-        Component_setSize(component, (float)(*frame).width, (float)(*frame).height);
+        GraphicsComponent_setSize(component, (float)(*frame).width, (float)(*frame).height);
     }
 }
 
@@ -783,11 +783,11 @@ void Frame_setContentPane(Frame *frame, Panel *panel) {
     (*frame).contentPane = panel;
     if (panel != nullptr) {
         Component *meta = &(*panel).component;
-        Component_setAnchor(meta, COMPONENT_ANCHOR_TOP_LEFT);
-        Component_setPivot(meta, COMPONENT_PIVOT_TOP_LEFT);
-        Component_setLocation(meta, 0.0f, 0.0f);
-        Component_setSize(meta, (float)(*frame).width, (float)(*frame).height);
-        Component_setParentAbs(meta, 0.0f, 0.0f, (float)(*frame).width, (float)(*frame).height);
+        GraphicsComponent_setAnchor(meta, COMPONENT_ANCHOR_TOP_LEFT);
+        GraphicsComponent_setPivot(meta, COMPONENT_PIVOT_TOP_LEFT);
+        GraphicsComponent_setLocation(meta, 0.0f, 0.0f);
+        GraphicsComponent_setSize(meta, (float)(*frame).width, (float)(*frame).height);
+        GraphicsComponent_setParentAbs(meta, 0.0f, 0.0f, (float)(*frame).width, (float)(*frame).height);
     }
 }
 
@@ -797,11 +797,11 @@ void Frame_setScenePane(Frame *frame, Panel *panel) {
     (*frame).scenePane = panel;
     if (panel != nullptr) {
         Component *meta = &(*panel).component;
-        Component_setAnchor(meta, COMPONENT_ANCHOR_TOP_LEFT);
-        Component_setPivot(meta, COMPONENT_PIVOT_TOP_LEFT);
-        Component_setLocation(meta, 0.0f, 0.0f);
-        Component_setSize(meta, (float)(*frame).width, (float)(*frame).height);
-        Component_setParentAbs(meta, 0.0f, 0.0f, (float)(*frame).width, (float)(*frame).height);
+        GraphicsComponent_setAnchor(meta, COMPONENT_ANCHOR_TOP_LEFT);
+        GraphicsComponent_setPivot(meta, COMPONENT_PIVOT_TOP_LEFT);
+        GraphicsComponent_setLocation(meta, 0.0f, 0.0f);
+        GraphicsComponent_setSize(meta, (float)(*frame).width, (float)(*frame).height);
+        GraphicsComponent_setParentAbs(meta, 0.0f, 0.0f, (float)(*frame).width, (float)(*frame).height);
     }
 }
 

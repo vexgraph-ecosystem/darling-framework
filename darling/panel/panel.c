@@ -23,7 +23,7 @@
  * Component cascade wires up) and it owns a List of child
  * Panels; node connect runs both trees — Panel_addContainer /
  * Panel_removeChild mirror the edge into the embedded Component tree
- * (Component_addChild cascades the content box eagerly), so a panel stack
+ * (each geometry setter recomputes the content box eagerly), so a panel stack
  * IS a component stack; the VIEW model deep-copies structure but aliases shared payloads
  * (image/filters) BY POINTER through the source slot, with dirty flags
  * fanning out through the parent-ref set so every holder of a view
@@ -146,7 +146,7 @@ static bool paintBackground(Panel *panel, void *renderer, void *cmdBuffer,
     uint32_t color = (*panel).color;
     if ((color >> 24) == 0)
         return false;
-    float op = Component_getOpacity(&(*panel).component);
+    float op = GraphicsComponent_getOpacity(&(*panel).component);
     if (op <= 0.0f)
         return false;
     float r = (float) ((color >> 16) & 0xFF) / 255.0f;
@@ -171,7 +171,7 @@ Panel *Panel_0(void) {
     // adopt the container block's contents into our prefix, then free the shell
     *(&(*p).base) = (*b);
     Memory_free(b);
-    Component_init(&(*p).component);
+    GraphicsComponent_init(&(*p).component);
 
     (*p).color = PANEL_COLOR_CLEAR;
     (*p).filters = nullptr;
@@ -431,8 +431,8 @@ void Panel_addContainer(Panel *p, Panel *child) {
     }
     List_add((*p).children, (uint64_t)(uintptr_t)child);
     float contentX = 0.0f, contentY = 0.0f, contentW = 0.0f, contentH = 0.0f;
-    Component_getContentRect(&(*p).component, &contentX, &contentY, &contentW, &contentH);
-    Component_setParentAbs(&(*child).component, contentX, contentY, contentW, contentH);
+    GraphicsComponent_getContentRect(&(*p).component, &contentX, &contentY, &contentW, &contentH);
+    GraphicsComponent_setParentAbs(&(*child).component, contentX, contentY, contentW, contentH);
 }
 
 bool Panel_removeChild(Panel *p, Panel *child) {

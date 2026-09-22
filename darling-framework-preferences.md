@@ -277,8 +277,45 @@ as åuto and the check a single negativity test.
    coordinates are invariant under scale.
 3. **AUTO on all four lanes.** `x`, `y`, `w`, `h` each accept `SIZE_AUTO`;
    position-AUTO defers to the owner, size-AUTO derives from content.
-4. **Owners resolve, components store.** AUTO intent lives with the owner
-   that can re-measure; components hold the last resolved concrete extent.
+4. **The sentinel lives in the declared field; the equivalence resolves it.**
+   `w == SIZE_AUTO` is the check that swaps in the element's AUTO
+   equivalence — the size the class defaults to — stored by the owner via
+   `GraphicsComponent_setMeasuredSize` (0 for a dumb element, measured text
+   for a Label). The declared sentinel survives, so AUTO re-resolves every
+   render. Layout-currency reads (`getWidth`/`getHeight` on the widget
+   layer) return the resolved value, never the sentinel.
+
+---
+
+### One Layout Record Law (darling has no layout struct of its own)
+
+#### Definition:
+The layout/paint metadata record is **graphvex's `GraphicsComponent`**, one
+type, embedded by value as the first member of every widget
+(`Panel`, `Container`, `ScrollPanel`, `Label`, fields, ...). The old
+`darling/component.c` (40+ functions) is **deleted**; `darling/component.h`
+is a burn-down compat shim (`typedef GraphicsComponent Component;` + constant
+aliases + the two layout-currency reads `Component_getWidth/Height` that
+resolve AUTO before returning) that dies file-by-file as widgets move onto
+`GraphicsComponent_*` spellings directly.
+
+#### The Why:
+Two layout records with identical fields is how the ecosystem drifted —
+darling's record was a field-for-field duplicate of the language's, and every
+new language feature (AUTO, measured equivalence, Transform) missed the
+duplicate. One record means one resolve path, one AUTO protocol, one truth.
+
+#### The Rule:
+1. **One type.** Widget geometry/presentation fields live on graphvex
+   `GraphicsComponent` and nowhere else. No darling file re-declares a layout
+   struct.
+2. **Burn-down alias.** `Component`, `COMPONENT_*` constants, and the
+   `Component_getWidth/Height` (resolved) reads remain only inside
+   `darling/component.h`; every widget file conversion drops them for
+   `GraphicsComponent_*` until the shim is deleted.
+3. **"Component" always means the language's tree node** (the element with
+   name/type/parent/children) once a file includes `lang/component.h` — the
+   shim alias and the tree node are never both live in one file.
 
 ---
 

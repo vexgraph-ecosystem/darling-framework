@@ -554,9 +554,9 @@ static void animApply(AnimBinding *b, float t) {
     float nh = sampleSizeH(a, (*b).fromH, t);
     float nsx = sampleScaleX(a, (*b).fromSX, t);
     float nsy = sampleScaleY(a, (*b).fromSY, t);
-    Component_setLocation(c, nx, ny);
-    Component_setSize(c, nw, nh);
-    Component_setScale(c, nsx, nsy);
+    GraphicsComponent_setLocation(c, nx, ny);
+    GraphicsComponent_setSize(c, nw, nh);
+    GraphicsComponent_setScale(c, nsx, nsy);
     if ((*b).kind == ANIM_KIND_PANEL || (*b).kind == ANIM_KIND_LABEL || (*b).kind == ANIM_KIND_BUTTON) {
         Panel *p = (Panel*) ((char*) c - offsetof(Panel, component));
         uint32_t col = (*p).color;
@@ -682,13 +682,13 @@ size_t Anim_liveCount(void) {
 
 // --- per-class facades ------------------------------------------------------
 
-void Component_animate(Component *c, Anim *a) {
+void Anim_animate(Component *c, Anim *a) {
     if (c)
         Anim_play(c, a, ANIM_KIND_CONTAINER);
 }
 
 void Container_animate(Component *c, Anim *a) {
-    Component_animate(c, a);
+    Anim_animate(c, a);
 }
 
 void Panel_animate(struct Panel *p, Anim *a) {

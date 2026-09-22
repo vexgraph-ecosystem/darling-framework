@@ -55,7 +55,6 @@ add_library(darling STATIC
         c23/add.c
     darling/scene/canvas.c
     darling/compositor.c
-    darling/component.c
     darling/container.c
     darling/anim/anim.c
     darling/cursor/cursor.c
