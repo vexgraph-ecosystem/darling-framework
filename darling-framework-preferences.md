@@ -20,6 +20,7 @@
 | **Panel Gravity Law** | R4 UI Toolkit | Mandatory for `darling-framework` |
 | **Window Decoupling Law (a Window is just a Window)** | R4 UI Toolkit | Mandatory for `darling-framework` |
 | **Forward Rendering & Bounded Surface Law** | R4 UI Toolkit | Mandatory for `darling-framework` |
+| **Absolute Size and Location Law** | R4 UI Toolkit | Mandatory for `darling-framework` |
 
 ## 2. Exclusive Repo-Local Laws (FULL PROSE RESTATEMENT)
 
@@ -229,6 +230,55 @@ live frames as events; graphvex (R3) consumes them through the
 `resizeRenderFn` hook and `GfxLoop_modalTick` seam and presents only when
 actually registered (Window is a dumb surface + bridge, never a renderer,
 per this law).
+
+---
+
+### Absolute Size and Location Law
+
+#### Definition:
+Every element carries TWO rects, and they are never confused. The **declared**
+rect — the raw `(x, y, w, h)` the author sets — is intent. The **absolute**
+rect — the TRUE size and TRUE location of the element on screen — is a
+function of everything that can move or grow it: **scale, padding, margin,
+filters, visual effects, rotation, transform**, and the ancestors' layout.
+The regular size IS NOT the absolute size; the regular location IS NOT the
+absolute location. Layout, hit-testing, culling, and scrolling read the
+absolute rect; authoring writes the declared rect; resolution (declared →
+absolute) runs eagerly on every geometry setter.
+
+Scale is a first-class citizen of the absolute: an element scaled 2× (or N×)
+keeps its **conceptual pixel coordinates** — children, hit-testing, and layout
+math do not move — while its absolute footprint absorbs the factor. A scaled
+element is bigger on screen and identical in layout space.
+
+Any of `x`, `y`, `w`, `h` may carry `SIZE_AUTO` (the åuto FourCC,
+`lang/size.h`): a negative dimension reads as AUTO. AUTO position defers to
+the owner's layout (the parent places you); AUTO size derives from content
+(a Label resolves font size + padding; a ScrollPanel resolves AUTO content
+to its viewport). AUTO is an owner-level protocol — components store raw
+values and resolve a zero abs for AUTO dims; owners remember the intent and
+re-measure on every render/layout.
+
+#### The Why:
+Conflating declared and absolute rects is how scrollbars drift, thumbs lie,
+and scaled elements mis-hit: one code path reads the author's numbers while
+another paints the transformed truth. A single declared→absolute resolve,
+run eagerly and read everywhere, keeps every consumer (paint, hit-test,
+scroll geometry, culling) on the same truth. AUTO removes hand-measured
+boxes — content *is* the size — while keeping the sentinel debugger-visible
+as åuto and the check a single negativity test.
+
+#### The Rule:
+1. **Two rects, one resolve.** Declared `(x, y, w, h)` is written by authors;
+   absolute `(absX, absY, absW, absH)` is resolved eagerly and read by
+   consumers. No consumer reads declared dims for screen truth.
+2. **Absolute absorbs everything.** Scale, padding, margin, filters, visual
+   effects, rotation, and transform all feed the absolute. Conceptual pixel
+   coordinates are invariant under scale.
+3. **AUTO on all four lanes.** `x`, `y`, `w`, `h` each accept `SIZE_AUTO`;
+   position-AUTO defers to the owner, size-AUTO derives from content.
+4. **Owners resolve, components store.** AUTO intent lives with the owner
+   that can re-measure; components hold the last resolved concrete extent.
 
 ---
 
