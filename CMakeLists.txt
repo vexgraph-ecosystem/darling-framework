@@ -72,6 +72,7 @@ add_library(darling STATIC
     darling/panel/markdown_panel.c
     darling/panel/richtext_panel.c
     darling/panel/scroll_container.c
+    darling/panel/scroll_panel.c
     darling/field/scrollbar.c
     darling/button/button.c
     darling/button/switch.c
