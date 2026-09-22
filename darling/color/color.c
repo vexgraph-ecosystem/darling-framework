@@ -451,6 +451,12 @@ void Color_setRGBA(Color *color, float r, float g, float b, float a) {
     Color_init(r, g, b, a, color);
 }
 
+void Color_setRGBA32(Color *color, uint32_t rgba) {
+    if (color == nullptr)
+        return;
+    Color_fromRGBA32(rgba, color);
+}
+
 void Color_setHSV(Color *color, float h, float s, float v) {
     if (color == nullptr)
         return;
@@ -518,6 +524,10 @@ float Color_getA(const Color *color) {
     if (color == nullptr)
         return 0.0f;
     return (*color).a;
+}
+
+uint32_t Color_getRGBA32(const Color *color) {
+    return Color_toRGBA32(color);
 }
 
 void Color_getHSV(const Color *color, float *outH, float *outS, float *outV) {
