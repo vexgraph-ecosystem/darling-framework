@@ -24,6 +24,8 @@
 #include "darling/panel/markdown_panel.h"
 #include "darling/panel/richtext_panel.h"
 #include "darling/panel/expandable_list_container.h"
+#include "darling/panel/flex_container.h"
+#include "darling/panel/scroll_panel.h"
 #include "darling/button/button.h"
 #include "darling/button/switch.h"
 #include "darling/field/checkbox.h"
@@ -180,6 +182,8 @@ static const EmitRow kRows[] = {
     { "ID_CODEFIELD", (uint64_t) TYPE_CODEFIELD_SINGLETON, ID_CODEFIELD, sizeof(CodeField) },
     { "ID_FRAME_FUNCTION", (uint64_t) TYPE_FRAME_FUNCTION_ARRAY, ID_FRAME_FUNCTION, sizeof(FrameFunction) },
     { "ID_COMPONENT", (uint64_t) TYPE_COMPONENT_SINGLETON, ID_COMPONENT, sizeof(Component) },
+    { "ID_SCROLLPANEL", (uint64_t) TYPE_SCROLLPANEL_SINGLETON, ID_SCROLLPANEL, sizeof(ScrollPanel) },
+    { "ID_FLEX_CONTAINER", (uint64_t) TYPE_FLEX_CONTAINER_SINGLETON, ID_FLEX_CONTAINER, sizeof(FlexContainer) },
 };
 
 _Static_assert(sizeof(kRows) / sizeof(kRows[0]) == DARLING_PARENT_COUNT - 1u,

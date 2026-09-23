@@ -11,7 +11,7 @@
 // via Type_registerParents) and tools/emit_manifest.c (manifest parent
 // rows), so the swap contract can never disagree with the live chain.
 
-#define DARLING_PARENT_COUNT 58u
+#define DARLING_PARENT_COUNT 59u
 
 static const uint32_t kDarlingParents[DARLING_PARENT_COUNT] = {
     0u,   //  0 unused
@@ -72,6 +72,7 @@ static const uint32_t kDarlingParents[DARLING_PARENT_COUNT] = {
     0u,   // 55 ID_FRAME_FUNCTION (root, slot record)
     0u,   // 56 ID_COMPONENT (root, structural leaf)
     1u,   // 57 ID_SCROLLPANEL -> ID_PANEL
+    1u,   // 58 ID_FLEX_CONTAINER -> ID_PANEL
 };
 
 #endif

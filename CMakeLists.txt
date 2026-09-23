@@ -78,6 +78,7 @@ add_library(darling STATIC
     darling/panel/section_container.c
     darling/panel/list_container.c
     darling/panel/grid_container.c
+    darling/panel/flex_container.c
     darling/panel/scroll_panel.c
     darling/field/scrollbar.c
     darling/field/codefield.c
@@ -203,6 +204,17 @@ if(NOT TARGET picture_test AND EXISTS "${DARLING_TEST_DIR}/picture_test.c")
     )
     target_link_libraries(picture_test PRIVATE darling graphvex vexspoke)
     target_compile_options(picture_test PRIVATE -Wall -Wextra -Werror)
+endif()
+
+# FlexContainer: repo-local headless proof (standalone-safe: never depends
+# on umbrella test paths).
+set(DARLING_FLEX_TEST_DIR "${CMAKE_CURRENT_SOURCE_DIR}/tests")
+if(NOT TARGET flex_container_test AND EXISTS "${DARLING_FLEX_TEST_DIR}/flex_container_test.c")
+    add_executable(flex_container_test
+        "${DARLING_FLEX_TEST_DIR}/flex_container_test.c"
+    )
+    target_link_libraries(flex_container_test PRIVATE darling graphvex vexspoke)
+    target_compile_options(flex_container_test PRIVATE -Wall -Wextra -Werror)
 endif()
 
 if(NOT TARGET checkbox_test AND EXISTS "${DARLING_TEST_DIR}/checkbox_test.c")
