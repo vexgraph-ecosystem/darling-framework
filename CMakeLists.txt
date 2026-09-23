@@ -62,7 +62,7 @@ if(NOT TARGET darling)
 #   c23/add.c, darling/anim/anim.c, darling/button/button.c,
 #   darling/color/colordialog.c, darling/compositor.c, darling/cursor/cursor.c,
 #   darling/dialog/{dialog,optiondialog,inputdialog}.c, darling/frame.c,
-#   darling/field/{input,textarea,inputotp,searchfield,codefield}.c,
+#   darling/field/{input,textarea,inputotp,searchfield}.c,
 #   darling/label/{label,rich_label,typography}.c,
 #   darling/overlay/filedialog.c, darling/plot/plot.c,
 #   darling/panel/{expandable_list_container,markdown_panel,richtext_panel,
@@ -80,6 +80,7 @@ add_library(darling STATIC
     darling/panel/grid_container.c
     darling/panel/scroll_panel.c
     darling/field/scrollbar.c
+    darling/field/codefield.c
     darling/button/switch.c
     darling/field/checkbox.c
     darling/field/radiogroup.c
@@ -258,4 +259,20 @@ if(NOT TARGET color_test AND EXISTS "${DARLING_TEST_DIR}/color_test.c")
         ${DARLING_TEST_DIR}/color_test.c
     )
     target_link_libraries(color_test PRIVATE darling)
+endif()
+
+set(DARLING_CODEFIELD_TEST_DIR "${CMAKE_CURRENT_SOURCE_DIR}/../../_tests/darling")
+if(NOT EXISTS "${DARLING_CODEFIELD_TEST_DIR}")
+    set(DARLING_CODEFIELD_TEST_DIR "${CMAKE_CURRENT_SOURCE_DIR}/tests")
+endif()
+if(EXISTS "${DARLING_CODEFIELD_TEST_DIR}/codefield_test.c")
+    add_executable(codefield_test "${DARLING_CODEFIELD_TEST_DIR}/codefield_test.c")
+    target_link_libraries(codefield_test PRIVATE darling)
+    target_compile_options(codefield_test PRIVATE -Wall -Wextra -Werror -UNDEBUG)
+endif()
+if(APPLE AND EXISTS "${DARLING_CODEFIELD_TEST_DIR}/codefield_demo.m")
+    add_executable(codefield_demo "${DARLING_CODEFIELD_TEST_DIR}/codefield_demo.m"
+        "${DARLING_CODEFIELD_TEST_DIR}/codefield_demo.c")
+    target_link_libraries(codefield_demo PRIVATE darling "-framework Cocoa")
+    target_compile_options(codefield_demo PRIVATE -Wall -Wextra -Werror $<$<COMPILE_LANGUAGE:OBJC>:-fobjc-arc>)
 endif()

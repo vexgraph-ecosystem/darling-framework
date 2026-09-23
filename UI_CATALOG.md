@@ -1,6 +1,6 @@
 # Darling UI Catalog & Theme System
 
-> Retained-mode, off-heap UI for C23. Every node embeds `Container` as its first member (`&(*node).base` upgrades to layout), extends `Panel` for background + tree, and exposes symmetric `set/get` pairs (Rule 24). Containers are detach-only: `add/insert` attach, `remove` detaches, never frees.
+> Retained-mode, off-heap UI for C23. Every node embeds `Container` as its first member (`&(*node).base` upgrades to layout), extends `Panel` for background + tree, and exposes symmetric `set/get` pairs (the Symmetric Getter/Setter Completeness Law). Containers are detach-only: `add/insert` attach, `remove` detaches, never frees.
 
 This document elaborates **every widget darling has today + every widget proposed** for everyday / SaaS / game use, plus the **theme system** that makes them all look polished.
 
@@ -407,3 +407,7 @@ Suggested order — each unlocks the next, no dead ends:
 5. **Tools:** `NodeEditor + DockPanel + Menu + Keybindings`. Editor/blueprint payoff.
 
 If you want, say the word and I start at P0 with `darling/theme/theme.h/.c` + `Toast/Spinner/Progress` in darling style (constructors + symmetric getters/setters + `;;OVERVIEW` headers), wired into `../../trash/darling_gallery.c` S8.
+
+## Indexed CodeField migration
+
+🟧 Functional foundation: indexed variable-height rows, optional numbering, borrowed documentation panels, row actions, selection/editing and two-axis scrolling. Built against Graphics; no retired Vulkan/Texture/Textarea dependency. Proof: `tests/codefield_test.c` and `codefield_demo`. API and remaining work: [`_docs/darling.md`](_docs/darling.md).

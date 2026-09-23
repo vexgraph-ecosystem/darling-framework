@@ -21,6 +21,7 @@
 | **Window Decoupling Law (a Window is just a Window)** | R4 UI Toolkit | Mandatory for `darling-framework` |
 | **Forward Rendering & Bounded Surface Law** | R4 UI Toolkit | Mandatory for `darling-framework` |
 | **Absolute Size and Location Law** | R4 UI Toolkit | Mandatory for `darling-framework` |
+| **Indexed CodeField Row Law** | R4 CodeField | Mandatory for `darling-framework` |
 
 ## 2. Exclusive Repo-Local Laws (FULL PROSE RESTATEMENT)
 
@@ -366,3 +367,11 @@ Vertical Integration Law: R4 consumes R3's seam, never the driver).
 ## 4. Readiness Cross-Reference (the Living Feature Readiness Law)
 
 - Feature readiness matrix tracked in [`../../_repositories/.ecosystem/darling-framework.md`](../../_repositories/.ecosystem/darling-framework.md) (rendered as `[[darling-framework]]` wiki page).
+
+### Indexed CodeField Row Law
+
+CodeField uses zero-based row indices independently of displayed line numbers and source-file positions. A row may carry text, a borrowed documentation panel, an explicit height or AUTO, an inclusion flag, and a button callback. Only included rows advance the one-based displayed number; zero denotes no number. Numbering never changes row identity or determines row height. Insertion/removal shifts indices; callers must not retain indices across structural edits as stable identities.
+
+The number and text panels share vertical row layout. Horizontal scrolling affects only text content. Selection positions are row index plus text offset, never displayed numbers. Buttons are bound by index and receive the current index and optional number when invoked. Borrowed panels and callback contexts are never freed or reparented by CodeField.
+
+CodeField retains its requested public widget name as a managed naming exception to the Container-vs-Panel Law: it is a composite field with embedded number/text panels and flat row slots, painted into one clipped surface; it creates no child layers. Row storage/text changes are cold document operations on the owner thread. Paint, layout, selection, hit testing and scrolling allocate nothing. Geometry follows the Absolute Size and Location Law, drawing uses Graphics, and physical allocation is viewport-bounded.
