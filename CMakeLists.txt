@@ -217,6 +217,17 @@ if(NOT TARGET flex_container_test AND EXISTS "${DARLING_FLEX_TEST_DIR}/flex_cont
     target_compile_options(flex_container_test PRIVATE -Wall -Wextra -Werror)
 endif()
 
+# LayeredContainer: repo-local headless proof (standalone-safe: never depends
+# on umbrella test paths).
+set(DARLING_LAYERED_TEST_DIR "${CMAKE_CURRENT_SOURCE_DIR}/tests")
+if(NOT TARGET layered_container_test AND EXISTS "${DARLING_LAYERED_TEST_DIR}/layered_container_test.c")
+    add_executable(layered_container_test
+        "${DARLING_LAYERED_TEST_DIR}/layered_container_test.c"
+    )
+    target_link_libraries(layered_container_test PRIVATE darling graphvex vexspoke)
+    target_compile_options(layered_container_test PRIVATE -Wall -Wextra -Werror)
+endif()
+
 if(NOT TARGET checkbox_test AND EXISTS "${DARLING_TEST_DIR}/checkbox_test.c")
     add_executable(checkbox_test
         ${DARLING_TEST_DIR}/checkbox_test.c
