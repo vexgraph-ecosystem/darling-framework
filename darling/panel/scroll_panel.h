@@ -86,6 +86,9 @@ bool ScrollPanel_paint(ScrollPanel *sp, const Rectangle *rect, const Panel *skip
 // Same, but excludes a set of subtrees (nested panels a page paints itself).
 bool ScrollPanel_paintSkips(ScrollPanel *sp, const Rectangle *rect,
                             const Panel *const *skips, size_t skipCount);
+// Bars only (the chrome), for a caller composing the order itself: content
+// first, then this panel's bars on top (the container render order).
+bool ScrollPanel_paintBars(ScrollPanel *sp, const Rectangle *rect);
 void ScrollPanel_setViewportSize(ScrollPanel *sp, float w, float h);
 void ScrollPanel_setContentSize(ScrollPanel *sp, float w, float h);
 void ScrollPanel_layoutBars(ScrollPanel *sp);
@@ -119,6 +122,7 @@ float ScrollPanel_verticalScroll_getScrollFriction(const ScrollPanel *sp);
 float ScrollPanel_verticalScroll_getScrollSensitivity(const ScrollPanel *sp);
 uint64_t ScrollPanel_verticalScroll_getScrollDelay(const ScrollPanel *sp);
 bool ScrollPanel_verticalScroll_isEffectiveVisible(const ScrollPanel *sp);
+bool ScrollPanel_verticalScroll_isNeeded(const ScrollPanel *sp);
 void ScrollPanel_verticalScroll_getRange(const ScrollPanel *sp, float *outMin, float *outMax);
 void ScrollPanel_verticalScroll_getThumbRect(const ScrollPanel *sp,
                                              float *outX, float *outY, float *outW, float *outH);
@@ -149,6 +153,7 @@ float ScrollPanel_horizontalScroll_getScrollFriction(const ScrollPanel *sp);
 float ScrollPanel_horizontalScroll_getScrollSensitivity(const ScrollPanel *sp);
 uint64_t ScrollPanel_horizontalScroll_getScrollDelay(const ScrollPanel *sp);
 bool ScrollPanel_horizontalScroll_isEffectiveVisible(const ScrollPanel *sp);
+bool ScrollPanel_horizontalScroll_isNeeded(const ScrollPanel *sp);
 void ScrollPanel_horizontalScroll_getRange(const ScrollPanel *sp, float *outMin, float *outMax);
 void ScrollPanel_horizontalScroll_getThumbRect(const ScrollPanel *sp,
                                                float *outX, float *outY, float *outW, float *outH);

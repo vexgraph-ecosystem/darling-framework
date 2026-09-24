@@ -148,6 +148,7 @@
  *   - ScrollBar_getScrollDelay(s)
  *   - ScrollBar_isAutoHidden(s)
  *   - ScrollBar_isEffectiveVisible(s)
+ *   - ScrollBar_isNeeded(s)
  *   - ScrollBar_getThickness(s)
  *   - ScrollBar_getInset(s)
  *   - ScrollBar_getRange(s, outMin, outMax)
@@ -698,6 +699,11 @@ uint64_t ScrollBar_getScrollDelay(const ScrollBar *s) {
 ;;GETTER
 bool ScrollBar_isAutoHidden(const ScrollBar *s) {
     return s ? (*s).autoHidden : false;
+}
+
+;;GETTER
+bool ScrollBar_isNeeded(const ScrollBar *s) {
+    return s ? ((*s).contentLen > (*s).viewLen) : false;
 }
 
 ;;GETTER

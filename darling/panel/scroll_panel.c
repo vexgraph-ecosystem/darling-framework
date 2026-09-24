@@ -92,6 +92,7 @@
  *   - ScrollPanel_isBarDragging(sp)
  *   - ScrollPanel_tick(sp, nowMs)
  *   - ScrollPanel_paint(sp, rect, skip) / ScrollPanel_paintSkips(sp, rect, skips, n)
+ *   - ScrollPanel_paintBars(sp, rect)
  *   - ScrollPanel_setViewportSize(sp, w, h)
  *   - ScrollPanel_setContentSize(sp, w, h)
  *   - ScrollPanel_layoutBars(sp)
@@ -110,6 +111,7 @@
  *   - ScrollPanel_verticalScroll_isHideWhenUnused/getOpacity/getIdleTimeoutMs/isEffectiveVisible
  *   - ScrollPanel_verticalScroll_setScrollMode/setScrollFriction/setScrollSensitivity/setScrollDelay
  *   - ScrollPanel_verticalScroll_getScrollMode/getScrollFriction/getScrollSensitivity/getScrollDelay
+ *   - ScrollPanel_verticalScroll_isNeeded
  *   - ScrollPanel_verticalScroll_getRange/getThumbRect
  *
  * Public horizontalScroll Part Verbs: (.h)
@@ -119,6 +121,7 @@
  *   - ScrollPanel_horizontalScroll_isHideWhenUnused/getOpacity/getIdleTimeoutMs/isEffectiveVisible
  *   - ScrollPanel_horizontalScroll_setScrollMode/setScrollFriction/setScrollSensitivity/setScrollDelay
  *   - ScrollPanel_horizontalScroll_getScrollMode/getScrollFriction/getScrollSensitivity/getScrollDelay
+ *   - ScrollPanel_horizontalScroll_isNeeded
  *   - ScrollPanel_horizontalScroll_getRange/getThumbRect
  *
  * Public contentPanel Part Verbs: (.h)
@@ -830,6 +833,11 @@ uint64_t ScrollPanel_verticalScroll_getScrollDelay(const ScrollPanel *sp) {
 }
 
 ;;GETTER
+bool ScrollPanel_verticalScroll_isNeeded(const ScrollPanel *sp) {
+    return (sp && (*sp).vBar) ? ScrollBar_isNeeded((*sp).vBar) : false;
+}
+
+;;GETTER
 void ScrollPanel_verticalScroll_getRange(const ScrollPanel *sp, float *outMin, float *outMax) {
     if (sp && (*sp).vBar)
         ScrollBar_getRange((*sp).vBar, outMin, outMax);
@@ -1029,6 +1037,11 @@ uint64_t ScrollPanel_horizontalScroll_getScrollDelay(const ScrollPanel *sp) {
 }
 
 ;;GETTER
+bool ScrollPanel_horizontalScroll_isNeeded(const ScrollPanel *sp) {
+    return (sp && (*sp).hBar) ? ScrollBar_isNeeded((*sp).hBar) : false;
+}
+
+;;GETTER
 void ScrollPanel_horizontalScroll_getRange(const ScrollPanel *sp, float *outMin, float *outMax) {
     if (sp && (*sp).hBar)
         ScrollBar_getRange((*sp).hBar, outMin, outMax);
@@ -1199,10 +1212,16 @@ bool ScrollPanel_paintSkips(ScrollPanel *sp, const Rectangle *rect,
         else
             Graphics_clip(nullptr);
     }
+    drew = ScrollPanel_paintBars(sp, rect) || drew;
+    return drew;
+}
+
+bool ScrollPanel_paintBars(ScrollPanel *sp, const Rectangle *rect) {
+    if (!sp || !rect)
+        return false;
     ScrollPanelGraphics pg;
     fillPanelGraphics(sp, &pg);
-    drew = ScrollPanelGraphics_paint(&pg, rect) || drew;
-    return drew;
+    return ScrollPanelGraphics_paint(&pg, rect);
 }
 
 bool ScrollPanel_paint(ScrollPanel *sp, const Rectangle *rect, const Panel *skip) {

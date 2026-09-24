@@ -158,6 +158,9 @@ float ScrollBar_getScrollSensitivity(const ScrollBar *s);
 uint64_t ScrollBar_getScrollDelay(const ScrollBar *s);
 bool ScrollBar_isAutoHidden(const ScrollBar *s);
 bool ScrollBar_isEffectiveVisible(const ScrollBar *s);
+// Needed = the axis actually overflows (content longer than the viewport).
+// A not-needed bar paints nothing and scrolls nothing on its axis.
+bool ScrollBar_isNeeded(const ScrollBar *s);
 float ScrollBar_getThickness(const ScrollBar *s);
 float ScrollBar_getInset(const ScrollBar *s);
 void ScrollBar_getRange(const ScrollBar *s, float *outMin, float *outMax);
