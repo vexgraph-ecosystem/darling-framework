@@ -181,7 +181,72 @@ int main(void) {
     float cy = GraphicsComponent_getY(&(*innerContent).component);
     check(near(cx, 0.0f) && near(cy, -300.0f), "content-rides-offset");
 
-    // section 10 strings
+    // section 10 scroll behavior: sensitivity, mode, friction, delay
+    ScrollPanel *b = ScrollPanel_2(200.0f, 200.0f);
+    Panel *bc = Panel_0();
+    Panel_setSize(bc, 200.0f, 1000.0f);
+    ScrollPanel_setContent(b, bc);
+    ScrollPanel_layoutBars(b);
+    check(ScrollPanel_verticalScroll_getScrollSensitivity(b) == 1.0f, "sens-default");
+    check(ScrollPanel_verticalScroll_getScrollMode(b) == SCROLL_BAR_STEP, "mode-default");
+    ScrollPanel_verticalScroll_setScrollSensitivity(b, 2.0f);
+    check(ScrollPanel_verticalScroll_getScrollSensitivity(b) == 2.0f, "sens-set");
+    ScrollPanel_scrollInputAt(b, 0.0f, 100.0f, 1000u);
+    ScrollPanel_getOffset(b, &ox, &oy);
+    check(near(oy, 200.0f), "sens-scaled");
+    ScrollPanel_verticalScroll_setScrollSensitivity(b, 0.5f);
+    ScrollPanel_scrollInputAt(b, 0.0f, 100.0f, 1100u);
+    ScrollPanel_getOffset(b, &ox, &oy);
+    check(near(oy, 250.0f), "sens-half");
+    ScrollPanel_verticalScroll_setScrollSensitivity(b, 1.0f);
+
+    // step mode: input lands, tick glides nothing
+    ScrollPanel_setOffsetAt(b, 0.0f, 0.0f, 2000u);
+    ScrollPanel_verticalScroll_setScrollMode(b, SCROLL_BAR_STEP);
+    ScrollPanel_verticalScroll_setScrollFriction(b, 1.0f);
+    ScrollPanel_scrollInputAt(b, 0.0f, 120.0f, 2100u);
+    ScrollPanel_tick(b, 2200u);
+    ScrollPanel_getOffset(b, &ox, &oy);
+    check(near(oy, 120.0f), "step-no-glide");
+
+    // smooth mode with friction: tick glides past the input, then settles
+    ScrollPanel_setOffsetAt(b, 0.0f, 0.0f, 3000u);
+    ScrollPanel_verticalScroll_setScrollMode(b, SCROLL_BAR_SMOOTH);
+    ScrollPanel_verticalScroll_setScrollFriction(b, 1.0f);
+    ScrollPanel_verticalScroll_setScrollDelay(b, 0u);
+    ScrollPanel_scrollInputAt(b, 0.0f, 120.0f, 3100u);
+    ScrollPanel_getOffset(b, &ox, &oy);
+    check(near(oy, 120.0f), "smooth-input-lands");
+    ScrollPanel_tick(b, 3160u);
+    ScrollPanel_getOffset(b, &ox, &oy);
+    check(oy > 120.0f && oy < 240.0f, "smooth-glides");
+    float afterGlide = oy;
+    for (uint64_t t = 3200u; t < 8000u; t += 100u)
+        ScrollPanel_tick(b, t);
+    ScrollPanel_getOffset(b, &ox, &oy);
+    check(oy >= afterGlide && oy <= 240.0f, "smooth-settles");
+
+    // friction 0: smooth mode glides nothing (no sliding action)
+    ScrollPanel_setOffsetAt(b, 0.0f, 0.0f, 9000u);
+    ScrollPanel_verticalScroll_setScrollFriction(b, 0.0f);
+    ScrollPanel_scrollInputAt(b, 0.0f, 120.0f, 9100u);
+    ScrollPanel_tick(b, 9160u);
+    ScrollPanel_getOffset(b, &ox, &oy);
+    check(near(oy, 120.0f), "friction-zero-stops");
+
+    // delay: glide holds until the settle delay elapses
+    ScrollPanel_setOffsetAt(b, 0.0f, 0.0f, 10000u);
+    ScrollPanel_verticalScroll_setScrollFriction(b, 1.0f);
+    ScrollPanel_verticalScroll_setScrollDelay(b, 500u);
+    ScrollPanel_scrollInputAt(b, 0.0f, 120.0f, 10100u);
+    ScrollPanel_tick(b, 10300u);
+    ScrollPanel_getOffset(b, &ox, &oy);
+    check(near(oy, 120.0f), "delay-holds");
+    ScrollPanel_tick(b, 10600u);
+    ScrollPanel_getOffset(b, &ox, &oy);
+    check(oy > 120.0f, "delay-then-glides");
+
+    // section 11 strings
     char buf[512];
     bool trunc = false;
     ScrollPanel_toString(sp, buf, sizeof(buf), &trunc);

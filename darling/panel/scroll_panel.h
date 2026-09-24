@@ -60,6 +60,9 @@ void ScrollPanel_scrollByAt(ScrollPanel *sp, float dx, float dy, uint64_t nowMs)
 // the parent — when the inner panel is at its end, the outer continues.
 void ScrollPanel_scrollByChained(ScrollPanel *sp, float dx, float dy, uint64_t nowMs,
                                  float *outDx, float *outDy);
+// Wheel/trackpad input entry: each axis scales by its bar's sensitivity and
+// arms that bar's momentum; the offset then moves and glides on tick.
+void ScrollPanel_scrollInputAt(ScrollPanel *sp, float dx, float dy, uint64_t nowMs);
 void ScrollPanel_tick(ScrollPanel *sp, uint64_t nowMs);
 // Immediate-mode paint: viewport stages, scissored content subtree shifted
 // by the offsets, bars last. skip (nullable) excludes one subtree — the
@@ -82,6 +85,10 @@ void ScrollPanel_verticalScroll_setShortLengthLimit(ScrollPanel *sp, float perce
 void ScrollPanel_verticalScroll_setHideWhenUnused(ScrollPanel *sp, bool hide);
 void ScrollPanel_verticalScroll_setOpacity(ScrollPanel *sp, float opacity);
 void ScrollPanel_verticalScroll_setIdleTimeoutMs(ScrollPanel *sp, uint64_t timeoutMs);
+void ScrollPanel_verticalScroll_setScrollMode(ScrollPanel *sp, int mode);
+void ScrollPanel_verticalScroll_setScrollFriction(ScrollPanel *sp, float friction);
+void ScrollPanel_verticalScroll_setScrollSensitivity(ScrollPanel *sp, float sensitivity);
+void ScrollPanel_verticalScroll_setScrollDelay(ScrollPanel *sp, uint64_t delayMs);
 float ScrollPanel_verticalScroll_getValue(const ScrollPanel *sp);
 float ScrollPanel_verticalScroll_getThickness(const ScrollPanel *sp);
 float ScrollPanel_verticalScroll_getInset(const ScrollPanel *sp);
@@ -89,6 +96,10 @@ float ScrollPanel_verticalScroll_getShortLengthLimit(const ScrollPanel *sp);
 bool ScrollPanel_verticalScroll_isHideWhenUnused(const ScrollPanel *sp);
 float ScrollPanel_verticalScroll_getOpacity(const ScrollPanel *sp);
 uint64_t ScrollPanel_verticalScroll_getIdleTimeoutMs(const ScrollPanel *sp);
+int ScrollPanel_verticalScroll_getScrollMode(const ScrollPanel *sp);
+float ScrollPanel_verticalScroll_getScrollFriction(const ScrollPanel *sp);
+float ScrollPanel_verticalScroll_getScrollSensitivity(const ScrollPanel *sp);
+uint64_t ScrollPanel_verticalScroll_getScrollDelay(const ScrollPanel *sp);
 bool ScrollPanel_verticalScroll_isEffectiveVisible(const ScrollPanel *sp);
 void ScrollPanel_verticalScroll_getRange(const ScrollPanel *sp, float *outMin, float *outMax);
 void ScrollPanel_verticalScroll_getThumbRect(const ScrollPanel *sp,
@@ -104,6 +115,10 @@ void ScrollPanel_horizontalScroll_setShortLengthLimit(ScrollPanel *sp, float per
 void ScrollPanel_horizontalScroll_setHideWhenUnused(ScrollPanel *sp, bool hide);
 void ScrollPanel_horizontalScroll_setOpacity(ScrollPanel *sp, float opacity);
 void ScrollPanel_horizontalScroll_setIdleTimeoutMs(ScrollPanel *sp, uint64_t timeoutMs);
+void ScrollPanel_horizontalScroll_setScrollMode(ScrollPanel *sp, int mode);
+void ScrollPanel_horizontalScroll_setScrollFriction(ScrollPanel *sp, float friction);
+void ScrollPanel_horizontalScroll_setScrollSensitivity(ScrollPanel *sp, float sensitivity);
+void ScrollPanel_horizontalScroll_setScrollDelay(ScrollPanel *sp, uint64_t delayMs);
 float ScrollPanel_horizontalScroll_getValue(const ScrollPanel *sp);
 float ScrollPanel_horizontalScroll_getThickness(const ScrollPanel *sp);
 float ScrollPanel_horizontalScroll_getInset(const ScrollPanel *sp);
@@ -111,6 +126,10 @@ float ScrollPanel_horizontalScroll_getShortLengthLimit(const ScrollPanel *sp);
 bool ScrollPanel_horizontalScroll_isHideWhenUnused(const ScrollPanel *sp);
 float ScrollPanel_horizontalScroll_getOpacity(const ScrollPanel *sp);
 uint64_t ScrollPanel_horizontalScroll_getIdleTimeoutMs(const ScrollPanel *sp);
+int ScrollPanel_horizontalScroll_getScrollMode(const ScrollPanel *sp);
+float ScrollPanel_horizontalScroll_getScrollFriction(const ScrollPanel *sp);
+float ScrollPanel_horizontalScroll_getScrollSensitivity(const ScrollPanel *sp);
+uint64_t ScrollPanel_horizontalScroll_getScrollDelay(const ScrollPanel *sp);
 bool ScrollPanel_horizontalScroll_isEffectiveVisible(const ScrollPanel *sp);
 void ScrollPanel_horizontalScroll_getRange(const ScrollPanel *sp, float *outMin, float *outMax);
 void ScrollPanel_horizontalScroll_getThumbRect(const ScrollPanel *sp,

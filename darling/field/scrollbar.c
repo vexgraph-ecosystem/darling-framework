@@ -9,6 +9,8 @@
 #include "nio/mem.h"
 #include "oop/type.h"
 
+#include <math.h>
+
 ;;DEFINITION
 /**
  * ============================================================================
@@ -66,6 +68,12 @@
  *   bool autoHidden;           // Auto-hide currently hiding the bar
  *   float viewLen;             // Viewport length along the bar (paint lens)
  *   float contentLen;          // Content length along the bar (paint lens)
+ *   int scrollMode;            // SCROLL_BAR_STEP or SCROLL_BAR_SMOOTH
+ *   float friction;            // 0 = no glide, 1 = default, >1 = longer
+ *   float sensitivity;         // Input multiplier (1.0 = unchanged)
+ *   uint64_t delayMs;          // Settle hold before glide begins
+ *   float velocity;            // Remaining px carried by momentum
+ *   uint64_t lastInputMs;      // Clock of the last input (momentum arming)
  *
  * PRIVATE HELPERS:
  * ----------------------------------------------------------------------------
@@ -94,6 +102,8 @@
  *   - ScrollBar_tick(s, nowMs, scrollable)
  *   - ScrollBar_setLengths(s, viewportLen, contentLen)
  *   - ScrollBar_paint(s, trackRect)
+ *   - ScrollBar_applyInput(s, deltaPx, nowMs)
+ *   - ScrollBar_glideStep(s, nowMs, dtMs)
  *
  * Private Core Functions: (.c static)
  *   - pinValue / pin01 / gestureDelta / pointLerp / trackLen / thumbDims
@@ -107,6 +117,10 @@
  *   - ScrollBar_setHideWhenUnused(s, hide)
  *   - ScrollBar_setOpacity(s, opacity)
  *   - ScrollBar_setIdleTimeoutMs(s, timeoutMs)
+ *   - ScrollBar_setScrollMode(s, mode)
+ *   - ScrollBar_setScrollFriction(s, friction)
+ *   - ScrollBar_setScrollSensitivity(s, sensitivity)
+ *   - ScrollBar_setScrollDelay(s, delayMs)
  *   - ScrollBar_setThickness(s, px)
  *   - ScrollBar_setInset(s, px)
  *
@@ -122,6 +136,10 @@
  *   - ScrollBar_isHideWhenUnused(s)
  *   - ScrollBar_getOpacity(s)
  *   - ScrollBar_getIdleTimeoutMs(s)
+ *   - ScrollBar_getScrollMode(s)
+ *   - ScrollBar_getScrollFriction(s)
+ *   - ScrollBar_getScrollSensitivity(s)
+ *   - ScrollBar_getScrollDelay(s)
  *   - ScrollBar_isAutoHidden(s)
  *   - ScrollBar_isEffectiveVisible(s)
  *   - ScrollBar_getThickness(s)
@@ -152,22 +170,28 @@ ScrollBar *ScrollBar_0(void) {
     GraphicsComponent_init(&(*s).track);
     (*s).mode = SCROLL_BAR_GESTURE;
     (*s).orientation = SCROLL_BAR_VERTICAL;
-    (*s).min = 0.0f;
-    (*s).max = 1.0f;
-    (*s).value = 0.0f;
-    (*s).thumbMin = 24.0f;
-    (*s).thickness = 12.0f;
-    (*s).inset = 2.0f;
-    (*s).shortLimit = 0.0f;
+    (*s).min = SCROLL_BAR_VALUE_MIN_DEFAULT;
+    (*s).max = SCROLL_BAR_VALUE_MAX_DEFAULT;
+    (*s).value = SCROLL_BAR_VALUE_MIN_DEFAULT;
+    (*s).thumbMin = SCROLL_BAR_THUMB_MIN_DEFAULT;
+    (*s).thickness = SCROLL_BAR_THICKNESS_DEFAULT;
+    (*s).inset = SCROLL_BAR_INSET_DEFAULT;
+    (*s).shortLimit = SCROLL_BAR_SHORT_LIMIT_DEFAULT;
     (*s).hideWhenUnused = false;
-    (*s).opacity = 1.0f;
-    (*s).idleTimeoutMs = 1200u;
+    (*s).opacity = SCROLL_BAR_OPACITY_DEFAULT;
+    (*s).idleTimeoutMs = SCROLL_BAR_IDLE_MS_DEFAULT;
     (*s).lastScrollMs = 0u;
     (*s).hasScrolled = false;
     (*s).autoHidden = false;
     (*s).viewLen = 0.0f;
     (*s).contentLen = 0.0f;
-    GraphicsComponent_setOpacity(&(*base).component, 1.0f);
+    (*s).scrollMode = SCROLL_BAR_MODE_DEFAULT;
+    (*s).friction = SCROLL_BAR_FRICTION_DEFAULT;
+    (*s).sensitivity = SCROLL_BAR_SENSITIVITY_DEFAULT;
+    (*s).delayMs = SCROLL_BAR_DELAY_MS_DEFAULT;
+    (*s).velocity = 0.0f;
+    (*s).lastInputMs = 0u;
+    GraphicsComponent_setOpacity(&(*base).component, SCROLL_BAR_OPACITY_DEFAULT);
     return s;
 }
 
@@ -401,7 +425,7 @@ bool ScrollBar_paint(ScrollBar *s, const Rectangle *trackRect) {
     float pos = 0.0f, len = 0.0f;
     thumbDims(trackLen, (*s).viewLen, (*s).contentLen, (*s).min, (*s).max,
               (*s).value, (*s).thumbMin, (*s).shortLimit, &pos, &len);
-    Brush trackBrush = { 0xFFFFFF2Eu, op };
+    Brush trackBrush = { SCROLL_BAR_TRACK_COLOR, op };
     if (!Graphics_fillRect(trackRect, &trackBrush))
         return false;
     Rectangle thumb;
@@ -416,8 +440,45 @@ bool ScrollBar_paint(ScrollBar *s, const Rectangle *trackRect) {
         thumb.width = tw;
         thumb.height = len;
     }
-    Brush thumbBrush = { 0xFFFFFFB3u, op };
+    Brush thumbBrush = { SCROLL_BAR_THUMB_COLOR, op };
     return Graphics_fillRect(&thumb, &thumbBrush);
+}
+
+float ScrollBar_applyInput(ScrollBar *s, float deltaPx, uint64_t nowMs) {
+    if (!s)
+        return deltaPx;
+    float scaled = deltaPx * (*s).sensitivity;
+    (*s).lastInputMs = nowMs;
+    if ((*s).scrollMode == SCROLL_BAR_SMOOTH && (*s).friction > 0.0f)
+        (*s).velocity += scaled;
+    else
+        (*s).velocity = 0.0f;
+    return scaled;
+}
+
+float ScrollBar_glideStep(ScrollBar *s, uint64_t nowMs, uint64_t dtMs) {
+    if (!s)
+        return 0.0f;
+    if ((*s).scrollMode != SCROLL_BAR_SMOOTH)
+        return 0.0f;
+    if ((*s).friction <= 0.0f) {
+        (*s).velocity = 0.0f;
+        return 0.0f;
+    }
+    if ((*s).velocity == 0.0f || dtMs == 0u)
+        return 0.0f;
+    if (nowMs < (*s).lastInputMs)
+        return 0.0f;
+    if (nowMs - (*s).lastInputMs < (*s).delayMs)
+        return 0.0f;
+    float tau = SCROLL_BAR_GLIDE_TAU_MS * (*s).friction;
+    float factor = expf(-(float) dtMs / tau);
+    float delta = (*s).velocity * (1.0f - factor);
+    (*s).velocity *= factor;
+    float absVel = (*s).velocity < 0.0f ? -(*s).velocity : (*s).velocity;
+    if (absVel < SCROLL_BAR_GLIDE_MIN_PX)
+        (*s).velocity = 0.0f;
+    return delta;
 }
 
 // SETTERS (PUBLIC & PRIVATE)
@@ -511,6 +572,42 @@ void ScrollBar_setIdleTimeoutMs(ScrollBar *s, uint64_t timeoutMs) {
 }
 
 ;;SETTER
+void ScrollBar_setScrollMode(ScrollBar *s, int mode) {
+    if (!s)
+        return;
+    if (mode != SCROLL_BAR_STEP && mode != SCROLL_BAR_SMOOTH)
+        return;
+    (*s).scrollMode = mode;
+    if (mode == SCROLL_BAR_STEP)
+        (*s).velocity = 0.0f;
+}
+
+;;SETTER
+void ScrollBar_setScrollFriction(ScrollBar *s, float friction) {
+    if (!s)
+        return;
+    if (friction < 0.0f)
+        friction = 0.0f;
+    (*s).friction = friction;
+}
+
+;;SETTER
+void ScrollBar_setScrollSensitivity(ScrollBar *s, float sensitivity) {
+    if (!s)
+        return;
+    if (sensitivity < 0.0f)
+        sensitivity = 0.0f;
+    (*s).sensitivity = sensitivity;
+}
+
+;;SETTER
+void ScrollBar_setScrollDelay(ScrollBar *s, uint64_t delayMs) {
+    if (!s)
+        return;
+    (*s).delayMs = delayMs;
+}
+
+;;SETTER
 void ScrollBar_setThickness(ScrollBar *s, float px) {
     if (!s)
         return;
@@ -568,6 +665,26 @@ float ScrollBar_getOpacity(const ScrollBar *s) {
 ;;GETTER
 uint64_t ScrollBar_getIdleTimeoutMs(const ScrollBar *s) {
     return s ? (*s).idleTimeoutMs : 0u;
+}
+
+;;GETTER
+int ScrollBar_getScrollMode(const ScrollBar *s) {
+    return s ? (*s).scrollMode : SCROLL_BAR_MODE_DEFAULT;
+}
+
+;;GETTER
+float ScrollBar_getScrollFriction(const ScrollBar *s) {
+    return s ? (*s).friction : SCROLL_BAR_FRICTION_DEFAULT;
+}
+
+;;GETTER
+float ScrollBar_getScrollSensitivity(const ScrollBar *s) {
+    return s ? (*s).sensitivity : SCROLL_BAR_SENSITIVITY_DEFAULT;
+}
+
+;;GETTER
+uint64_t ScrollBar_getScrollDelay(const ScrollBar *s) {
+    return s ? (*s).delayMs : SCROLL_BAR_DELAY_MS_DEFAULT;
 }
 
 ;;GETTER

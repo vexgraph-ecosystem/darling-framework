@@ -110,6 +110,18 @@ int main(int argc, char **argv) {
     ScrollScene_toEnd(5000u);
     ScrollScene_paint(DEMO_FB_W, DEMO_FB_H);
     dumpFrame(outdir, "f4_end");
+    // f5/f6: smooth momentum — an input of 120px lands, then glides past it
+    // (friction 2 = a longer stop) as the clock advances. Step mode would
+    // sit still after the input.
+    ScrollScene_setOffsets(0.0f, 0.0f, 6000u);
+    ScrollScene_setSmooth(true, 2.0f);
+    ScrollScene_scrollInput(120.0f, 6100u);
+    ScrollScene_paint(DEMO_FB_W, DEMO_FB_H);
+    dumpFrame(outdir, "f5_momentum_input");
+    ScrollScene_tick(6200u);
+    ScrollScene_tick(6350u);
+    ScrollScene_paint(DEMO_FB_W, DEMO_FB_H);
+    dumpFrame(outdir, "f6_momentum_glide");
 
     ScrollScene_free();
     RasterGraphics_shutdown();

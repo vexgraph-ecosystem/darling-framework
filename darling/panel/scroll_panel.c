@@ -82,6 +82,7 @@
  *   - ScrollPanel_scrollBy(sp, dx, dy)
  *   - ScrollPanel_scrollByAt(sp, dx, dy, nowMs)
  *   - ScrollPanel_scrollByChained(sp, dx, dy, nowMs, outDx, outDy)
+ *   - ScrollPanel_scrollInputAt(sp, dx, dy, nowMs)
  *   - ScrollPanel_tick(sp, nowMs)
  *   - ScrollPanel_paint(sp, rect, skip)
  *   - ScrollPanel_setViewportSize(sp, w, h)
@@ -100,6 +101,8 @@
  *   - ScrollPanel_verticalScroll_setShortLengthLimit/setHideWhenUnused/setOpacity/setIdleTimeoutMs
  *   - ScrollPanel_verticalScroll_getValue/getThickness/getInset/getShortLengthLimit
  *   - ScrollPanel_verticalScroll_isHideWhenUnused/getOpacity/getIdleTimeoutMs/isEffectiveVisible
+ *   - ScrollPanel_verticalScroll_setScrollMode/setScrollFriction/setScrollSensitivity/setScrollDelay
+ *   - ScrollPanel_verticalScroll_getScrollMode/getScrollFriction/getScrollSensitivity/getScrollDelay
  *   - ScrollPanel_verticalScroll_getRange/getThumbRect
  *
  * Public horizontalScroll Part Verbs: (.h)
@@ -107,6 +110,8 @@
  *   - ScrollPanel_horizontalScroll_setShortLengthLimit/setHideWhenUnused/setOpacity/setIdleTimeoutMs
  *   - ScrollPanel_horizontalScroll_getValue/getThickness/getInset/getShortLengthLimit
  *   - ScrollPanel_horizontalScroll_isHideWhenUnused/getOpacity/getIdleTimeoutMs/isEffectiveVisible
+ *   - ScrollPanel_horizontalScroll_setScrollMode/setScrollFriction/setScrollSensitivity/setScrollDelay
+ *   - ScrollPanel_horizontalScroll_getScrollMode/getScrollFriction/getScrollSensitivity/getScrollDelay
  *   - ScrollPanel_horizontalScroll_getRange/getThumbRect
  *
  * Public contentPanel Part Verbs: (.h)
@@ -392,6 +397,18 @@ void ScrollPanel_scrollByChained(ScrollPanel *sp, float dx, float dy, uint64_t n
         *outDy = leftY;
 }
 
+void ScrollPanel_scrollInputAt(ScrollPanel *sp, float dx, float dy, uint64_t nowMs) {
+    if (!sp)
+        return;
+    float sx = dx;
+    float sy = dy;
+    if ((*sp).hBar)
+        sx = ScrollBar_applyInput((*sp).hBar, dx, nowMs);
+    if ((*sp).vBar)
+        sy = ScrollBar_applyInput((*sp).vBar, dy, nowMs);
+    ScrollPanel_scrollByAt(sp, sx, sy, nowMs);
+}
+
 void ScrollPanel_scrollBy(ScrollPanel *sp, float dx, float dy) {
     if (!sp)
         return;
@@ -407,7 +424,17 @@ void ScrollPanel_scrollByAt(ScrollPanel *sp, float dx, float dy, uint64_t nowMs)
 void ScrollPanel_tick(ScrollPanel *sp, uint64_t nowMs) {
     if (!sp)
         return;
+    uint64_t dt = nowMs >= (*sp).lastTickMs ? nowMs - (*sp).lastTickMs : 0u;
     (*sp).lastTickMs = nowMs;
+    // Momentum glide first (friction/delay live on each bar): the leftover
+    // velocity carries the offset, decaying every tick. No glide in step
+    // mode or with friction 0 — the bar returns 0 and the offset stands.
+    if (dt > 0u) {
+        float gx = (*sp).hBar ? ScrollBar_glideStep((*sp).hBar, nowMs, dt) : 0.0f;
+        float gy = (*sp).vBar ? ScrollBar_glideStep((*sp).vBar, nowMs, dt) : 0.0f;
+        if (gx != 0.0f || gy != 0.0f)
+            ScrollPanel_setOffsetAt(sp, (*sp).offsetX + gx, (*sp).offsetY + gy, nowMs);
+    }
     float loX = 0.0f, hiX = 0.0f, loY = 0.0f, hiY = 0.0f;
     offsetBounds(sp, &loX, &hiX, &loY, &hiY);
     bool scrollH = hiX > 0.0f;
@@ -635,6 +662,54 @@ bool ScrollPanel_verticalScroll_isEffectiveVisible(const ScrollPanel *sp) {
     return ScrollBar_isEffectiveVisible((*sp).vBar);
 }
 
+;;SETTER
+void ScrollPanel_verticalScroll_setScrollMode(ScrollPanel *sp, int mode) {
+    if (!sp || !(*sp).vBar)
+        return;
+    ScrollBar_setScrollMode((*sp).vBar, mode);
+}
+
+;;SETTER
+void ScrollPanel_verticalScroll_setScrollFriction(ScrollPanel *sp, float friction) {
+    if (!sp || !(*sp).vBar)
+        return;
+    ScrollBar_setScrollFriction((*sp).vBar, friction);
+}
+
+;;SETTER
+void ScrollPanel_verticalScroll_setScrollSensitivity(ScrollPanel *sp, float sensitivity) {
+    if (!sp || !(*sp).vBar)
+        return;
+    ScrollBar_setScrollSensitivity((*sp).vBar, sensitivity);
+}
+
+;;SETTER
+void ScrollPanel_verticalScroll_setScrollDelay(ScrollPanel *sp, uint64_t delayMs) {
+    if (!sp || !(*sp).vBar)
+        return;
+    ScrollBar_setScrollDelay((*sp).vBar, delayMs);
+}
+
+;;GETTER
+int ScrollPanel_verticalScroll_getScrollMode(const ScrollPanel *sp) {
+    return (sp && (*sp).vBar) ? ScrollBar_getScrollMode((*sp).vBar) : SCROLL_BAR_MODE_DEFAULT;
+}
+
+;;GETTER
+float ScrollPanel_verticalScroll_getScrollFriction(const ScrollPanel *sp) {
+    return (sp && (*sp).vBar) ? ScrollBar_getScrollFriction((*sp).vBar) : SCROLL_BAR_FRICTION_DEFAULT;
+}
+
+;;GETTER
+float ScrollPanel_verticalScroll_getScrollSensitivity(const ScrollPanel *sp) {
+    return (sp && (*sp).vBar) ? ScrollBar_getScrollSensitivity((*sp).vBar) : SCROLL_BAR_SENSITIVITY_DEFAULT;
+}
+
+;;GETTER
+uint64_t ScrollPanel_verticalScroll_getScrollDelay(const ScrollPanel *sp) {
+    return (sp && (*sp).vBar) ? ScrollBar_getScrollDelay((*sp).vBar) : SCROLL_BAR_DELAY_MS_DEFAULT;
+}
+
 ;;GETTER
 void ScrollPanel_verticalScroll_getRange(const ScrollPanel *sp, float *outMin, float *outMax) {
     if (sp && (*sp).vBar)
@@ -778,6 +853,54 @@ bool ScrollPanel_horizontalScroll_isEffectiveVisible(const ScrollPanel *sp) {
     if (!(*sp).hVisible)
         return false;
     return ScrollBar_isEffectiveVisible((*sp).hBar);
+}
+
+;;SETTER
+void ScrollPanel_horizontalScroll_setScrollMode(ScrollPanel *sp, int mode) {
+    if (!sp || !(*sp).hBar)
+        return;
+    ScrollBar_setScrollMode((*sp).hBar, mode);
+}
+
+;;SETTER
+void ScrollPanel_horizontalScroll_setScrollFriction(ScrollPanel *sp, float friction) {
+    if (!sp || !(*sp).hBar)
+        return;
+    ScrollBar_setScrollFriction((*sp).hBar, friction);
+}
+
+;;SETTER
+void ScrollPanel_horizontalScroll_setScrollSensitivity(ScrollPanel *sp, float sensitivity) {
+    if (!sp || !(*sp).hBar)
+        return;
+    ScrollBar_setScrollSensitivity((*sp).hBar, sensitivity);
+}
+
+;;SETTER
+void ScrollPanel_horizontalScroll_setScrollDelay(ScrollPanel *sp, uint64_t delayMs) {
+    if (!sp || !(*sp).hBar)
+        return;
+    ScrollBar_setScrollDelay((*sp).hBar, delayMs);
+}
+
+;;GETTER
+int ScrollPanel_horizontalScroll_getScrollMode(const ScrollPanel *sp) {
+    return (sp && (*sp).hBar) ? ScrollBar_getScrollMode((*sp).hBar) : SCROLL_BAR_MODE_DEFAULT;
+}
+
+;;GETTER
+float ScrollPanel_horizontalScroll_getScrollFriction(const ScrollPanel *sp) {
+    return (sp && (*sp).hBar) ? ScrollBar_getScrollFriction((*sp).hBar) : SCROLL_BAR_FRICTION_DEFAULT;
+}
+
+;;GETTER
+float ScrollPanel_horizontalScroll_getScrollSensitivity(const ScrollPanel *sp) {
+    return (sp && (*sp).hBar) ? ScrollBar_getScrollSensitivity((*sp).hBar) : SCROLL_BAR_SENSITIVITY_DEFAULT;
+}
+
+;;GETTER
+uint64_t ScrollPanel_horizontalScroll_getScrollDelay(const ScrollPanel *sp) {
+    return (sp && (*sp).hBar) ? ScrollBar_getScrollDelay((*sp).hBar) : SCROLL_BAR_DELAY_MS_DEFAULT;
 }
 
 ;;GETTER
