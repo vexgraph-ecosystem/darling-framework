@@ -239,6 +239,16 @@ if(NOT TARGET scroll_panel_test AND EXISTS "${DARLING_SCROLLPANEL_TEST_DIR}/scro
     target_compile_options(scroll_panel_test PRIVATE -Wall -Wextra -Werror)
 endif()
 
+# Scroll demo: headless visual proof (scripted frames -> BMP; no window).
+if(NOT TARGET scroll_demo AND EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/demo/scroll_demo.c")
+    add_executable(scroll_demo
+        "${CMAKE_CURRENT_SOURCE_DIR}/demo/scroll_scene.c"
+        "${CMAKE_CURRENT_SOURCE_DIR}/demo/scroll_demo.c"
+    )
+    target_link_libraries(scroll_demo PRIVATE darling graphvex vexspoke)
+    target_compile_options(scroll_demo PRIVATE -Wall -Wextra -Werror)
+endif()
+
 if(NOT TARGET checkbox_test AND EXISTS "${DARLING_TEST_DIR}/checkbox_test.c")
     add_executable(checkbox_test
         ${DARLING_TEST_DIR}/checkbox_test.c

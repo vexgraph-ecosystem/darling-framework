@@ -150,7 +150,38 @@ int main(void) {
     ScrollPanel_verticalScroll_setOpacity(sp, 1.0f);
     ScrollPanel_horizontalScroll_setOpacity(sp, 1.0f);
 
-    // section 8 strings
+    // section 9 nesting + chaining: inner at end bubbles to the parent
+    ScrollPanel *outer = ScrollPanel_2(200.0f, 200.0f);
+    Panel *outerContent = Panel_0();
+    Panel_setSize(outerContent, 200.0f, 800.0f);
+    ScrollPanel_setContent(outer, outerContent);
+    ScrollPanel *inner = ScrollPanel_2(200.0f, 200.0f);
+    Panel *innerContent = Panel_0();
+    Panel_setSize(innerContent, 200.0f, 600.0f);
+    ScrollPanel_setContent(inner, innerContent);
+    Panel_addContainer(outerContent, &(*inner).base);
+    float leftX = -1.0f, leftY = -1.0f;
+    ScrollPanel_scrollByChained(inner, 0.0f, 1000.0f, 9000u, &leftX, &leftY);
+    ScrollPanel_getOffset(inner, &ox, &oy);
+    check(near(oy, 400.0f) && near(leftY, 600.0f), "chain-inner-consumes");
+    ScrollPanel_scrollByAt(outer, leftX, leftY, 9000u);
+    ScrollPanel_getOffset(outer, &ox, &oy);
+    check(near(oy, 600.0f) && near(leftY, 600.0f), "chain-parent-continues");
+    ScrollPanel_scrollByChained(inner, 0.0f, 100.0f, 9100u, &leftX, &leftY);
+    check(near(leftY, 100.0f), "chain-inner-at-end");
+    ScrollPanel_scrollByAt(outer, leftX, leftY, 9100u);
+    ScrollPanel_getOffset(outer, &ox, &oy);
+    check(near(oy, 600.0f), "chain-parent-clamped");
+    ScrollPanel_scrollByChained(inner, 0.0f, -100.0f, 9200u, &leftX, &leftY);
+    ScrollPanel_getOffset(inner, &ox, &oy);
+    check(near(oy, 300.0f) && near(leftY, 0.0f), "chain-reverse-consumes");
+    ScrollPanel_scrollByChained(nullptr, 1.0f, 2.0f, 0u, &leftX, &leftY);
+    check(near(leftX, 1.0f) && near(leftY, 2.0f), "chain-null-passthrough");
+    float cx = GraphicsComponent_getX(&(*innerContent).component);
+    float cy = GraphicsComponent_getY(&(*innerContent).component);
+    check(near(cx, 0.0f) && near(cy, -300.0f), "content-rides-offset");
+
+    // section 10 strings
     char buf[512];
     bool trunc = false;
     ScrollPanel_toString(sp, buf, sizeof(buf), &trunc);

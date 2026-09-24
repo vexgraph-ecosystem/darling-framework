@@ -81,7 +81,9 @@
  *   - ScrollPanel_setOffsetAt(sp, x, y, nowMs)
  *   - ScrollPanel_scrollBy(sp, dx, dy)
  *   - ScrollPanel_scrollByAt(sp, dx, dy, nowMs)
+ *   - ScrollPanel_scrollByChained(sp, dx, dy, nowMs, outDx, outDy)
  *   - ScrollPanel_tick(sp, nowMs)
+ *   - ScrollPanel_paint(sp, rect, skip)
  *   - ScrollPanel_setViewportSize(sp, w, h)
  *   - ScrollPanel_setContentSize(sp, w, h)
  *   - ScrollPanel_layoutBars(sp)
@@ -90,7 +92,8 @@
  *
  * Private Core Functions: (.c static)
  *   - pinOffset / offsetBounds / raiseBars / resolveContentAuto / dockBar /
- *     applyBarVisible / noteBarsScrolled
+ *     applyBarVisible / noteBarsScrolled / placeContent / paintSubtree /
+ *     paintBars
  *
  * Public verticalScroll Part Verbs: (.h)
  *   - ScrollPanel_verticalScroll_setThickness/setInset/setVisible/setRange/setValue
@@ -318,6 +321,16 @@ static void noteBarsScrolled(ScrollPanel *sp, uint64_t nowMs) {
     applyBarVisible(sp);
 }
 
+// The content rides at -offset (top-left anchor default): scrolling shifts
+// the subtree under the viewport instead of caching a paint transform —
+// the same model ListContainer uses when it stacks children at layout.
+static void placeContent(ScrollPanel *sp) {
+    if (!sp || !(*sp).contentPanel)
+        return;
+    Panel *content = (*sp).contentPanel;
+    GraphicsComponent_setLocation(&(*content).component, -(*sp).offsetX, -(*sp).offsetY);
+}
+
 void ScrollPanel_setContent(ScrollPanel *sp, Panel *content) {
     if (!sp)
         return;
@@ -335,6 +348,7 @@ void ScrollPanel_setContent(ScrollPanel *sp, Panel *content) {
     raiseBars(sp);
     resolveContentAuto(sp);
     ScrollPanel_setOffset(sp, (*sp).offsetX, (*sp).offsetY);
+    placeContent(sp);
     ScrollPanel_layoutBars(sp);
 }
 
@@ -351,8 +365,31 @@ void ScrollPanel_setOffsetAt(ScrollPanel *sp, float x, float y, uint64_t nowMs) 
     offsetBounds(sp, &loX, &hiX, &loY, &hiY);
     (*sp).offsetX = pinOffset(x, loX, hiX);
     (*sp).offsetY = pinOffset(y, loY, hiY);
+    placeContent(sp);
     ScrollPanel_syncToBars(sp);
     noteBarsScrolled(sp, nowMs);
+}
+
+void ScrollPanel_scrollByChained(ScrollPanel *sp, float dx, float dy, uint64_t nowMs,
+                                 float *outDx, float *outDy) {
+    float leftX = dx;
+    float leftY = dy;
+    if (sp) {
+        float loX = 0.0f, hiX = 0.0f, loY = 0.0f, hiY = 0.0f;
+        offsetBounds(sp, &loX, &hiX, &loY, &hiY);
+        float wantX = pinOffset((*sp).offsetX + dx, loX, hiX);
+        float wantY = pinOffset((*sp).offsetY + dy, loY, hiY);
+        float gotX = wantX - (*sp).offsetX;
+        float gotY = wantY - (*sp).offsetY;
+        leftX = dx - gotX;
+        leftY = dy - gotY;
+        if (gotX != 0.0f || gotY != 0.0f)
+            ScrollPanel_setOffsetAt(sp, wantX, wantY, nowMs);
+    }
+    if (outDx)
+        *outDx = leftX;
+    if (outDy)
+        *outDy = leftY;
 }
 
 void ScrollPanel_scrollBy(ScrollPanel *sp, float dx, float dy) {
@@ -414,6 +451,21 @@ void ScrollPanel_layoutBars(ScrollPanel *sp) {
     offsetBounds(sp, &loX, &hiX, &loY, &hiY);
     (*sp).offsetX = pinOffset((*sp).offsetX, loX, hiX);
     (*sp).offsetY = pinOffset((*sp).offsetY, loY, hiY);
+    placeContent(sp);
+    Panel *b = &(*sp).base;
+    float viewW = Component_getWidth(&(*b).component);
+    float viewH = Component_getHeight(&(*b).component);
+    float contentW = viewW;
+    float contentH = viewH;
+    if ((*sp).contentPanel) {
+        Panel *content = (*sp).contentPanel;
+        contentW = Component_getWidth(&(*content).component);
+        contentH = Component_getHeight(&(*content).component);
+    }
+    if ((*sp).hBar)
+        ScrollBar_setLengths((*sp).hBar, viewW, contentW);
+    if ((*sp).vBar)
+        ScrollBar_setLengths((*sp).vBar, viewH, contentH);
     ScrollPanel_syncToBars(sp);
 }
 
@@ -464,6 +516,7 @@ void ScrollPanel_syncFromBars(ScrollPanel *sp) {
         else
             (*sp).offsetY = los[i] + t * extent;
     }
+    placeContent(sp);
     noteBarsScrolled(sp, (*sp).lastTickMs);
 }
 
@@ -815,6 +868,94 @@ bool ScrollPanel_isContentAutoWidth(const ScrollPanel *sp) {
 ;;GETTER
 bool ScrollPanel_isContentAutoHeight(const ScrollPanel *sp) {
     return sp ? (*sp).contentAutoH : false;
+}
+
+// PAINT (PUBLIC)
+
+// Generic subtree paint: each node paints its own stages into its
+// accumulated rect, then children accumulate further. Locations chain from
+// top-left anchors (the GraphicsComponent default), so accumulation is
+// exact with no abs cascade needed. skip (nullable) excludes one subtree.
+static void paintSubtree(Panel *node, float dx, float dy, const Panel *skip) {
+    if (!node || node == skip)
+        return;
+    if (!Panel_isVisible(node))
+        return;
+    Component *c = &(*node).component;
+    float x = GraphicsComponent_getX(c) + dx;
+    float y = GraphicsComponent_getY(c) + dy;
+    float w = Component_getWidth(c);
+    float h = Component_getHeight(c);
+    if (w <= 0.0f || h <= 0.0f)
+        return;
+    Rectangle r;
+    r.x = x;
+    r.y = y;
+    r.width = w;
+    r.height = h;
+    Panel_paintParts(node, &r);
+    size_t n = Panel_childCount(node);
+    for (size_t i = 0; i < n; i++)
+        paintSubtree(Panel_getChild(node, i), x, y, skip);
+}
+
+static bool paintBars(ScrollPanel *sp, const Rectangle *rect) {
+    bool drew = false;
+    float rx = (*rect).x;
+    float ry = (*rect).y;
+    float rw = (*rect).width;
+    float rh = (*rect).height;
+    ScrollBar *hBar = (*sp).hBar;
+    if (hBar) {
+        float t = ScrollBar_getThickness(hBar);
+        float inset = ScrollBar_getInset(hBar);
+        Rectangle track;
+        track.x = rx + inset;
+        track.y = ry + rh - inset - t;
+        track.width = rw - 2.0f * inset;
+        track.height = t;
+        drew = ScrollBar_paint(hBar, &track) || drew;
+    }
+    ScrollBar *vBar = (*sp).vBar;
+    if (vBar) {
+        float t = ScrollBar_getThickness(vBar);
+        float inset = ScrollBar_getInset(vBar);
+        Rectangle track;
+        track.x = rx + rw - inset - t;
+        track.y = ry + inset;
+        track.width = t;
+        track.height = rh - 2.0f * inset;
+        drew = ScrollBar_paint(vBar, &track) || drew;
+    }
+    return drew;
+}
+
+bool ScrollPanel_paint(ScrollPanel *sp, const Rectangle *rect, const Panel *skip) {
+    if (!sp || !rect)
+        return false;
+    if ((*rect).width <= 0.0f || (*rect).height <= 0.0f)
+        return false;
+    Panel *base = &(*sp).base;
+    if (!Panel_isVisible(base))
+        return false;
+    bool drew = Panel_paintParts(base, rect);
+    Rectangle saved;
+    bool haveClip = Graphics_getClip(&saved);
+    Rectangle clip = *rect;
+    if (haveClip)
+        Rectangle_intersection(&clip, &saved, &clip);
+    if (!Rectangle_isEmpty(&clip)) {
+        Graphics_clip(&clip);
+        Panel *content = (*sp).contentPanel;
+        if (content)
+            paintSubtree(content, (*rect).x, (*rect).y, skip);
+        if (haveClip)
+            Graphics_clip(&saved);
+        else
+            Graphics_clip(nullptr);
+    }
+    drew = paintBars(sp, rect) || drew;
+    return drew;
 }
 
 // TOSTRING (PUBLIC)

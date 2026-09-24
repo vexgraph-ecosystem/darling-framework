@@ -55,7 +55,16 @@ void ScrollPanel_setOffset(ScrollPanel *sp, float x, float y);
 void ScrollPanel_setOffsetAt(ScrollPanel *sp, float x, float y, uint64_t nowMs);
 void ScrollPanel_scrollBy(ScrollPanel *sp, float dx, float dy);
 void ScrollPanel_scrollByAt(ScrollPanel *sp, float dx, float dy, uint64_t nowMs);
+// Chained scroll for nesting: consume what fits inside the bounds, report
+// the leftover in outDx/outDy (dest-last) so the caller can bubble it to
+// the parent — when the inner panel is at its end, the outer continues.
+void ScrollPanel_scrollByChained(ScrollPanel *sp, float dx, float dy, uint64_t nowMs,
+                                 float *outDx, float *outDy);
 void ScrollPanel_tick(ScrollPanel *sp, uint64_t nowMs);
+// Immediate-mode paint: viewport stages, scissored content subtree shifted
+// by the offsets, bars last. skip (nullable) excludes one subtree — the
+// demo passes a nested ScrollPanel's base and paints it separately.
+bool ScrollPanel_paint(ScrollPanel *sp, const Rectangle *rect, const Panel *skip);
 void ScrollPanel_setViewportSize(ScrollPanel *sp, float w, float h);
 void ScrollPanel_setContentSize(ScrollPanel *sp, float w, float h);
 void ScrollPanel_layoutBars(ScrollPanel *sp);

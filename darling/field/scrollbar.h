@@ -44,6 +44,8 @@ typedef struct ScrollBar {
     uint64_t lastScrollMs;     // Clock of the last noted scroll
     bool hasScrolled;          // True once any scroll was noted
     bool autoHidden;           // True = auto-hide currently hiding the bar
+    float viewLen;             // Viewport length along the bar (paint lens)
+    float contentLen;          // Content length along the bar (paint lens)
 } ScrollBar;
 
 // Constructors:
@@ -66,6 +68,13 @@ void ScrollBar_handlePointer(ScrollBar *s, int kind, float localX, float localY)
 // without a window.
 void ScrollBar_thumbRect(const ScrollBar *s, float viewportLen, float contentLen,
                          float *outX, float *outY, float *outW, float *outH);
+// Paint lens: the viewport/content lengths the thumb derives from when the
+// bar paints itself (pushed by the owning ScrollPanel every layout pass).
+void ScrollBar_setLengths(ScrollBar *s, float viewportLen, float contentLen);
+// Paint the track + thumb into an explicit track rect (immediate mode, no
+// cached state). False when hidden, fully transparent, nothing to scroll
+// (content fits the viewport — a rangeless axis paints no bar), or hostile.
+bool ScrollBar_paint(ScrollBar *s, const Rectangle *trackRect);
 
 // Activity (overlay auto-hide driven by an explicit caller clock — no
 // threads; note on scroll, tick on idle; dest-last outputs stay last).
