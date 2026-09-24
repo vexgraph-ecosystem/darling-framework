@@ -219,18 +219,18 @@ static float pinValue(float value, float lo, float hi) {
     return value;
 }
 
+static float gestureDelta(float deltaPx, float trackLen, float span) {
+    if (trackLen <= 0.0f)
+        return 0.0f;
+    return deltaPx / trackLen * span;
+}
+
 static float pin01(float t) {
     if (t < 0.0f)
         return 0.0f;
     if (t > 1.0f)
         return 1.0f;
     return t;
-}
-
-static float gestureDelta(float deltaPx, float trackLen, float span) {
-    if (trackLen <= 0.0f)
-        return 0.0f;
-    return deltaPx / trackLen * span;
 }
 
 static float pointLerp(float lo, float hi, float fraction) {
@@ -336,64 +336,40 @@ bool ScrollBar_tick(ScrollBar *s, uint64_t nowMs, bool scrollable) {
     return !hide;
 }
 
-// Shared thumb core: fraction along the value span + length from the
-// viewport/content ratio floored by the grippable minimum. Pure scalars.
-static void thumbDims(float trackLen, float viewportLen, float contentLen,
-                      float lo, float hi, float value,
-                      float thumbMin, float shortLimit,
-                      float *outPos, float *outLen) {
+// The R4 -> R3 handoff: map this bar's behavior state into the R3 graphics
+// holder (the holder owns docking + thumb geometry + the two quads).
+void ScrollBar_fillGraphics(const ScrollBar *s, ScrollBarGraphics *dest) {
+    if (!dest)
+        return;
+    ScrollBarGraphics_init(dest);
+    if (!s)
+        return;
+    (*dest).orientation = (*s).orientation == SCROLL_BAR_HORIZONTAL
+        ? SCROLL_GRAPHICS_HORIZONTAL : SCROLL_GRAPHICS_VERTICAL;
+    (*dest).thickness = (*s).thickness;
+    (*dest).inset = (*s).inset;
+    float lo = (*s).min;
+    float hi = (*s).max;
     if (lo > hi) {
         float tmp = lo;
         lo = hi;
         hi = tmp;
     }
     float span = hi - lo;
-    float frac = span > 0.0f ? (value - lo) / span : 0.0f;
-    frac = pin01(frac);
-    float ratio = contentLen > 0.0f ? viewportLen / contentLen : 1.0f;
-    ratio = pin01(ratio);
-    float floor = shortLimit * trackLen;
-    float minLen = thumbMin > floor ? thumbMin : floor;
-    float len = ratio * trackLen;
-    if (len < minLen)
-        len = minLen;
-    if (len > trackLen)
-        len = trackLen;
-    float pos = frac * (trackLen - len);
-    if (outPos)
-        *outPos = pos;
-    if (outLen)
-        *outLen = len;
+    (*dest).fraction = span > 0.0f ? ((*s).value - lo) / span : 0.0f;
+    (*dest).viewLen = (*s).viewLen;
+    (*dest).contentLen = (*s).contentLen;
+    (*dest).thumbMin = (*s).thumbMin;
+    (*dest).shortLimit = (*s).shortLimit;
+    (*dest).opacity = (*s).opacity;
+    const Panel *base = &(*s).base;
+    (*dest).visible = Panel_isVisible(base);
 }
 
-void ScrollBar_thumbRect(const ScrollBar *s, float viewportLen, float contentLen,
-                         float *outX, float *outY, float *outW, float *outH) {
-    float tx = 0.0f, ty = 0.0f, tw = 0.0f, th = 0.0f;
-    float lo = 0.0f, hi = 1.0f, value = 0.0f, thumbMin = 0.0f, shortLimit = 0.0f;
-    bool horizontal = false;
-    if (s) {
-        GraphicsComponent_getAbsRect(&(*s).track, &tx, &ty, &tw, &th);
-        lo = (*s).min;
-        hi = (*s).max;
-        value = (*s).value;
-        thumbMin = (*s).thumbMin;
-        shortLimit = (*s).shortLimit;
-        horizontal = (*s).orientation == SCROLL_BAR_HORIZONTAL;
-    }
-    float pos = 0.0f, len = 0.0f;
-    if (horizontal) {
-        thumbDims(tw, viewportLen, contentLen, lo, hi, value, thumbMin, shortLimit, &pos, &len);
-        if (outX) *outX = tx + pos;
-        if (outY) *outY = ty;
-        if (outW) *outW = len;
-        if (outH) *outH = th;
-    } else {
-        thumbDims(th, viewportLen, contentLen, lo, hi, value, thumbMin, shortLimit, &pos, &len);
-        if (outX) *outX = tx;
-        if (outY) *outY = ty + pos;
-        if (outW) *outW = tw;
-        if (outH) *outH = len;
-    }
+void ScrollBar_thumbRect(const ScrollBar *s, const Rectangle *viewportRect, Rectangle *dest) {
+    ScrollBarGraphics g;
+    ScrollBar_fillGraphics(s, &g);
+    ScrollBarGraphics_thumbRect(&g, viewportRect, dest);
 }
 
 void ScrollBar_setLengths(ScrollBar *s, float viewportLen, float contentLen) {
@@ -403,45 +379,10 @@ void ScrollBar_setLengths(ScrollBar *s, float viewportLen, float contentLen) {
     (*s).contentLen = contentLen;
 }
 
-bool ScrollBar_paint(ScrollBar *s, const Rectangle *trackRect) {
-    if (!s || !trackRect)
-        return false;
-    float tx = (*trackRect).x;
-    float ty = (*trackRect).y;
-    float tw = (*trackRect).width;
-    float th = (*trackRect).height;
-    if (tw <= 0.0f || th <= 0.0f)
-        return false;
-    Panel *base = &(*s).base;
-    if (!Panel_isVisible(base))
-        return false;
-    float op = (*s).opacity;
-    if (op <= 0.0f)
-        return false;
-    if ((*s).contentLen <= (*s).viewLen)
-        return false;
-    bool horizontal = (*s).orientation == SCROLL_BAR_HORIZONTAL;
-    float trackLen = horizontal ? tw : th;
-    float pos = 0.0f, len = 0.0f;
-    thumbDims(trackLen, (*s).viewLen, (*s).contentLen, (*s).min, (*s).max,
-              (*s).value, (*s).thumbMin, (*s).shortLimit, &pos, &len);
-    Brush trackBrush = { SCROLL_BAR_TRACK_COLOR, op };
-    if (!Graphics_fillRect(trackRect, &trackBrush))
-        return false;
-    Rectangle thumb;
-    if (horizontal) {
-        thumb.x = tx + pos;
-        thumb.y = ty;
-        thumb.width = len;
-        thumb.height = th;
-    } else {
-        thumb.x = tx;
-        thumb.y = ty + pos;
-        thumb.width = tw;
-        thumb.height = len;
-    }
-    Brush thumbBrush = { SCROLL_BAR_THUMB_COLOR, op };
-    return Graphics_fillRect(&thumb, &thumbBrush);
+bool ScrollBar_paint(ScrollBar *s, const Rectangle *viewportRect) {
+    ScrollBarGraphics g;
+    ScrollBar_fillGraphics(s, &g);
+    return ScrollBarGraphics_paint(&g, viewportRect);
 }
 
 float ScrollBar_applyInput(ScrollBar *s, float deltaPx, uint64_t nowMs) {

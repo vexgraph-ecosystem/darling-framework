@@ -206,47 +206,32 @@ if(NOT TARGET picture_test AND EXISTS "${DARLING_TEST_DIR}/picture_test.c")
     target_compile_options(picture_test PRIVATE -Wall -Wextra -Werror)
 endif()
 
-# FlexContainer: repo-local headless proof (standalone-safe: never depends
-# on umbrella test paths).
-set(DARLING_FLEX_TEST_DIR "${CMAKE_CURRENT_SOURCE_DIR}/tests")
-if(NOT TARGET flex_container_test AND EXISTS "${DARLING_FLEX_TEST_DIR}/flex_container_test.c")
+# FlexContainer / LayeredContainer / ScrollPanel: headless proofs live in the
+# umbrella test tree (the Test Segregation Law: _tests/<subsystem>/ canonical;
+# this repo falls back to its own tests/ when checked out standalone). The
+# visual probe + live window live in the umbrella main/, never in this repo.
+if(NOT TARGET flex_container_test AND EXISTS "${DARLING_TEST_DIR}/flex_container_test.c")
     add_executable(flex_container_test
-        "${DARLING_FLEX_TEST_DIR}/flex_container_test.c"
+        "${DARLING_TEST_DIR}/flex_container_test.c"
     )
     target_link_libraries(flex_container_test PRIVATE darling graphvex vexspoke)
     target_compile_options(flex_container_test PRIVATE -Wall -Wextra -Werror)
 endif()
 
-# LayeredContainer: repo-local headless proof (standalone-safe: never depends
-# on umbrella test paths).
-set(DARLING_LAYERED_TEST_DIR "${CMAKE_CURRENT_SOURCE_DIR}/tests")
-if(NOT TARGET layered_container_test AND EXISTS "${DARLING_LAYERED_TEST_DIR}/layered_container_test.c")
+if(NOT TARGET layered_container_test AND EXISTS "${DARLING_TEST_DIR}/layered_container_test.c")
     add_executable(layered_container_test
-        "${DARLING_LAYERED_TEST_DIR}/layered_container_test.c"
+        "${DARLING_TEST_DIR}/layered_container_test.c"
     )
     target_link_libraries(layered_container_test PRIVATE darling graphvex vexspoke)
     target_compile_options(layered_container_test PRIVATE -Wall -Wextra -Werror)
 endif()
 
-# ScrollPanel: repo-local headless proof (standalone-safe: never depends
-# on umbrella test paths).
-set(DARLING_SCROLLPANEL_TEST_DIR "${CMAKE_CURRENT_SOURCE_DIR}/tests")
-if(NOT TARGET scroll_panel_test AND EXISTS "${DARLING_SCROLLPANEL_TEST_DIR}/scroll_panel_test.c")
+if(NOT TARGET scroll_panel_test AND EXISTS "${DARLING_TEST_DIR}/scroll_panel_test.c")
     add_executable(scroll_panel_test
-        "${DARLING_SCROLLPANEL_TEST_DIR}/scroll_panel_test.c"
+        "${DARLING_TEST_DIR}/scroll_panel_test.c"
     )
     target_link_libraries(scroll_panel_test PRIVATE darling graphvex vexspoke)
     target_compile_options(scroll_panel_test PRIVATE -Wall -Wextra -Werror)
-endif()
-
-# Scroll demo: headless visual proof (scripted frames -> BMP; no window).
-if(NOT TARGET scroll_demo AND EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/demo/scroll_demo.c")
-    add_executable(scroll_demo
-        "${CMAKE_CURRENT_SOURCE_DIR}/demo/scroll_scene.c"
-        "${CMAKE_CURRENT_SOURCE_DIR}/demo/scroll_demo.c"
-    )
-    target_link_libraries(scroll_demo PRIVATE darling graphvex vexspoke)
-    target_compile_options(scroll_demo PRIVATE -Wall -Wextra -Werror)
 endif()
 
 if(NOT TARGET checkbox_test AND EXISTS "${DARLING_TEST_DIR}/checkbox_test.c")

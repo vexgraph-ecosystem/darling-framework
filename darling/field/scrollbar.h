@@ -8,6 +8,7 @@
 #include "darling/panel/panel.h"
 #include "event/pointer.h"
 #include "lang/graphics_component.h"
+#include "lang/scroll_bar_graphics.h"
 #include "oop/type.h"
 
 
@@ -28,8 +29,6 @@
 #define SCROLL_BAR_SHORT_LIMIT_DEFAULT  0.0f
 #define SCROLL_BAR_OPACITY_DEFAULT      1.0f
 #define SCROLL_BAR_IDLE_MS_DEFAULT      1200u
-#define SCROLL_BAR_TRACK_COLOR          0xFFFFFF2Eu
-#define SCROLL_BAR_THUMB_COLOR          0xFFFFFFB3u
 
 // Scroll behavior (per bar = per axis, per panel): how input becomes motion.
 #define SCROLL_BAR_STEP     0   // discrete: each input lands immediately
@@ -94,18 +93,18 @@ void ScrollBar_dragBy(ScrollBar *s, float deltaPx, float trackLen);
 void ScrollBar_clickAt(ScrollBar *s, float fraction);
 void ScrollBar_setRange(ScrollBar *s, float min, float max);
 void ScrollBar_handlePointer(ScrollBar *s, int kind, float localX, float localY);
-// Geometry: the thumb rect in absolute coords from value + track abs. Pure over
-// scalars (viewport/content lengths drive the thumb proportion); testable
-// without a window.
-void ScrollBar_thumbRect(const ScrollBar *s, float viewportLen, float contentLen,
-                         float *outX, float *outY, float *outW, float *outH);
+// Geometry: the thumb rect inside a viewport rect (dest-last), derived from
+// the bar's state through the R3 ScrollBarGraphics holder.
+void ScrollBar_thumbRect(const ScrollBar *s, const Rectangle *viewportRect, Rectangle *dest);
 // Paint lens: the viewport/content lengths the thumb derives from when the
 // bar paints itself (pushed by the owning ScrollPanel every layout pass).
 void ScrollBar_setLengths(ScrollBar *s, float viewportLen, float contentLen);
-// Paint the track + thumb into an explicit track rect (immediate mode, no
-// cached state). False when hidden, fully transparent, nothing to scroll
-// (content fits the viewport — a rangeless axis paints no bar), or hostile.
-bool ScrollBar_paint(ScrollBar *s, const Rectangle *trackRect);
+// Fill an R3 ScrollBarGraphics from this bar's state (the R4->R3 handoff).
+void ScrollBar_fillGraphics(const ScrollBar *s, ScrollBarGraphics *dest);
+// Paint the track + thumb into a viewport rect (the R3 holder docks the
+// track and derives the thumb). False when hidden, fully transparent,
+// nothing to scroll (content fits the viewport), or hostile.
+bool ScrollBar_paint(ScrollBar *s, const Rectangle *viewportRect);
 // Behavior: apply an input delta through the bar's sensitivity and arm
 // momentum; returns the scaled delta the caller applies to the offset.
 float ScrollBar_applyInput(ScrollBar *s, float deltaPx, uint64_t nowMs);

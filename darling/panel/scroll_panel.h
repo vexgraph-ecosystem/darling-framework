@@ -63,11 +63,18 @@ void ScrollPanel_scrollByChained(ScrollPanel *sp, float dx, float dy, uint64_t n
 // Wheel/trackpad input entry: each axis scales by its bar's sensitivity and
 // arms that bar's momentum; the offset then moves and glides on tick.
 void ScrollPanel_scrollInputAt(ScrollPanel *sp, float dx, float dy, uint64_t nowMs);
+// Input + chaining in one: sensitivity + momentum arm, then the leftover
+// bubbles to the caller (dest-last) so a parent continues at the inner end.
+void ScrollPanel_scrollInputChainedAt(ScrollPanel *sp, float dx, float dy, uint64_t nowMs,
+                                      float *outDx, float *outDy);
 void ScrollPanel_tick(ScrollPanel *sp, uint64_t nowMs);
 // Immediate-mode paint: viewport stages, scissored content subtree shifted
 // by the offsets, bars last. skip (nullable) excludes one subtree — the
 // demo passes a nested ScrollPanel's base and paints it separately.
 bool ScrollPanel_paint(ScrollPanel *sp, const Rectangle *rect, const Panel *skip);
+// Same, but excludes a set of subtrees (nested panels a page paints itself).
+bool ScrollPanel_paintSkips(ScrollPanel *sp, const Rectangle *rect,
+                            const Panel *const *skips, size_t skipCount);
 void ScrollPanel_setViewportSize(ScrollPanel *sp, float w, float h);
 void ScrollPanel_setContentSize(ScrollPanel *sp, float w, float h);
 void ScrollPanel_layoutBars(ScrollPanel *sp);

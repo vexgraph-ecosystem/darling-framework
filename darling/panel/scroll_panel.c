@@ -5,6 +5,7 @@
 #include "annotation/getter.h"
 #include "annotation/setter.h"
 #include "lang/graphics_component.h"
+#include "lang/scroll_panel_graphics.h"
 #include "lang/size.h"
 #include "lang/str.h"
 #include "nio/mem.h"
@@ -83,6 +84,7 @@
  *   - ScrollPanel_scrollByAt(sp, dx, dy, nowMs)
  *   - ScrollPanel_scrollByChained(sp, dx, dy, nowMs, outDx, outDy)
  *   - ScrollPanel_scrollInputAt(sp, dx, dy, nowMs)
+ *   - ScrollPanel_scrollInputChainedAt(sp, dx, dy, nowMs, outDx, outDy)
  *   - ScrollPanel_tick(sp, nowMs)
  *   - ScrollPanel_paint(sp, rect, skip)
  *   - ScrollPanel_setViewportSize(sp, w, h)
@@ -94,7 +96,7 @@
  * Private Core Functions: (.c static)
  *   - pinOffset / offsetBounds / raiseBars / resolveContentAuto / dockBar /
  *     applyBarVisible / noteBarsScrolled / placeContent / paintSubtree /
- *     paintBars
+ *     fillPanelGraphics
  *
  * Public verticalScroll Part Verbs: (.h)
  *   - ScrollPanel_verticalScroll_setThickness/setInset/setVisible/setRange/setValue
@@ -407,6 +409,19 @@ void ScrollPanel_scrollInputAt(ScrollPanel *sp, float dx, float dy, uint64_t now
     if ((*sp).vBar)
         sy = ScrollBar_applyInput((*sp).vBar, dy, nowMs);
     ScrollPanel_scrollByAt(sp, sx, sy, nowMs);
+}
+
+void ScrollPanel_scrollInputChainedAt(ScrollPanel *sp, float dx, float dy, uint64_t nowMs,
+                                      float *outDx, float *outDy) {
+    float sx = dx;
+    float sy = dy;
+    if (sp) {
+        if ((*sp).hBar)
+            sx = ScrollBar_applyInput((*sp).hBar, dx, nowMs);
+        if ((*sp).vBar)
+            sy = ScrollBar_applyInput((*sp).vBar, dy, nowMs);
+    }
+    ScrollPanel_scrollByChained(sp, sx, sy, nowMs, outDx, outDy);
 }
 
 void ScrollPanel_scrollBy(ScrollPanel *sp, float dx, float dy) {
@@ -723,21 +738,27 @@ void ScrollPanel_verticalScroll_getRange(const ScrollPanel *sp, float *outMin, f
 ;;GETTER
 void ScrollPanel_verticalScroll_getThumbRect(const ScrollPanel *sp,
                                              float *outX, float *outY, float *outW, float *outH) {
-    float viewH = 0.0f, contentH = 0.0f;
+    Rectangle view;
+    view.x = 0.0f;
+    view.y = 0.0f;
+    view.width = 0.0f;
+    view.height = 0.0f;
     if (sp) {
         const Panel *b = &(*sp).base;
-        viewH = Component_getHeight(&(*b).component);
-        if ((*sp).contentPanel)
-            contentH = Component_getHeight(&(*(*sp).contentPanel).component);
+        view.width = Component_getWidth(&(*b).component);
+        view.height = Component_getHeight(&(*b).component);
     }
+    Rectangle dest;
+    dest.x = 0.0f;
+    dest.y = 0.0f;
+    dest.width = 0.0f;
+    dest.height = 0.0f;
     if (sp && (*sp).vBar)
-        ScrollBar_thumbRect((*sp).vBar, viewH, contentH, outX, outY, outW, outH);
-    else {
-        if (outX) *outX = 0.0f;
-        if (outY) *outY = 0.0f;
-        if (outW) *outW = 0.0f;
-        if (outH) *outH = 0.0f;
-    }
+        ScrollBar_thumbRect((*sp).vBar, &view, &dest);
+    if (outX) *outX = dest.x;
+    if (outY) *outY = dest.y;
+    if (outW) *outW = dest.width;
+    if (outH) *outH = dest.height;
 }
 
 // HORIZONTALSCROLL PART VERBS (PUBLIC)
@@ -916,21 +937,27 @@ void ScrollPanel_horizontalScroll_getRange(const ScrollPanel *sp, float *outMin,
 ;;GETTER
 void ScrollPanel_horizontalScroll_getThumbRect(const ScrollPanel *sp,
                                                float *outX, float *outY, float *outW, float *outH) {
-    float viewW = 0.0f, contentW = 0.0f;
+    Rectangle view;
+    view.x = 0.0f;
+    view.y = 0.0f;
+    view.width = 0.0f;
+    view.height = 0.0f;
     if (sp) {
         const Panel *b = &(*sp).base;
-        viewW = Component_getWidth(&(*b).component);
-        if ((*sp).contentPanel)
-            contentW = Component_getWidth(&(*(*sp).contentPanel).component);
+        view.width = Component_getWidth(&(*b).component);
+        view.height = Component_getHeight(&(*b).component);
     }
+    Rectangle dest;
+    dest.x = 0.0f;
+    dest.y = 0.0f;
+    dest.width = 0.0f;
+    dest.height = 0.0f;
     if (sp && (*sp).hBar)
-        ScrollBar_thumbRect((*sp).hBar, viewW, contentW, outX, outY, outW, outH);
-    else {
-        if (outX) *outX = 0.0f;
-        if (outY) *outY = 0.0f;
-        if (outW) *outW = 0.0f;
-        if (outH) *outH = 0.0f;
-    }
+        ScrollBar_thumbRect((*sp).hBar, &view, &dest);
+    if (outX) *outX = dest.x;
+    if (outY) *outY = dest.y;
+    if (outW) *outW = dest.width;
+    if (outH) *outH = dest.height;
 }
 
 // CONTENTPANEL PART VERBS (PUBLIC)
@@ -998,9 +1025,19 @@ bool ScrollPanel_isContentAutoHeight(const ScrollPanel *sp) {
 // Generic subtree paint: each node paints its own stages into its
 // accumulated rect, then children accumulate further. Locations chain from
 // top-left anchors (the GraphicsComponent default), so accumulation is
-// exact with no abs cascade needed. skip (nullable) excludes one subtree.
-static void paintSubtree(Panel *node, float dx, float dy, const Panel *skip) {
-    if (!node || node == skip)
+// exact with no abs cascade needed. A node in skips is excluded (and its
+// whole subtree) — the page paints nested ScrollPanels itself.
+static bool nodeSkipped(const Panel *node, const Panel *const *skips, size_t skipCount) {
+    for (size_t i = 0; i < skipCount; i++) {
+        if (skips[i] == node)
+            return true;
+    }
+    return false;
+}
+
+static void paintSubtree(Panel *node, float dx, float dy,
+                         const Panel *const *skips, size_t skipCount) {
+    if (!node || nodeSkipped(node, skips, skipCount))
         return;
     if (!Panel_isVisible(node))
         return;
@@ -1019,41 +1056,22 @@ static void paintSubtree(Panel *node, float dx, float dy, const Panel *skip) {
     Panel_paintParts(node, &r);
     size_t n = Panel_childCount(node);
     for (size_t i = 0; i < n; i++)
-        paintSubtree(Panel_getChild(node, i), x, y, skip);
+        paintSubtree(Panel_getChild(node, i), x, y, skips, skipCount);
 }
 
-static bool paintBars(ScrollPanel *sp, const Rectangle *rect) {
-    bool drew = false;
-    float rx = (*rect).x;
-    float ry = (*rect).y;
-    float rw = (*rect).width;
-    float rh = (*rect).height;
-    ScrollBar *hBar = (*sp).hBar;
-    if (hBar) {
-        float t = ScrollBar_getThickness(hBar);
-        float inset = ScrollBar_getInset(hBar);
-        Rectangle track;
-        track.x = rx + inset;
-        track.y = ry + rh - inset - t;
-        track.width = rw - 2.0f * inset;
-        track.height = t;
-        drew = ScrollBar_paint(hBar, &track) || drew;
-    }
-    ScrollBar *vBar = (*sp).vBar;
-    if (vBar) {
-        float t = ScrollBar_getThickness(vBar);
-        float inset = ScrollBar_getInset(vBar);
-        Rectangle track;
-        track.x = rx + rw - inset - t;
-        track.y = ry + inset;
-        track.width = t;
-        track.height = rh - 2.0f * inset;
-        drew = ScrollBar_paint(vBar, &track) || drew;
-    }
-    return drew;
+// The R4 -> R3 handoff: map the panel's two bars into the R3 chrome holder
+// (which docks + paints both bars). The panel background stays R4
+// (Panel_paintParts); the holder's own fill is left off here.
+static void fillPanelGraphics(const ScrollPanel *sp, ScrollPanelGraphics *g) {
+    ScrollPanelGraphics_init(g);
+    if ((*sp).hBar)
+        ScrollBar_fillGraphics((*sp).hBar, &(*g).hBar);
+    if ((*sp).vBar)
+        ScrollBar_fillGraphics((*sp).vBar, &(*g).vBar);
 }
 
-bool ScrollPanel_paint(ScrollPanel *sp, const Rectangle *rect, const Panel *skip) {
+bool ScrollPanel_paintSkips(ScrollPanel *sp, const Rectangle *rect,
+                            const Panel *const *skips, size_t skipCount) {
     if (!sp || !rect)
         return false;
     if ((*rect).width <= 0.0f || (*rect).height <= 0.0f)
@@ -1071,14 +1089,22 @@ bool ScrollPanel_paint(ScrollPanel *sp, const Rectangle *rect, const Panel *skip
         Graphics_clip(&clip);
         Panel *content = (*sp).contentPanel;
         if (content)
-            paintSubtree(content, (*rect).x, (*rect).y, skip);
+            paintSubtree(content, (*rect).x, (*rect).y, skips, skipCount);
         if (haveClip)
             Graphics_clip(&saved);
         else
             Graphics_clip(nullptr);
     }
-    drew = paintBars(sp, rect) || drew;
+    ScrollPanelGraphics pg;
+    fillPanelGraphics(sp, &pg);
+    drew = ScrollPanelGraphics_paint(&pg, rect) || drew;
     return drew;
+}
+
+bool ScrollPanel_paint(ScrollPanel *sp, const Rectangle *rect, const Panel *skip) {
+    if (skip)
+        return ScrollPanel_paintSkips(sp, rect, &skip, 1u);
+    return ScrollPanel_paintSkips(sp, rect, nullptr, 0u);
 }
 
 // TOSTRING (PUBLIC)
