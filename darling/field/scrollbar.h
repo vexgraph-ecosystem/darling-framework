@@ -37,6 +37,13 @@ typedef struct ScrollBar {
     float thumbMin;            // Minimum thumb extent in px
     float thickness;           // Cross-axis extent (bar width / bar height)
     float inset;               // Edge inset from the docked corner
+    float shortLimit;          // Minimum thumb share of the track (0..1)
+    bool hideWhenUnused;       // True = overlay bar: hidden until scrolled
+    float opacity;             // Bar opacity (0..1, pushed to the base)
+    uint64_t idleTimeoutMs;    // Hide delay after the last scroll
+    uint64_t lastScrollMs;     // Clock of the last noted scroll
+    bool hasScrolled;          // True once any scroll was noted
+    bool autoHidden;           // True = auto-hide currently hiding the bar
 } ScrollBar;
 
 // Constructors:
@@ -60,11 +67,20 @@ void ScrollBar_handlePointer(ScrollBar *s, int kind, float localX, float localY)
 void ScrollBar_thumbRect(const ScrollBar *s, float viewportLen, float contentLen,
                          float *outX, float *outY, float *outW, float *outH);
 
+// Activity (overlay auto-hide driven by an explicit caller clock — no
+// threads; note on scroll, tick on idle; dest-last outputs stay last).
+void ScrollBar_noteScroll(ScrollBar *s, uint64_t nowMs);
+bool ScrollBar_tick(ScrollBar *s, uint64_t nowMs, bool scrollable);
+
 // Setters.
 void ScrollBar_setMode(ScrollBar *s, int mode);
 void ScrollBar_setOrientation(ScrollBar *s, int orientation);
 void ScrollBar_setValue(ScrollBar *s, float value);
 void ScrollBar_setThumbMin(ScrollBar *s, float px);
+void ScrollBar_setShortLengthLimit(ScrollBar *s, float percent);
+void ScrollBar_setHideWhenUnused(ScrollBar *s, bool hide);
+void ScrollBar_setOpacity(ScrollBar *s, float opacity);
+void ScrollBar_setIdleTimeoutMs(ScrollBar *s, uint64_t timeoutMs);
 void ScrollBar_setThickness(ScrollBar *s, float px);
 void ScrollBar_setInset(ScrollBar *s, float px);
 
@@ -73,6 +89,12 @@ int ScrollBar_getMode(const ScrollBar *s);
 int ScrollBar_getOrientation(const ScrollBar *s);
 float ScrollBar_getValue(const ScrollBar *s);
 float ScrollBar_getThumbMin(const ScrollBar *s);
+float ScrollBar_getShortLengthLimit(const ScrollBar *s);
+bool ScrollBar_isHideWhenUnused(const ScrollBar *s);
+float ScrollBar_getOpacity(const ScrollBar *s);
+uint64_t ScrollBar_getIdleTimeoutMs(const ScrollBar *s);
+bool ScrollBar_isAutoHidden(const ScrollBar *s);
+bool ScrollBar_isEffectiveVisible(const ScrollBar *s);
 float ScrollBar_getThickness(const ScrollBar *s);
 float ScrollBar_getInset(const ScrollBar *s);
 void ScrollBar_getRange(const ScrollBar *s, float *outMin, float *outMax);

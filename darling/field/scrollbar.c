@@ -79,6 +79,8 @@
  *   - ScrollBar_setRange(s, min, max)
  *   - ScrollBar_handlePointer(s, kind, localX, localY)
  *   - ScrollBar_thumbRect(s, viewportLen, contentLen, outX, outY, outW, outH)
+ *   - ScrollBar_noteScroll(s, nowMs)
+ *   - ScrollBar_tick(s, nowMs, scrollable)
  *
  * Private Core Functions: (.c static)
  *   - pinValue / pin01 / gestureDelta / pointLerp / trackLen
@@ -88,6 +90,10 @@
  *   - ScrollBar_setOrientation(s, orientation)
  *   - ScrollBar_setValue(s, value)
  *   - ScrollBar_setThumbMin(s, px)
+ *   - ScrollBar_setShortLengthLimit(s, percent)
+ *   - ScrollBar_setHideWhenUnused(s, hide)
+ *   - ScrollBar_setOpacity(s, opacity)
+ *   - ScrollBar_setIdleTimeoutMs(s, timeoutMs)
  *   - ScrollBar_setThickness(s, px)
  *   - ScrollBar_setInset(s, px)
  *
@@ -99,6 +105,12 @@
  *   - ScrollBar_getOrientation(s)
  *   - ScrollBar_getValue(s)
  *   - ScrollBar_getThumbMin(s)
+ *   - ScrollBar_getShortLengthLimit(s)
+ *   - ScrollBar_isHideWhenUnused(s)
+ *   - ScrollBar_getOpacity(s)
+ *   - ScrollBar_getIdleTimeoutMs(s)
+ *   - ScrollBar_isAutoHidden(s)
+ *   - ScrollBar_isEffectiveVisible(s)
  *   - ScrollBar_getThickness(s)
  *   - ScrollBar_getInset(s)
  *   - ScrollBar_getRange(s, outMin, outMax)
@@ -133,6 +145,14 @@ ScrollBar *ScrollBar_0(void) {
     (*s).thumbMin = 24.0f;
     (*s).thickness = 12.0f;
     (*s).inset = 2.0f;
+    (*s).shortLimit = 0.0f;
+    (*s).hideWhenUnused = false;
+    (*s).opacity = 1.0f;
+    (*s).idleTimeoutMs = 1200u;
+    (*s).lastScrollMs = 0u;
+    (*s).hasScrolled = false;
+    (*s).autoHidden = false;
+    GraphicsComponent_setOpacity(&(*base).component, 1.0f);
     return s;
 }
 
@@ -247,10 +267,40 @@ void ScrollBar_handlePointer(ScrollBar *s, int kind, float localX, float localY)
     ScrollBar_clickAt(s, len > 0.0f ? pos / len : 0.0f);
 }
 
+void ScrollBar_noteScroll(ScrollBar *s, uint64_t nowMs) {
+    if (!s)
+        return;
+    (*s).hasScrolled = true;
+    (*s).lastScrollMs = nowMs;
+    (*s).autoHidden = false;
+    Panel *base = &(*s).base;
+    Panel_setVisible(base, true);
+}
+
+bool ScrollBar_tick(ScrollBar *s, uint64_t nowMs, bool scrollable) {
+    if (!s)
+        return false;
+    if (!(*s).hideWhenUnused) {
+        (*s).autoHidden = false;
+        return true;
+    }
+    bool hide = false;
+    if (!scrollable)
+        hide = true;
+    else if (!(*s).hasScrolled)
+        hide = true;
+    else if (nowMs >= (*s).lastScrollMs && nowMs - (*s).lastScrollMs >= (*s).idleTimeoutMs)
+        hide = true;
+    (*s).autoHidden = hide;
+    Panel *base = &(*s).base;
+    Panel_setVisible(base, !hide);
+    return !hide;
+}
+
 void ScrollBar_thumbRect(const ScrollBar *s, float viewportLen, float contentLen,
                          float *outX, float *outY, float *outW, float *outH) {
     float tx = 0.0f, ty = 0.0f, tw = 0.0f, th = 0.0f;
-    float lo = 0.0f, hi = 1.0f, value = 0.0f, thumbMin = 0.0f;
+    float lo = 0.0f, hi = 1.0f, value = 0.0f, thumbMin = 0.0f, shortLimit = 0.0f;
     bool horizontal = false;
     if (s) {
         GraphicsComponent_getAbsRect(&(*s).track, &tx, &ty, &tw, &th);
@@ -258,6 +308,7 @@ void ScrollBar_thumbRect(const ScrollBar *s, float viewportLen, float contentLen
         hi = (*s).max;
         value = (*s).value;
         thumbMin = (*s).thumbMin;
+        shortLimit = (*s).shortLimit;
         horizontal = (*s).orientation == SCROLL_BAR_HORIZONTAL;
     }
     if (lo > hi) {
@@ -271,9 +322,11 @@ void ScrollBar_thumbRect(const ScrollBar *s, float viewportLen, float contentLen
     float ratio = contentLen > 0.0f ? viewportLen / contentLen : 1.0f;
     ratio = pin01(ratio);
     if (horizontal) {
+        float floor = shortLimit * tw;
+        float minLen = thumbMin > floor ? thumbMin : floor;
         float thumbW = ratio * tw;
-        if (thumbW < thumbMin)
-            thumbW = thumbMin;
+        if (thumbW < minLen)
+            thumbW = minLen;
         if (thumbW > tw)
             thumbW = tw;
         float thumbX = tx + frac * (tw - thumbW);
@@ -282,9 +335,11 @@ void ScrollBar_thumbRect(const ScrollBar *s, float viewportLen, float contentLen
         if (outW) *outW = thumbW;
         if (outH) *outH = th;
     } else {
+        float floor = shortLimit * th;
+        float minLen = thumbMin > floor ? thumbMin : floor;
         float thumbH = ratio * th;
-        if (thumbH < thumbMin)
-            thumbH = thumbMin;
+        if (thumbH < minLen)
+            thumbH = minLen;
         if (thumbH > th)
             thumbH = th;
         float thumbY = ty + frac * (th - thumbH);
@@ -339,6 +394,53 @@ void ScrollBar_setThumbMin(ScrollBar *s, float px) {
 }
 
 ;;SETTER
+void ScrollBar_setShortLengthLimit(ScrollBar *s, float percent) {
+    if (!s)
+        return;
+    if (percent < 0.0f)
+        percent = 0.0f;
+    if (percent > 1.0f)
+        percent = 1.0f;
+    (*s).shortLimit = percent;
+}
+
+;;SETTER
+void ScrollBar_setHideWhenUnused(ScrollBar *s, bool hide) {
+    if (!s)
+        return;
+    (*s).hideWhenUnused = hide;
+    if (hide) {
+        (*s).autoHidden = true;
+        Panel *base = &(*s).base;
+        Panel_setVisible(base, false);
+    } else {
+        (*s).autoHidden = false;
+        Panel *base = &(*s).base;
+        Panel_setVisible(base, true);
+    }
+}
+
+;;SETTER
+void ScrollBar_setOpacity(ScrollBar *s, float opacity) {
+    if (!s)
+        return;
+    if (opacity < 0.0f)
+        opacity = 0.0f;
+    if (opacity > 1.0f)
+        opacity = 1.0f;
+    (*s).opacity = opacity;
+    Panel *base = &(*s).base;
+    GraphicsComponent_setOpacity(&(*base).component, opacity);
+}
+
+;;SETTER
+void ScrollBar_setIdleTimeoutMs(ScrollBar *s, uint64_t timeoutMs) {
+    if (!s)
+        return;
+    (*s).idleTimeoutMs = timeoutMs;
+}
+
+;;SETTER
 void ScrollBar_setThickness(ScrollBar *s, float px) {
     if (!s)
         return;
@@ -379,6 +481,39 @@ float ScrollBar_getThumbMin(const ScrollBar *s) {
 }
 
 ;;GETTER
+float ScrollBar_getShortLengthLimit(const ScrollBar *s) {
+    return s ? (*s).shortLimit : 0.0f;
+}
+
+;;GETTER
+bool ScrollBar_isHideWhenUnused(const ScrollBar *s) {
+    return s ? (*s).hideWhenUnused : false;
+}
+
+;;GETTER
+float ScrollBar_getOpacity(const ScrollBar *s) {
+    return s ? (*s).opacity : 0.0f;
+}
+
+;;GETTER
+uint64_t ScrollBar_getIdleTimeoutMs(const ScrollBar *s) {
+    return s ? (*s).idleTimeoutMs : 0u;
+}
+
+;;GETTER
+bool ScrollBar_isAutoHidden(const ScrollBar *s) {
+    return s ? (*s).autoHidden : false;
+}
+
+;;GETTER
+bool ScrollBar_isEffectiveVisible(const ScrollBar *s) {
+    if (!s)
+        return false;
+    const Panel *base = &(*s).base;
+    return Panel_isVisible(base) && !(*s).autoHidden;
+}
+
+;;GETTER
 float ScrollBar_getThickness(const ScrollBar *s) {
     return s ? (*s).thickness : 0.0f;
 }
@@ -412,11 +547,13 @@ void ScrollBar_toString(const ScrollBar *self, char *dest, size_t cap, bool *out
         if (outTruncated) *outTruncated = false;
         return;
     }
-    Str_printf(&s, "ScrollBar[%s %s value=%.2f [%.2f, %.2f] thickness=%.1f inset=%.1f]",
+    Str_printf(&s, "ScrollBar[%s %s value=%.2f [%.2f, %.2f] thickness=%.1f inset=%.1f short=%.2f %s opacity=%.2f]",
                (*self).orientation == SCROLL_BAR_HORIZONTAL ? "horizontal" : "vertical",
                (*self).mode == SCROLL_BAR_POINT ? "point" : "gesture",
                (*self).value, (*self).min, (*self).max,
-               (*self).thickness, (*self).inset);
+               (*self).thickness, (*self).inset, (*self).shortLimit,
+               (*self).hideWhenUnused ? ((*self).autoHidden ? "auto-hidden" : "auto-shown") : "always",
+               (*self).opacity);
     if (outTruncated) *outTruncated = Str_isTruncated(&s);
 }
 
@@ -435,7 +572,8 @@ void ScrollBar_toStringStruct(const ScrollBar *self, char *dest, size_t cap, boo
     Str_put(&s, "ScrollBar { ");
     Str_printf(&s, "mode: %d, orientation: %d, ", (*self).mode, (*self).orientation);
     Str_printf(&s, "min: %.2f, max: %.2f, value: %.2f, ", (*self).min, (*self).max, (*self).value);
-    Str_printf(&s, "thumbMin: %.1f, thickness: %.1f, inset: %.1f, ", (*self).thumbMin, (*self).thickness, (*self).inset);
+    Str_printf(&s, "thumbMin: %.1f, shortLimit: %.2f, thickness: %.1f, inset: %.1f, ", (*self).thumbMin, (*self).shortLimit, (*self).thickness, (*self).inset);
+    Str_printf(&s, "hideWhenUnused: %s, opacity: %.2f, idleTimeoutMs: %llu, autoHidden: %s, ", (*self).hideWhenUnused ? "true" : "false", (*self).opacity, (unsigned long long) (*self).idleTimeoutMs, (*self).autoHidden ? "true" : "false");
     Str_put(&s, "track: ");
     Str_put(&s, track);
     Str_put(&s, " }");

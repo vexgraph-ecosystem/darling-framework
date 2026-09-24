@@ -228,6 +228,17 @@ if(NOT TARGET layered_container_test AND EXISTS "${DARLING_LAYERED_TEST_DIR}/lay
     target_compile_options(layered_container_test PRIVATE -Wall -Wextra -Werror)
 endif()
 
+# ScrollPanel: repo-local headless proof (standalone-safe: never depends
+# on umbrella test paths).
+set(DARLING_SCROLLPANEL_TEST_DIR "${CMAKE_CURRENT_SOURCE_DIR}/tests")
+if(NOT TARGET scroll_panel_test AND EXISTS "${DARLING_SCROLLPANEL_TEST_DIR}/scroll_panel_test.c")
+    add_executable(scroll_panel_test
+        "${DARLING_SCROLLPANEL_TEST_DIR}/scroll_panel_test.c"
+    )
+    target_link_libraries(scroll_panel_test PRIVATE darling graphvex vexspoke)
+    target_compile_options(scroll_panel_test PRIVATE -Wall -Wextra -Werror)
+endif()
+
 if(NOT TARGET checkbox_test AND EXISTS "${DARLING_TEST_DIR}/checkbox_test.c")
     add_executable(checkbox_test
         ${DARLING_TEST_DIR}/checkbox_test.c

@@ -53,8 +53,9 @@
  *   float offsetX, offsetY;     // scroll offsets (single source of truth)
  *   bool contentAutoW;          // AUTO content hugs the viewport width
  *   bool contentAutoH;          // AUTO content hugs the viewport height
- *   bool hVisible;              // horizontal bar visibility
- *   bool vVisible;              // vertical bar visibility
+ *   bool hVisible;              // horizontal bar master visibility
+ *   bool vVisible;              // vertical bar master visibility
+ *   uint64_t lastTickMs;        // caller clock for overlay auto-hide
  *
  * PRIVATE HELPERS:
  * ----------------------------------------------------------------------------
@@ -63,7 +64,8 @@
  *   raiseBars(sp)                        : bars last (front) after structure
  *   resolveContentAuto(sp)               : AUTO content hugs the viewport
  *   dockBar(sp, bar, horizontal)         : anchor/dock one bar + its track
- *   applyBarVisible(sp)                  : push visibility into the bar bases
+ *   applyBarVisible(sp)                  : master && !autoHidden into bar bases
+ *   noteBarsScrolled(sp, nowMs)          : show overlay bars on user scroll
  *
  * FUNCTION REGISTRY:
  * ----------------------------------------------------------------------------
@@ -76,6 +78,10 @@
  * Public Core Functions: (.h)
  *   - ScrollPanel_setContent(sp, content)
  *   - ScrollPanel_setOffset(sp, x, y)
+ *   - ScrollPanel_setOffsetAt(sp, x, y, nowMs)
+ *   - ScrollPanel_scrollBy(sp, dx, dy)
+ *   - ScrollPanel_scrollByAt(sp, dx, dy, nowMs)
+ *   - ScrollPanel_tick(sp, nowMs)
  *   - ScrollPanel_setViewportSize(sp, w, h)
  *   - ScrollPanel_setContentSize(sp, w, h)
  *   - ScrollPanel_layoutBars(sp)
@@ -84,15 +90,21 @@
  *
  * Private Core Functions: (.c static)
  *   - pinOffset / offsetBounds / raiseBars / resolveContentAuto / dockBar /
- *     applyBarVisible
+ *     applyBarVisible / noteBarsScrolled
  *
  * Public verticalScroll Part Verbs: (.h)
  *   - ScrollPanel_verticalScroll_setThickness/setInset/setVisible/setRange/setValue
- *   - ScrollPanel_verticalScroll_getValue/getThickness/getInset/getRange/getThumbRect
+ *   - ScrollPanel_verticalScroll_setShortLengthLimit/setHideWhenUnused/setOpacity/setIdleTimeoutMs
+ *   - ScrollPanel_verticalScroll_getValue/getThickness/getInset/getShortLengthLimit
+ *   - ScrollPanel_verticalScroll_isHideWhenUnused/getOpacity/getIdleTimeoutMs/isEffectiveVisible
+ *   - ScrollPanel_verticalScroll_getRange/getThumbRect
  *
  * Public horizontalScroll Part Verbs: (.h)
  *   - ScrollPanel_horizontalScroll_setThickness/setInset/setVisible/setRange/setValue
- *   - ScrollPanel_horizontalScroll_getValue/getThickness/getInset/getRange/getThumbRect
+ *   - ScrollPanel_horizontalScroll_setShortLengthLimit/setHideWhenUnused/setOpacity/setIdleTimeoutMs
+ *   - ScrollPanel_horizontalScroll_getValue/getThickness/getInset/getShortLengthLimit
+ *   - ScrollPanel_horizontalScroll_isHideWhenUnused/getOpacity/getIdleTimeoutMs/isEffectiveVisible
+ *   - ScrollPanel_horizontalScroll_getRange/getThumbRect
  *
  * Public contentPanel Part Verbs: (.h)
  *   - ScrollPanel_contentPanel_setSize/getSize/setVisible
@@ -144,6 +156,7 @@ ScrollPanel *ScrollPanel_2(float viewW, float viewH) {
     (*sp).contentAutoH = false;
     (*sp).hVisible = true;
     (*sp).vVisible = true;
+    (*sp).lastTickMs = 0u;
     Panel *self = &(*sp).base;
     Component *c = &(*self).component;
     GraphicsComponent_setSize(c, viewW, viewH);
@@ -282,13 +295,27 @@ static void applyBarVisible(ScrollPanel *sp) {
     if (!sp)
         return;
     if ((*sp).hBar) {
-        Panel *thumb = &(*(*sp).hBar).base;
-        GraphicsComponent_setVisible(&(*thumb).component, (*sp).hVisible);
+        ScrollBar *bar = (*sp).hBar;
+        Panel *thumb = &(*bar).base;
+        bool shown = (*sp).hVisible && !(*bar).autoHidden;
+        GraphicsComponent_setVisible(&(*thumb).component, shown);
     }
     if ((*sp).vBar) {
-        Panel *thumb = &(*(*sp).vBar).base;
-        GraphicsComponent_setVisible(&(*thumb).component, (*sp).vVisible);
+        ScrollBar *bar = (*sp).vBar;
+        Panel *thumb = &(*bar).base;
+        bool shown = (*sp).vVisible && !(*bar).autoHidden;
+        GraphicsComponent_setVisible(&(*thumb).component, shown);
     }
+}
+
+static void noteBarsScrolled(ScrollPanel *sp, uint64_t nowMs) {
+    if (!sp)
+        return;
+    if ((*sp).hBar)
+        ScrollBar_noteScroll((*sp).hBar, nowMs);
+    if ((*sp).vBar)
+        ScrollBar_noteScroll((*sp).vBar, nowMs);
+    applyBarVisible(sp);
 }
 
 void ScrollPanel_setContent(ScrollPanel *sp, Panel *content) {
@@ -314,11 +341,45 @@ void ScrollPanel_setContent(ScrollPanel *sp, Panel *content) {
 void ScrollPanel_setOffset(ScrollPanel *sp, float x, float y) {
     if (!sp)
         return;
+    ScrollPanel_setOffsetAt(sp, x, y, (*sp).lastTickMs);
+}
+
+void ScrollPanel_setOffsetAt(ScrollPanel *sp, float x, float y, uint64_t nowMs) {
+    if (!sp)
+        return;
     float loX = 0.0f, hiX = 0.0f, loY = 0.0f, hiY = 0.0f;
     offsetBounds(sp, &loX, &hiX, &loY, &hiY);
     (*sp).offsetX = pinOffset(x, loX, hiX);
     (*sp).offsetY = pinOffset(y, loY, hiY);
     ScrollPanel_syncToBars(sp);
+    noteBarsScrolled(sp, nowMs);
+}
+
+void ScrollPanel_scrollBy(ScrollPanel *sp, float dx, float dy) {
+    if (!sp)
+        return;
+    ScrollPanel_scrollByAt(sp, dx, dy, (*sp).lastTickMs);
+}
+
+void ScrollPanel_scrollByAt(ScrollPanel *sp, float dx, float dy, uint64_t nowMs) {
+    if (!sp)
+        return;
+    ScrollPanel_setOffsetAt(sp, (*sp).offsetX + dx, (*sp).offsetY + dy, nowMs);
+}
+
+void ScrollPanel_tick(ScrollPanel *sp, uint64_t nowMs) {
+    if (!sp)
+        return;
+    (*sp).lastTickMs = nowMs;
+    float loX = 0.0f, hiX = 0.0f, loY = 0.0f, hiY = 0.0f;
+    offsetBounds(sp, &loX, &hiX, &loY, &hiY);
+    bool scrollH = hiX > 0.0f;
+    bool scrollV = hiY > 0.0f;
+    if ((*sp).hBar)
+        ScrollBar_tick((*sp).hBar, nowMs, scrollH);
+    if ((*sp).vBar)
+        ScrollBar_tick((*sp).vBar, nowMs, scrollV);
+    applyBarVisible(sp);
 }
 
 void ScrollPanel_setViewportSize(ScrollPanel *sp, float w, float h) {
@@ -403,6 +464,7 @@ void ScrollPanel_syncFromBars(ScrollPanel *sp) {
         else
             (*sp).offsetY = los[i] + t * extent;
     }
+    noteBarsScrolled(sp, (*sp).lastTickMs);
 }
 
 // VERTICALSCROLL PART VERBS (PUBLIC)
@@ -460,6 +522,64 @@ float ScrollPanel_verticalScroll_getThickness(const ScrollPanel *sp) {
 ;;GETTER
 float ScrollPanel_verticalScroll_getInset(const ScrollPanel *sp) {
     return (sp && (*sp).vBar) ? ScrollBar_getInset((*sp).vBar) : 0.0f;
+}
+
+;;SETTER
+void ScrollPanel_verticalScroll_setShortLengthLimit(ScrollPanel *sp, float percent) {
+    if (!sp || !(*sp).vBar)
+        return;
+    ScrollBar_setShortLengthLimit((*sp).vBar, percent);
+}
+
+;;SETTER
+void ScrollPanel_verticalScroll_setHideWhenUnused(ScrollPanel *sp, bool hide) {
+    if (!sp || !(*sp).vBar)
+        return;
+    ScrollBar_setHideWhenUnused((*sp).vBar, hide);
+    applyBarVisible(sp);
+}
+
+;;SETTER
+void ScrollPanel_verticalScroll_setOpacity(ScrollPanel *sp, float opacity) {
+    if (!sp || !(*sp).vBar)
+        return;
+    ScrollBar_setOpacity((*sp).vBar, opacity);
+}
+
+;;SETTER
+void ScrollPanel_verticalScroll_setIdleTimeoutMs(ScrollPanel *sp, uint64_t timeoutMs) {
+    if (!sp || !(*sp).vBar)
+        return;
+    ScrollBar_setIdleTimeoutMs((*sp).vBar, timeoutMs);
+}
+
+;;GETTER
+float ScrollPanel_verticalScroll_getShortLengthLimit(const ScrollPanel *sp) {
+    return (sp && (*sp).vBar) ? ScrollBar_getShortLengthLimit((*sp).vBar) : 0.0f;
+}
+
+;;GETTER
+bool ScrollPanel_verticalScroll_isHideWhenUnused(const ScrollPanel *sp) {
+    return (sp && (*sp).vBar) ? ScrollBar_isHideWhenUnused((*sp).vBar) : false;
+}
+
+;;GETTER
+float ScrollPanel_verticalScroll_getOpacity(const ScrollPanel *sp) {
+    return (sp && (*sp).vBar) ? ScrollBar_getOpacity((*sp).vBar) : 0.0f;
+}
+
+;;GETTER
+uint64_t ScrollPanel_verticalScroll_getIdleTimeoutMs(const ScrollPanel *sp) {
+    return (sp && (*sp).vBar) ? ScrollBar_getIdleTimeoutMs((*sp).vBar) : 0u;
+}
+
+;;GETTER
+bool ScrollPanel_verticalScroll_isEffectiveVisible(const ScrollPanel *sp) {
+    if (!sp || !(*sp).vBar)
+        return false;
+    if (!(*sp).vVisible)
+        return false;
+    return ScrollBar_isEffectiveVisible((*sp).vBar);
 }
 
 ;;GETTER
@@ -547,6 +667,64 @@ float ScrollPanel_horizontalScroll_getThickness(const ScrollPanel *sp) {
 ;;GETTER
 float ScrollPanel_horizontalScroll_getInset(const ScrollPanel *sp) {
     return (sp && (*sp).hBar) ? ScrollBar_getInset((*sp).hBar) : 0.0f;
+}
+
+;;SETTER
+void ScrollPanel_horizontalScroll_setShortLengthLimit(ScrollPanel *sp, float percent) {
+    if (!sp || !(*sp).hBar)
+        return;
+    ScrollBar_setShortLengthLimit((*sp).hBar, percent);
+}
+
+;;SETTER
+void ScrollPanel_horizontalScroll_setHideWhenUnused(ScrollPanel *sp, bool hide) {
+    if (!sp || !(*sp).hBar)
+        return;
+    ScrollBar_setHideWhenUnused((*sp).hBar, hide);
+    applyBarVisible(sp);
+}
+
+;;SETTER
+void ScrollPanel_horizontalScroll_setOpacity(ScrollPanel *sp, float opacity) {
+    if (!sp || !(*sp).hBar)
+        return;
+    ScrollBar_setOpacity((*sp).hBar, opacity);
+}
+
+;;SETTER
+void ScrollPanel_horizontalScroll_setIdleTimeoutMs(ScrollPanel *sp, uint64_t timeoutMs) {
+    if (!sp || !(*sp).hBar)
+        return;
+    ScrollBar_setIdleTimeoutMs((*sp).hBar, timeoutMs);
+}
+
+;;GETTER
+float ScrollPanel_horizontalScroll_getShortLengthLimit(const ScrollPanel *sp) {
+    return (sp && (*sp).hBar) ? ScrollBar_getShortLengthLimit((*sp).hBar) : 0.0f;
+}
+
+;;GETTER
+bool ScrollPanel_horizontalScroll_isHideWhenUnused(const ScrollPanel *sp) {
+    return (sp && (*sp).hBar) ? ScrollBar_isHideWhenUnused((*sp).hBar) : false;
+}
+
+;;GETTER
+float ScrollPanel_horizontalScroll_getOpacity(const ScrollPanel *sp) {
+    return (sp && (*sp).hBar) ? ScrollBar_getOpacity((*sp).hBar) : 0.0f;
+}
+
+;;GETTER
+uint64_t ScrollPanel_horizontalScroll_getIdleTimeoutMs(const ScrollPanel *sp) {
+    return (sp && (*sp).hBar) ? ScrollBar_getIdleTimeoutMs((*sp).hBar) : 0u;
+}
+
+;;GETTER
+bool ScrollPanel_horizontalScroll_isEffectiveVisible(const ScrollPanel *sp) {
+    if (!sp || !(*sp).hBar)
+        return false;
+    if (!(*sp).hVisible)
+        return false;
+    return ScrollBar_isEffectiveVisible((*sp).hBar);
 }
 
 ;;GETTER

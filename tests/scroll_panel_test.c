@@ -1,0 +1,168 @@
+// tests/scroll_panel_test.c — headless proof for ScrollPanel + ScrollBar
+// overlay behaviors.
+//
+// MODULE harness (procedural entry, no owned struct): all layers attached
+// (content + h/v bars, bars front), scroll offsets clamp to bounds,
+// thumb short-length floor, per-bar hide-when-unused + opacity + idle
+// timeout independence, tick-driven auto-hide, and string forms. Pure
+// Component math with an explicit caller clock — no window, no GPU,
+// no threads.
+
+#include "darling/component.h"
+#include "darling/field/scrollbar.h"
+#include "darling/panel/panel.h"
+#include "darling/panel/scroll_panel.h"
+#include "lang/graphics_component.h"
+
+#include <math.h>
+#include <stdbool.h>
+#include <stddef.h>
+#include <stdint.h>
+#include <stdio.h>
+
+static int failures;
+
+static void check(bool cond, const char *name) {
+    if (!cond) {
+        failures++;
+        printf("FAIL %s\n", name);
+    } else {
+        printf("ok %s\n", name);
+    }
+}
+
+static bool near(float a, float b) {
+    float d = a - b;
+    if (d < 0.0f)
+        d = -d;
+    return d < 0.05f;
+}
+
+int main(void) {
+    // section 1 nullptr guards (cold-strict: never crash, fail closed)
+    ScrollPanel_setContent(nullptr, nullptr);
+    ScrollPanel_setOffset(nullptr, 0.0f, 0.0f);
+    ScrollPanel_setOffsetAt(nullptr, 0.0f, 0.0f, 0u);
+    ScrollPanel_scrollBy(nullptr, 1.0f, 1.0f);
+    ScrollPanel_tick(nullptr, 0u);
+    ScrollPanel_layoutBars(nullptr);
+    ScrollPanel_syncToBars(nullptr);
+    ScrollPanel_syncFromBars(nullptr);
+    float ox = -1.0f, oy = -1.0f;
+    ScrollPanel_getOffset(nullptr, &ox, &oy);
+    check(ox == 0.0f && oy == 0.0f, "null-offset");
+    check(ScrollPanel_getContentPanel(nullptr) == nullptr, "null-content");
+    check(!ScrollPanel_verticalScroll_isEffectiveVisible(nullptr), "null-v-visible");
+    check(!ScrollPanel_horizontalScroll_isEffectiveVisible(nullptr), "null-h-visible");
+    check(ScrollPanel_verticalScroll_getShortLengthLimit(nullptr) == 0.0f, "null-short");
+    check(ScrollPanel_verticalScroll_getOpacity(nullptr) == 0.0f, "null-opacity");
+
+    // section 2 all layers: viewport + content + h/v bars, bars front
+    ScrollPanel *sp = ScrollPanel_2(200.0f, 200.0f);
+    check(sp != nullptr, "construct");
+    Panel *content = Panel_0();
+    check(content != nullptr, "content-panel");
+    Panel_setSize(content, 200.0f, 600.0f);
+    ScrollPanel_setContent(sp, content);
+    check(ScrollPanel_getContentPanel(sp) == content, "content-attached");
+    Panel *self = &(*sp).base;
+    size_t n = Panel_childCount(self);
+    check(n == 3u, "all-layers");
+    Panel *last = Panel_getChild(self, n - 1u);
+    Panel *prev = Panel_getChild(self, n - 2u);
+    check(last != content && prev != content, "bars-front");
+
+    // section 3 scrolling clamps to content/viewport bounds
+    ScrollPanel_setOffsetAt(sp, 0.0f, 100.0f, 100u);
+    ScrollPanel_getOffset(sp, &ox, &oy);
+    check(near(ox, 0.0f) && near(oy, 100.0f), "offset-set");
+    ScrollPanel_setOffsetAt(sp, 0.0f, 9000.0f, 200u);
+    ScrollPanel_getOffset(sp, &ox, &oy);
+    check(near(oy, 400.0f), "offset-clamp-hi");
+    ScrollPanel_scrollByAt(sp, 0.0f, -1000.0f, 300u);
+    ScrollPanel_getOffset(sp, &ox, &oy);
+    check(near(oy, 0.0f), "offset-clamp-lo");
+    ScrollPanel_scrollByAt(sp, 0.0f, 150.0f, 400u);
+    ScrollPanel_getOffset(sp, &ox, &oy);
+    check(near(oy, 150.0f), "scroll-by");
+    check(near(ScrollPanel_verticalScroll_getValue(sp), 0.375f), "bar-sync");
+
+    // section 4 short-length floor keeps the thumb grippable
+    ScrollPanel_verticalScroll_setShortLengthLimit(sp, 0.0f);
+    check(ScrollPanel_verticalScroll_getShortLengthLimit(sp) == 0.0f, "short-zero");
+    float tx = 0.0f, ty = 0.0f, tw = 0.0f, th = 0.0f;
+    ScrollPanel_verticalScroll_getThumbRect(sp, &tx, &ty, &tw, &th);
+    float smallThumb = th;
+    ScrollBar_setThumbMin((*sp).vBar, 0.0f);
+    ScrollPanel_verticalScroll_getThumbRect(sp, &tx, &ty, &tw, &th);
+    smallThumb = th;
+    ScrollPanel_verticalScroll_setShortLengthLimit(sp, 0.25f);
+    check(ScrollPanel_verticalScroll_getShortLengthLimit(sp) == 0.25f, "short-set");
+    ScrollPanel_verticalScroll_getThumbRect(sp, &tx, &ty, &tw, &th);
+    float trackH = GraphicsComponent_getAbsH(&(*(*sp).vBar).track);
+    if (trackH <= 0.0f)
+        trackH = 200.0f;
+    check(th >= 0.25f * trackH - 1.0f && th >= smallThumb, "short-floor");
+    ScrollPanel_verticalScroll_setShortLengthLimit(sp, 5.0f);
+    check(ScrollPanel_verticalScroll_getShortLengthLimit(sp) == 1.0f, "short-clamp-hi");
+    ScrollPanel_verticalScroll_setShortLengthLimit(sp, -1.0f);
+    check(ScrollPanel_verticalScroll_getShortLengthLimit(sp) == 0.0f, "short-clamp-lo");
+    ScrollPanel_verticalScroll_setShortLengthLimit(sp, 0.0f);
+
+    // section 5 hide-when-unused: per-bar independence
+    ScrollPanel_verticalScroll_setHideWhenUnused(sp, true);
+    ScrollPanel_horizontalScroll_setHideWhenUnused(sp, false);
+    check(ScrollPanel_verticalScroll_isHideWhenUnused(sp), "v-autohide-on");
+    check(!ScrollPanel_horizontalScroll_isHideWhenUnused(sp), "h-autohide-off");
+    check(!ScrollPanel_verticalScroll_isEffectiveVisible(sp), "v-starts-hidden");
+    check(ScrollPanel_horizontalScroll_isEffectiveVisible(sp), "h-stays-shown");
+    ScrollPanel_setOffsetAt(sp, 0.0f, 50.0f, 1000u);
+    check(ScrollPanel_verticalScroll_isEffectiveVisible(sp), "v-shows-on-scroll");
+    ScrollPanel_tick(sp, 1000u + 500u);
+    check(ScrollPanel_verticalScroll_isEffectiveVisible(sp), "v-visible-before-timeout");
+    ScrollPanel_tick(sp, 1000u + 1200u);
+    check(!ScrollPanel_verticalScroll_isEffectiveVisible(sp), "v-hides-on-idle");
+    check(ScrollPanel_horizontalScroll_isEffectiveVisible(sp), "h-unaffected-by-idle");
+    ScrollPanel_verticalScroll_setHideWhenUnused(sp, false);
+    check(ScrollPanel_verticalScroll_isEffectiveVisible(sp), "v-restored");
+
+    // section 6 hide-when-unused with nothing to scroll stays hidden
+    Panel_setSize(content, 200.0f, 200.0f);
+    ScrollPanel_layoutBars(sp);
+    ScrollPanel_horizontalScroll_setHideWhenUnused(sp, true);
+    ScrollPanel_tick(sp, 5000u);
+    check(!ScrollPanel_horizontalScroll_isEffectiveVisible(sp), "h-hidden-when-unused");
+    check(ScrollPanel_verticalScroll_isEffectiveVisible(sp), "v-manual-kept");
+    Panel_setSize(content, 200.0f, 600.0f);
+    ScrollPanel_layoutBars(sp);
+    ScrollPanel_horizontalScroll_setHideWhenUnused(sp, false);
+    ScrollPanel_tick(sp, 5000u);
+
+    // section 7 opacity per bar
+    ScrollPanel_verticalScroll_setOpacity(sp, 0.5f);
+    ScrollPanel_horizontalScroll_setOpacity(sp, 0.25f);
+    check(near(ScrollPanel_verticalScroll_getOpacity(sp), 0.5f), "v-opacity");
+    check(near(ScrollPanel_horizontalScroll_getOpacity(sp), 0.25f), "h-opacity");
+    ScrollPanel_verticalScroll_setOpacity(sp, 2.0f);
+    check(near(ScrollPanel_verticalScroll_getOpacity(sp), 1.0f), "opacity-clamp-hi");
+    ScrollPanel_verticalScroll_setOpacity(sp, -1.0f);
+    check(near(ScrollPanel_verticalScroll_getOpacity(sp), 0.0f), "opacity-clamp-lo");
+    ScrollPanel_verticalScroll_setOpacity(sp, 1.0f);
+    ScrollPanel_horizontalScroll_setOpacity(sp, 1.0f);
+
+    // section 8 strings
+    char buf[512];
+    bool trunc = false;
+    ScrollPanel_toString(sp, buf, sizeof(buf), &trunc);
+    check(!trunc && buf[0] != '\0', "to-string");
+    ScrollPanel_toStringStruct(sp, buf, sizeof(buf), &trunc);
+    check(!trunc && buf[0] != '\0', "to-struct");
+    char tiny[4];
+    bool t2 = false;
+    ScrollPanel_toString(sp, tiny, sizeof(tiny), &t2);
+    check(t2, "string-trunc");
+
+    if (failures == 0)
+        printf("scroll_panel_test: all green\n");
+    return failures == 0 ? 0 : 1;
+}

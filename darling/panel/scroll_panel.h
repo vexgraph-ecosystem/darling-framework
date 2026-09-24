@@ -35,8 +35,9 @@ typedef struct ScrollPanel {
     float offsetY;
     bool contentAutoW;          // AUTO content hugs the viewport width
     bool contentAutoH;          // AUTO content hugs the viewport height
-    bool hVisible;              // horizontal bar visibility
-    bool vVisible;              // vertical bar visibility
+    bool hVisible;              // horizontal bar master visibility
+    bool vVisible;              // vertical bar master visibility
+    uint64_t lastTickMs;        // caller clock for overlay auto-hide
 } ScrollPanel;
 
 // Constructors:
@@ -47,8 +48,14 @@ ScrollPanel *ScrollPanel_2(float viewW, float viewH);
 
 // Core (content attach is detach-only, never frees; bars re-raise on top;
 // offsets clamp to content/viewport bounds; AUTO content hugs the viewport).
+// The *At forms stamp the caller clock so overlay bars can show on scroll;
+// tick hides them again after the idle timeout. No threads, no waits.
 void ScrollPanel_setContent(ScrollPanel *sp, Panel *content);
 void ScrollPanel_setOffset(ScrollPanel *sp, float x, float y);
+void ScrollPanel_setOffsetAt(ScrollPanel *sp, float x, float y, uint64_t nowMs);
+void ScrollPanel_scrollBy(ScrollPanel *sp, float dx, float dy);
+void ScrollPanel_scrollByAt(ScrollPanel *sp, float dx, float dy, uint64_t nowMs);
+void ScrollPanel_tick(ScrollPanel *sp, uint64_t nowMs);
 void ScrollPanel_setViewportSize(ScrollPanel *sp, float w, float h);
 void ScrollPanel_setContentSize(ScrollPanel *sp, float w, float h);
 void ScrollPanel_layoutBars(ScrollPanel *sp);
@@ -56,14 +63,24 @@ void ScrollPanel_syncToBars(ScrollPanel *sp);
 void ScrollPanel_syncFromBars(ScrollPanel *sp);
 
 // verticalScroll part (the owned vertical bar; right-docked geometry).
+// Each bar keeps independent state: short limit, auto-hide, opacity.
 void ScrollPanel_verticalScroll_setThickness(ScrollPanel *sp, float px);
 void ScrollPanel_verticalScroll_setInset(ScrollPanel *sp, float px);
 void ScrollPanel_verticalScroll_setVisible(ScrollPanel *sp, bool visible);
 void ScrollPanel_verticalScroll_setRange(ScrollPanel *sp, float min, float max);
 void ScrollPanel_verticalScroll_setValue(ScrollPanel *sp, float value);
+void ScrollPanel_verticalScroll_setShortLengthLimit(ScrollPanel *sp, float percent);
+void ScrollPanel_verticalScroll_setHideWhenUnused(ScrollPanel *sp, bool hide);
+void ScrollPanel_verticalScroll_setOpacity(ScrollPanel *sp, float opacity);
+void ScrollPanel_verticalScroll_setIdleTimeoutMs(ScrollPanel *sp, uint64_t timeoutMs);
 float ScrollPanel_verticalScroll_getValue(const ScrollPanel *sp);
 float ScrollPanel_verticalScroll_getThickness(const ScrollPanel *sp);
 float ScrollPanel_verticalScroll_getInset(const ScrollPanel *sp);
+float ScrollPanel_verticalScroll_getShortLengthLimit(const ScrollPanel *sp);
+bool ScrollPanel_verticalScroll_isHideWhenUnused(const ScrollPanel *sp);
+float ScrollPanel_verticalScroll_getOpacity(const ScrollPanel *sp);
+uint64_t ScrollPanel_verticalScroll_getIdleTimeoutMs(const ScrollPanel *sp);
+bool ScrollPanel_verticalScroll_isEffectiveVisible(const ScrollPanel *sp);
 void ScrollPanel_verticalScroll_getRange(const ScrollPanel *sp, float *outMin, float *outMax);
 void ScrollPanel_verticalScroll_getThumbRect(const ScrollPanel *sp,
                                              float *outX, float *outY, float *outW, float *outH);
@@ -74,9 +91,18 @@ void ScrollPanel_horizontalScroll_setInset(ScrollPanel *sp, float px);
 void ScrollPanel_horizontalScroll_setVisible(ScrollPanel *sp, bool visible);
 void ScrollPanel_horizontalScroll_setRange(ScrollPanel *sp, float min, float max);
 void ScrollPanel_horizontalScroll_setValue(ScrollPanel *sp, float value);
+void ScrollPanel_horizontalScroll_setShortLengthLimit(ScrollPanel *sp, float percent);
+void ScrollPanel_horizontalScroll_setHideWhenUnused(ScrollPanel *sp, bool hide);
+void ScrollPanel_horizontalScroll_setOpacity(ScrollPanel *sp, float opacity);
+void ScrollPanel_horizontalScroll_setIdleTimeoutMs(ScrollPanel *sp, uint64_t timeoutMs);
 float ScrollPanel_horizontalScroll_getValue(const ScrollPanel *sp);
 float ScrollPanel_horizontalScroll_getThickness(const ScrollPanel *sp);
 float ScrollPanel_horizontalScroll_getInset(const ScrollPanel *sp);
+float ScrollPanel_horizontalScroll_getShortLengthLimit(const ScrollPanel *sp);
+bool ScrollPanel_horizontalScroll_isHideWhenUnused(const ScrollPanel *sp);
+float ScrollPanel_horizontalScroll_getOpacity(const ScrollPanel *sp);
+uint64_t ScrollPanel_horizontalScroll_getIdleTimeoutMs(const ScrollPanel *sp);
+bool ScrollPanel_horizontalScroll_isEffectiveVisible(const ScrollPanel *sp);
 void ScrollPanel_horizontalScroll_getRange(const ScrollPanel *sp, float *outMin, float *outMax);
 void ScrollPanel_horizontalScroll_getThumbRect(const ScrollPanel *sp,
                                                float *outX, float *outY, float *outW, float *outH);
