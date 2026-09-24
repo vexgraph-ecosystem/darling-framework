@@ -76,6 +76,9 @@
  *   uint64_t lastInputMs;      // Clock of the last input (momentum arming)
  *   bool dragging;             // Pointer grab is active
  *   float dragGrab;            // Px from the thumb start to the grab point
+ *   float fadeAlpha;           // Overlay fade (1 = solid, 0 = faded out)
+ *   uint64_t fadeOutMs;        // Fade-out duration after the idle hold
+ *   bool grappable;            // False = the bar refuses pointer grabs
  *
  * PRIVATE HELPERS:
  * ----------------------------------------------------------------------------
@@ -123,6 +126,8 @@
  *   - ScrollBar_setHideWhenUnused(s, hide)
  *   - ScrollBar_setOpacity(s, opacity)
  *   - ScrollBar_setIdleTimeoutMs(s, timeoutMs)
+ *   - ScrollBar_setFadeOutMs(s, fadeOutMs)
+ *   - ScrollBar_setGrappable(s, grappable)
  *   - ScrollBar_setScrollMode(s, mode)
  *   - ScrollBar_setScrollFriction(s, friction)
  *   - ScrollBar_setScrollSensitivity(s, sensitivity)
@@ -142,6 +147,7 @@
  *   - ScrollBar_isHideWhenUnused(s)
  *   - ScrollBar_getOpacity(s)
  *   - ScrollBar_getIdleTimeoutMs(s)
+ *   - ScrollBar_getFadeOutMs(s) / ScrollBar_isGrappable(s) / ScrollBar_getFadeAlpha(s)
  *   - ScrollBar_getScrollMode(s)
  *   - ScrollBar_getScrollFriction(s)
  *   - ScrollBar_getScrollSensitivity(s)
@@ -200,6 +206,9 @@ ScrollBar *ScrollBar_0(void) {
     (*s).lastInputMs = 0u;
     (*s).dragging = false;
     (*s).dragGrab = 0.0f;
+    (*s).fadeAlpha = 1.0f;
+    (*s).fadeOutMs = SCROLL_BAR_FADE_MS_DEFAULT;
+    (*s).grappable = SCROLL_BAR_GRAPPABLE_DEFAULT;
     GraphicsComponent_setOpacity(&(*base).component, SCROLL_BAR_OPACITY_DEFAULT);
     return s;
 }
@@ -325,24 +334,38 @@ void ScrollBar_noteScroll(ScrollBar *s, uint64_t nowMs) {
     Panel_setVisible(base, true);
 }
 
+// Fade-out (not a toggle): full opacity for the idle hold after the last
+// scroll, then a linear fade to zero over fadeOutMs. Derived from the clock
+// (not frame-stepped), so it is deterministic on any cadence.
 bool ScrollBar_tick(ScrollBar *s, uint64_t nowMs, bool scrollable) {
     if (!s)
         return false;
     if (!(*s).hideWhenUnused) {
+        (*s).fadeAlpha = 1.0f;
         (*s).autoHidden = false;
         return true;
     }
-    bool hide = false;
-    if (!scrollable)
-        hide = true;
-    else if (!(*s).hasScrolled)
-        hide = true;
-    else if (nowMs >= (*s).lastScrollMs && nowMs - (*s).lastScrollMs >= (*s).idleTimeoutMs)
-        hide = true;
-    (*s).autoHidden = hide;
+    float alpha = 0.0f;
+    if (scrollable && (*s).hasScrolled) {
+        uint64_t since = nowMs >= (*s).lastScrollMs ? nowMs - (*s).lastScrollMs : 0u;
+        if (since <= (*s).idleTimeoutMs) {
+            alpha = 1.0f;
+        } else if ((*s).fadeOutMs == 0u) {
+            alpha = 0.0f;
+        } else {
+            uint64_t into = since - (*s).idleTimeoutMs;
+            if (into >= (*s).fadeOutMs)
+                alpha = 0.0f;
+            else
+                alpha = 1.0f - (float) into / (float) (*s).fadeOutMs;
+        }
+    }
+    (*s).fadeAlpha = alpha;
+    bool hidden = alpha <= 0.0f;
+    (*s).autoHidden = hidden;
     Panel *base = &(*s).base;
-    Panel_setVisible(base, !hide);
-    return !hide;
+    Panel_setVisible(base, !hidden);
+    return !hidden;
 }
 
 // The R4 -> R3 handoff: map this bar's behavior state into the R3 graphics
@@ -370,7 +393,7 @@ void ScrollBar_fillGraphics(const ScrollBar *s, ScrollBarGraphics *dest) {
     (*dest).contentLen = (*s).contentLen;
     (*dest).thumbMin = (*s).thumbMin;
     (*dest).shortLimit = (*s).shortLimit;
-    (*dest).opacity = (*s).opacity;
+    (*dest).opacity = (*s).opacity * (*s).fadeAlpha;
     const Panel *base = &(*s).base;
     (*dest).visible = Panel_isVisible(base);
 }
@@ -411,7 +434,7 @@ static void valueSpan(const ScrollBar *s, float *outLo, float *outHi, float *out
 }
 
 bool ScrollBar_beginDrag(ScrollBar *s, float trackLenPx, float trackPosPx, float thumbLenPx) {
-    if (!s || trackLenPx <= 0.0f)
+    if (!s || !(*s).grappable || trackLenPx <= 0.0f)
         return false;
     float travel = trackLenPx - thumbLenPx;
     if (travel < 0.0f)
@@ -458,7 +481,8 @@ float ScrollBar_applyInput(ScrollBar *s, float deltaPx, uint64_t nowMs) {
         return deltaPx;
     float scaled = deltaPx * (*s).sensitivity;
     (*s).lastInputMs = nowMs;
-    if ((*s).scrollMode == SCROLL_BAR_SMOOTH && (*s).friction > 0.0f)
+    bool glides = (*s).scrollMode == SCROLL_BAR_SMOOTH || (*s).scrollMode == SCROLL_BAR_ELASTIC;
+    if (glides && (*s).friction > 0.0f)
         (*s).velocity += scaled;
     else
         (*s).velocity = 0.0f;
@@ -468,7 +492,7 @@ float ScrollBar_applyInput(ScrollBar *s, float deltaPx, uint64_t nowMs) {
 float ScrollBar_glideStep(ScrollBar *s, uint64_t nowMs, uint64_t dtMs) {
     if (!s)
         return 0.0f;
-    if ((*s).scrollMode != SCROLL_BAR_SMOOTH)
+    if ((*s).scrollMode == SCROLL_BAR_STEP)
         return 0.0f;
     if ((*s).friction <= 0.0f) {
         (*s).velocity = 0.0f;
@@ -584,11 +608,27 @@ void ScrollBar_setIdleTimeoutMs(ScrollBar *s, uint64_t timeoutMs) {
 void ScrollBar_setScrollMode(ScrollBar *s, int mode) {
     if (!s)
         return;
-    if (mode != SCROLL_BAR_STEP && mode != SCROLL_BAR_SMOOTH)
+    if (mode != SCROLL_BAR_STEP && mode != SCROLL_BAR_SMOOTH && mode != SCROLL_BAR_ELASTIC)
         return;
     (*s).scrollMode = mode;
     if (mode == SCROLL_BAR_STEP)
         (*s).velocity = 0.0f;
+}
+
+;;SETTER
+void ScrollBar_setFadeOutMs(ScrollBar *s, uint64_t fadeOutMs) {
+    if (!s)
+        return;
+    (*s).fadeOutMs = fadeOutMs;
+}
+
+;;SETTER
+void ScrollBar_setGrappable(ScrollBar *s, bool grappable) {
+    if (!s)
+        return;
+    (*s).grappable = grappable;
+    if (!grappable)
+        (*s).dragging = false;
 }
 
 ;;SETTER
@@ -694,6 +734,21 @@ float ScrollBar_getScrollSensitivity(const ScrollBar *s) {
 ;;GETTER
 uint64_t ScrollBar_getScrollDelay(const ScrollBar *s) {
     return s ? (*s).delayMs : SCROLL_BAR_DELAY_MS_DEFAULT;
+}
+
+;;GETTER
+uint64_t ScrollBar_getFadeOutMs(const ScrollBar *s) {
+    return s ? (*s).fadeOutMs : SCROLL_BAR_FADE_MS_DEFAULT;
+}
+
+;;GETTER
+bool ScrollBar_isGrappable(const ScrollBar *s) {
+    return s ? (*s).grappable : false;
+}
+
+;;GETTER
+float ScrollBar_getFadeAlpha(const ScrollBar *s) {
+    return s ? (*s).fadeAlpha : 1.0f;
 }
 
 ;;GETTER

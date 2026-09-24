@@ -11,6 +11,8 @@
 #include "nio/mem.h"
 #include "oop/type.h"
 
+#include <math.h>
+
 ;;DEFINITION
 /**
  * ============================================================================
@@ -95,14 +97,16 @@
  *   - ScrollPanel_paintBars(sp, rect)
  *   - ScrollPanel_setViewportSize(sp, w, h)
  *   - ScrollPanel_setContentSize(sp, w, h)
+ *   - ScrollPanel_setOverscrollLimit(sp, px) / ScrollPanel_getOverscrollLimit(sp)
  *   - ScrollPanel_layoutBars(sp)
  *   - ScrollPanel_syncToBars(sp)
  *   - ScrollPanel_syncFromBars(sp)
  *
  * Private Core Functions: (.c static)
- *   - pinOffset / offsetBounds / raiseBars / resolveContentAuto / dockBar /
- *     applyBarVisible / noteBarsScrolled / placeContent / paintSubtree /
- *     fillPanelGraphics / barGeometry / barHit / barBeginDrag / barDragTo
+ *   - pinOffset / offsetBounds / axisElastic / offsetBoundsElastic / raiseBars /
+ *     resolveContentAuto / dockBar / applyBarVisible / noteBarsScrolled /
+ *     placeContent / paintSubtree / fillPanelGraphics / barGeometry / barHit /
+ *     barBeginDrag / barDragTo
  *
  * Public verticalScroll Part Verbs: (.h)
  *   - ScrollPanel_verticalScroll_setThickness/setInset/setVisible/setRange/setValue
@@ -176,6 +180,7 @@ ScrollPanel *ScrollPanel_2(float viewW, float viewH) {
     (*sp).vVisible = true;
     (*sp).lastTickMs = 0u;
     (*sp).dragAxis = -1;
+    (*sp).overscrollLimit = SCROLLPANEL_OVERSCROLL_LIMIT_DEFAULT;
     Panel *self = &(*sp).base;
     Component *c = &(*self).component;
     GraphicsComponent_setSize(c, viewW, viewH);
@@ -194,6 +199,32 @@ static float pinOffset(float value, float lo, float hi) {
     if (value > hi)
         return hi;
     return value;
+}
+
+static void offsetBounds(const ScrollPanel *sp, float *outLoX, float *outHiX,
+                         float *outLoY, float *outHiY);
+
+// True when the axis's bar is in elastic mode (stretches past the ends).
+static bool axisElastic(const ScrollPanel *sp, bool horizontal) {
+    const ScrollBar *bar = horizontal ? (*sp).hBar : (*sp).vBar;
+    return bar && ScrollBar_getScrollMode(bar) == SCROLL_BAR_ELASTIC;
+}
+
+// Scrollable bounds per axis: [0, max(0, content - viewport)]. The *Elastic
+// variant widens a scrollable elastic axis by the overscroll limit, so the
+// offset may stretch past an end (and springs home on tick).
+static void offsetBoundsElastic(const ScrollPanel *sp, float *outLoX, float *outHiX,
+                                float *outLoY, float *outHiY) {
+    offsetBounds(sp, outLoX, outHiX, outLoY, outHiY);
+    float lim = (*sp).overscrollLimit;
+    if (outLoX && outHiX && *outHiX > *outLoX && axisElastic(sp, true)) {
+        *outLoX -= lim;
+        *outHiX += lim;
+    }
+    if (outLoY && outHiY && *outHiY > *outLoY && axisElastic(sp, false)) {
+        *outLoY -= lim;
+        *outHiY += lim;
+    }
 }
 
 // Scrollable bounds per axis: [0, max(0, content - viewport)].
@@ -378,7 +409,7 @@ void ScrollPanel_setOffsetAt(ScrollPanel *sp, float x, float y, uint64_t nowMs) 
     if (!sp)
         return;
     float loX = 0.0f, hiX = 0.0f, loY = 0.0f, hiY = 0.0f;
-    offsetBounds(sp, &loX, &hiX, &loY, &hiY);
+    offsetBoundsElastic(sp, &loX, &hiX, &loY, &hiY);
     (*sp).offsetX = pinOffset(x, loX, hiX);
     (*sp).offsetY = pinOffset(y, loY, hiY);
     placeContent(sp);
@@ -392,7 +423,7 @@ void ScrollPanel_scrollByChained(ScrollPanel *sp, float dx, float dy, uint64_t n
     float leftY = dy;
     if (sp) {
         float loX = 0.0f, hiX = 0.0f, loY = 0.0f, hiY = 0.0f;
-        offsetBounds(sp, &loX, &hiX, &loY, &hiY);
+        offsetBoundsElastic(sp, &loX, &hiX, &loY, &hiY);
         float wantX = pinOffset((*sp).offsetX + dx, loX, hiX);
         float wantY = pinOffset((*sp).offsetY + dy, loY, hiY);
         float gotX = wantX - (*sp).offsetX;
@@ -489,14 +520,17 @@ static void barDragTo(ScrollPanel *sp, ScrollBar *bar, bool horizontal, float lo
 bool ScrollPanel_barDragBegin(ScrollPanel *sp, float localX, float localY) {
     if (!sp)
         return false;
-    if (barHit(sp, (*sp).vBar, false, localX, localY)) {
+    // A non-grappable bar ignores the grab entirely (read-only chrome).
+    if ((*sp).vBar && ScrollBar_isGrappable((*sp).vBar)
+        && barHit(sp, (*sp).vBar, false, localX, localY)) {
         (*sp).dragAxis = 0;
         if (barBeginDrag(sp, (*sp).vBar, false, localX, localY)) {
             ScrollPanel_syncFromBars(sp);
             return true;
         }
     }
-    if (barHit(sp, (*sp).hBar, true, localX, localY)) {
+    if ((*sp).hBar && ScrollBar_isGrappable((*sp).hBar)
+        && barHit(sp, (*sp).hBar, true, localX, localY)) {
         (*sp).dragAxis = 1;
         if (barBeginDrag(sp, (*sp).hBar, true, localX, localY)) {
             ScrollPanel_syncFromBars(sp);
@@ -557,6 +591,27 @@ void ScrollPanel_tick(ScrollPanel *sp, uint64_t nowMs) {
         if (gx != 0.0f || gy != 0.0f)
             ScrollPanel_setOffsetAt(sp, (*sp).offsetX + gx, (*sp).offsetY + gy, nowMs);
     }
+    // Elastic spring: an overscrolled offset (past the hard bounds) eases
+    // home. Deterministic from dt (no frame stepping); a no-op off the ends.
+    if (dt > 0u) {
+        float loX = 0.0f, hiX = 0.0f, loY = 0.0f, hiY = 0.0f;
+        offsetBounds(sp, &loX, &hiX, &loY, &hiY);
+        float tx = (*sp).offsetX < loX ? loX : ((*sp).offsetX > hiX ? hiX : (*sp).offsetX);
+        float ty = (*sp).offsetY < loY ? loY : ((*sp).offsetY > hiY ? hiY : (*sp).offsetY);
+        if (tx != (*sp).offsetX || ty != (*sp).offsetY) {
+            float factor = 1.0f - expf(-(float) dt / SCROLLPANEL_SPRING_TAU_MS);
+            float nx = (*sp).offsetX + (tx - (*sp).offsetX) * factor;
+            float ny = (*sp).offsetY + (ty - (*sp).offsetY) * factor;
+            if (nx - tx < SCROLLPANEL_SPRING_SNAP_PX && tx - nx < SCROLLPANEL_SPRING_SNAP_PX)
+                nx = tx;
+            if (ny - ty < SCROLLPANEL_SPRING_SNAP_PX && ty - ny < SCROLLPANEL_SPRING_SNAP_PX)
+                ny = ty;
+            (*sp).offsetX = nx;
+            (*sp).offsetY = ny;
+            placeContent(sp);
+            ScrollPanel_syncToBars(sp);
+        }
+    }
     float loX = 0.0f, hiX = 0.0f, loY = 0.0f, hiY = 0.0f;
     offsetBounds(sp, &loX, &hiX, &loY, &hiY);
     bool scrollH = hiX > 0.0f;
@@ -574,6 +629,19 @@ void ScrollPanel_setViewportSize(ScrollPanel *sp, float w, float h) {
     Panel *self = &(*sp).base;
     GraphicsComponent_setSize(&(*self).component, w, h);
     ScrollPanel_layoutBars(sp);
+}
+
+void ScrollPanel_setOverscrollLimit(ScrollPanel *sp, float px) {
+    if (!sp)
+        return;
+    if (px < 0.0f)
+        px = 0.0f;
+    (*sp).overscrollLimit = px;
+    ScrollPanel_layoutBars(sp);
+}
+
+float ScrollPanel_getOverscrollLimit(const ScrollPanel *sp) {
+    return sp ? (*sp).overscrollLimit : 0.0f;
 }
 
 void ScrollPanel_setContentSize(ScrollPanel *sp, float w, float h) {
@@ -832,6 +900,34 @@ uint64_t ScrollPanel_verticalScroll_getScrollDelay(const ScrollPanel *sp) {
     return (sp && (*sp).vBar) ? ScrollBar_getScrollDelay((*sp).vBar) : SCROLL_BAR_DELAY_MS_DEFAULT;
 }
 
+;;SETTER
+void ScrollPanel_verticalScroll_setFadeOutMs(ScrollPanel *sp, uint64_t fadeOutMs) {
+    if (!sp || !(*sp).vBar)
+        return;
+    ScrollBar_setFadeOutMs((*sp).vBar, fadeOutMs);
+}
+
+;;SETTER
+void ScrollPanel_verticalScroll_setGrappable(ScrollPanel *sp, bool grappable) {
+    if (!sp || !(*sp).vBar)
+        return;
+    ScrollBar_setGrappable((*sp).vBar, grappable);
+    if (!grappable && (*sp).dragAxis == 0) {
+        ScrollBar_endDrag((*sp).vBar);
+        (*sp).dragAxis = -1;
+    }
+}
+
+;;GETTER
+uint64_t ScrollPanel_verticalScroll_getFadeOutMs(const ScrollPanel *sp) {
+    return (sp && (*sp).vBar) ? ScrollBar_getFadeOutMs((*sp).vBar) : SCROLL_BAR_FADE_MS_DEFAULT;
+}
+
+;;GETTER
+bool ScrollPanel_verticalScroll_isGrappable(const ScrollPanel *sp) {
+    return (sp && (*sp).vBar) ? ScrollBar_isGrappable((*sp).vBar) : false;
+}
+
 ;;GETTER
 bool ScrollPanel_verticalScroll_isNeeded(const ScrollPanel *sp) {
     return (sp && (*sp).vBar) ? ScrollBar_isNeeded((*sp).vBar) : false;
@@ -1034,6 +1130,34 @@ float ScrollPanel_horizontalScroll_getScrollSensitivity(const ScrollPanel *sp) {
 ;;GETTER
 uint64_t ScrollPanel_horizontalScroll_getScrollDelay(const ScrollPanel *sp) {
     return (sp && (*sp).hBar) ? ScrollBar_getScrollDelay((*sp).hBar) : SCROLL_BAR_DELAY_MS_DEFAULT;
+}
+
+;;SETTER
+void ScrollPanel_horizontalScroll_setFadeOutMs(ScrollPanel *sp, uint64_t fadeOutMs) {
+    if (!sp || !(*sp).hBar)
+        return;
+    ScrollBar_setFadeOutMs((*sp).hBar, fadeOutMs);
+}
+
+;;SETTER
+void ScrollPanel_horizontalScroll_setGrappable(ScrollPanel *sp, bool grappable) {
+    if (!sp || !(*sp).hBar)
+        return;
+    ScrollBar_setGrappable((*sp).hBar, grappable);
+    if (!grappable && (*sp).dragAxis == 1) {
+        ScrollBar_endDrag((*sp).hBar);
+        (*sp).dragAxis = -1;
+    }
+}
+
+;;GETTER
+uint64_t ScrollPanel_horizontalScroll_getFadeOutMs(const ScrollPanel *sp) {
+    return (sp && (*sp).hBar) ? ScrollBar_getFadeOutMs((*sp).hBar) : SCROLL_BAR_FADE_MS_DEFAULT;
+}
+
+;;GETTER
+bool ScrollPanel_horizontalScroll_isGrappable(const ScrollPanel *sp) {
+    return (sp && (*sp).hBar) ? ScrollBar_isGrappable((*sp).hBar) : false;
 }
 
 ;;GETTER

@@ -28,6 +28,11 @@
 
 // Extra grab area around a bar's track (px), so a 12px bar is easy to hold.
 #define SCROLLPANEL_DRAG_HIT_PAD 4.0f
+// Elastic (slinky) overscroll: how far past an end an elastic axis may
+// stretch, and the spring time constant that pulls it home.
+#define SCROLLPANEL_OVERSCROLL_LIMIT_DEFAULT 80.0f
+#define SCROLLPANEL_SPRING_TAU_MS            120.0f
+#define SCROLLPANEL_SPRING_SNAP_PX           0.5f
 
 typedef struct ScrollPanel {
     Panel base;                 // the viewport itself (same properties as a whole)
@@ -42,6 +47,7 @@ typedef struct ScrollPanel {
     bool vVisible;              // vertical bar master visibility
     uint64_t lastTickMs;        // caller clock for overlay auto-hide
     int32_t dragAxis;           // -1 none, 0 vertical bar, 1 horizontal bar
+    float overscrollLimit;      // Elastic stretch past an end (px)
 } ScrollPanel;
 
 // Constructors:
@@ -91,12 +97,15 @@ bool ScrollPanel_paintSkips(ScrollPanel *sp, const Rectangle *rect,
 bool ScrollPanel_paintBars(ScrollPanel *sp, const Rectangle *rect);
 void ScrollPanel_setViewportSize(ScrollPanel *sp, float w, float h);
 void ScrollPanel_setContentSize(ScrollPanel *sp, float w, float h);
+void ScrollPanel_setOverscrollLimit(ScrollPanel *sp, float px);
+float ScrollPanel_getOverscrollLimit(const ScrollPanel *sp);
 void ScrollPanel_layoutBars(ScrollPanel *sp);
 void ScrollPanel_syncToBars(ScrollPanel *sp);
 void ScrollPanel_syncFromBars(ScrollPanel *sp);
 
 // verticalScroll part (the owned vertical bar; right-docked geometry).
-// Each bar keeps independent state: short limit, auto-hide, opacity.
+// Each bar keeps independent state: short limit, auto-hide, fade-out,
+// opacity, grappable.
 void ScrollPanel_verticalScroll_setThickness(ScrollPanel *sp, float px);
 void ScrollPanel_verticalScroll_setInset(ScrollPanel *sp, float px);
 void ScrollPanel_verticalScroll_setVisible(ScrollPanel *sp, bool visible);
@@ -110,6 +119,8 @@ void ScrollPanel_verticalScroll_setScrollMode(ScrollPanel *sp, int mode);
 void ScrollPanel_verticalScroll_setScrollFriction(ScrollPanel *sp, float friction);
 void ScrollPanel_verticalScroll_setScrollSensitivity(ScrollPanel *sp, float sensitivity);
 void ScrollPanel_verticalScroll_setScrollDelay(ScrollPanel *sp, uint64_t delayMs);
+void ScrollPanel_verticalScroll_setFadeOutMs(ScrollPanel *sp, uint64_t fadeOutMs);
+void ScrollPanel_verticalScroll_setGrappable(ScrollPanel *sp, bool grappable);
 float ScrollPanel_verticalScroll_getValue(const ScrollPanel *sp);
 float ScrollPanel_verticalScroll_getThickness(const ScrollPanel *sp);
 float ScrollPanel_verticalScroll_getInset(const ScrollPanel *sp);
@@ -121,6 +132,8 @@ int ScrollPanel_verticalScroll_getScrollMode(const ScrollPanel *sp);
 float ScrollPanel_verticalScroll_getScrollFriction(const ScrollPanel *sp);
 float ScrollPanel_verticalScroll_getScrollSensitivity(const ScrollPanel *sp);
 uint64_t ScrollPanel_verticalScroll_getScrollDelay(const ScrollPanel *sp);
+uint64_t ScrollPanel_verticalScroll_getFadeOutMs(const ScrollPanel *sp);
+bool ScrollPanel_verticalScroll_isGrappable(const ScrollPanel *sp);
 bool ScrollPanel_verticalScroll_isEffectiveVisible(const ScrollPanel *sp);
 bool ScrollPanel_verticalScroll_isNeeded(const ScrollPanel *sp);
 void ScrollPanel_verticalScroll_getRange(const ScrollPanel *sp, float *outMin, float *outMax);
@@ -141,6 +154,8 @@ void ScrollPanel_horizontalScroll_setScrollMode(ScrollPanel *sp, int mode);
 void ScrollPanel_horizontalScroll_setScrollFriction(ScrollPanel *sp, float friction);
 void ScrollPanel_horizontalScroll_setScrollSensitivity(ScrollPanel *sp, float sensitivity);
 void ScrollPanel_horizontalScroll_setScrollDelay(ScrollPanel *sp, uint64_t delayMs);
+void ScrollPanel_horizontalScroll_setFadeOutMs(ScrollPanel *sp, uint64_t fadeOutMs);
+void ScrollPanel_horizontalScroll_setGrappable(ScrollPanel *sp, bool grappable);
 float ScrollPanel_horizontalScroll_getValue(const ScrollPanel *sp);
 float ScrollPanel_horizontalScroll_getThickness(const ScrollPanel *sp);
 float ScrollPanel_horizontalScroll_getInset(const ScrollPanel *sp);
@@ -152,6 +167,8 @@ int ScrollPanel_horizontalScroll_getScrollMode(const ScrollPanel *sp);
 float ScrollPanel_horizontalScroll_getScrollFriction(const ScrollPanel *sp);
 float ScrollPanel_horizontalScroll_getScrollSensitivity(const ScrollPanel *sp);
 uint64_t ScrollPanel_horizontalScroll_getScrollDelay(const ScrollPanel *sp);
+uint64_t ScrollPanel_horizontalScroll_getFadeOutMs(const ScrollPanel *sp);
+bool ScrollPanel_horizontalScroll_isGrappable(const ScrollPanel *sp);
 bool ScrollPanel_horizontalScroll_isEffectiveVisible(const ScrollPanel *sp);
 bool ScrollPanel_horizontalScroll_isNeeded(const ScrollPanel *sp);
 void ScrollPanel_horizontalScroll_getRange(const ScrollPanel *sp, float *outMin, float *outMax);

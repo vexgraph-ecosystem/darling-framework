@@ -28,19 +28,24 @@
 #define SCROLL_BAR_INSET_DEFAULT        2.0f
 #define SCROLL_BAR_SHORT_LIMIT_DEFAULT  0.0f
 #define SCROLL_BAR_OPACITY_DEFAULT      1.0f
-#define SCROLL_BAR_IDLE_MS_DEFAULT      1200u
 
 // Scroll behavior (per bar = per axis, per panel): how input becomes motion.
 #define SCROLL_BAR_STEP     0   // discrete: each input lands immediately
 #define SCROLL_BAR_SMOOTH   1   // glides: momentum decays by friction
+#define SCROLL_BAR_ELASTIC  2   // glides AND stretches past the ends (slinky)
 
 // Behavior defaults + glide tuning (the No Hardcoding Law).
-#define SCROLL_BAR_MODE_DEFAULT         SCROLL_BAR_STEP
+#define SCROLL_BAR_MODE_DEFAULT         SCROLL_BAR_ELASTIC
 #define SCROLL_BAR_FRICTION_DEFAULT     1.0f    // 0 = no glide, 1 = normal, >1 = longer
 #define SCROLL_BAR_SENSITIVITY_DEFAULT  1.0f    // input multiplier (1.0 = unchanged)
 #define SCROLL_BAR_DELAY_MS_DEFAULT     0u      // settle hold before glide begins
 #define SCROLL_BAR_GLIDE_TAU_MS         300.0f  // friction-1 glide time constant
 #define SCROLL_BAR_GLIDE_MIN_PX         0.05f   // below this, momentum stops
+// Overlay fade (the Fade-Out Law of scrollbars): after a quiescent hold the
+// bar fades its opacity to zero over the fade time — never a hard toggle.
+#define SCROLL_BAR_IDLE_MS_DEFAULT      1000u   // hold after the last scroll
+#define SCROLL_BAR_FADE_MS_DEFAULT      1000u   // then fade out over this long
+#define SCROLL_BAR_GRAPPABLE_DEFAULT    true    // false = read-only bar
 
 // darling/field/scrollbar.h — track+thumb scroller with two thumb laws.
 //
@@ -78,6 +83,9 @@ typedef struct ScrollBar {
     uint64_t lastInputMs;      // Clock of the last input (momentum arming)
     bool dragging;             // Pointer grab is active
     float dragGrab;            // Px from the thumb start to the grab point
+    float fadeAlpha;           // Overlay fade (1 = solid, 0 = faded out)
+    uint64_t fadeOutMs;        // Fade-out duration after the idle hold
+    bool grappable;            // False = the bar refuses pointer grabs
 } ScrollBar;
 
 // Constructors:
@@ -136,6 +144,8 @@ void ScrollBar_setShortLengthLimit(ScrollBar *s, float percent);
 void ScrollBar_setHideWhenUnused(ScrollBar *s, bool hide);
 void ScrollBar_setOpacity(ScrollBar *s, float opacity);
 void ScrollBar_setIdleTimeoutMs(ScrollBar *s, uint64_t timeoutMs);
+void ScrollBar_setFadeOutMs(ScrollBar *s, uint64_t fadeOutMs);
+void ScrollBar_setGrappable(ScrollBar *s, bool grappable);
 void ScrollBar_setScrollMode(ScrollBar *s, int mode);
 void ScrollBar_setScrollFriction(ScrollBar *s, float friction);
 void ScrollBar_setScrollSensitivity(ScrollBar *s, float sensitivity);
@@ -152,6 +162,9 @@ float ScrollBar_getShortLengthLimit(const ScrollBar *s);
 bool ScrollBar_isHideWhenUnused(const ScrollBar *s);
 float ScrollBar_getOpacity(const ScrollBar *s);
 uint64_t ScrollBar_getIdleTimeoutMs(const ScrollBar *s);
+uint64_t ScrollBar_getFadeOutMs(const ScrollBar *s);
+bool ScrollBar_isGrappable(const ScrollBar *s);
+float ScrollBar_getFadeAlpha(const ScrollBar *s);
 int ScrollBar_getScrollMode(const ScrollBar *s);
 float ScrollBar_getScrollFriction(const ScrollBar *s);
 float ScrollBar_getScrollSensitivity(const ScrollBar *s);
