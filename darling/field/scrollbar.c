@@ -74,6 +74,8 @@
  *   uint64_t delayMs;          // Settle hold before glide begins
  *   float velocity;            // Remaining px carried by momentum
  *   uint64_t lastInputMs;      // Clock of the last input (momentum arming)
+ *   bool dragging;             // Pointer grab is active
+ *   float dragGrab;            // Px from the thumb start to the grab point
  *
  * PRIVATE HELPERS:
  * ----------------------------------------------------------------------------
@@ -104,9 +106,13 @@
  *   - ScrollBar_paint(s, trackRect)
  *   - ScrollBar_applyInput(s, deltaPx, nowMs)
  *   - ScrollBar_glideStep(s, nowMs, dtMs)
+ *   - ScrollBar_beginDrag(s, trackLen, trackPos, thumbLen)
+ *   - ScrollBar_dragTo(s, trackLen, trackPos, thumbLen)
+ *   - ScrollBar_endDrag(s) / ScrollBar_isDragging(s)
  *
  * Private Core Functions: (.c static)
- *   - pinValue / pin01 / gestureDelta / pointLerp / trackLen / thumbDims
+ *   - pinValue / pin01 / gestureDelta / pointLerp / trackLen / thumbDims /
+ *     valueSpan
  *
  * Public Setters: (.h)
  *   - ScrollBar_setMode(s, mode)
@@ -191,6 +197,8 @@ ScrollBar *ScrollBar_0(void) {
     (*s).delayMs = SCROLL_BAR_DELAY_MS_DEFAULT;
     (*s).velocity = 0.0f;
     (*s).lastInputMs = 0u;
+    (*s).dragging = false;
+    (*s).dragGrab = 0.0f;
     GraphicsComponent_setOpacity(&(*base).component, SCROLL_BAR_OPACITY_DEFAULT);
     return s;
 }
@@ -383,6 +391,65 @@ bool ScrollBar_paint(ScrollBar *s, const Rectangle *viewportRect) {
     ScrollBarGraphics g;
     ScrollBar_fillGraphics(s, &g);
     return ScrollBarGraphics_paint(&g, viewportRect);
+}
+
+// The value span (lo/hi normalized) and the current fraction along it.
+static void valueSpan(const ScrollBar *s, float *outLo, float *outHi, float *outFrac) {
+    float lo = (*s).min;
+    float hi = (*s).max;
+    if (lo > hi) {
+        float tmp = lo;
+        lo = hi;
+        hi = tmp;
+    }
+    float span = hi - lo;
+    float frac = span > 0.0f ? ((*s).value - lo) / span : 0.0f;
+    if (outLo) *outLo = lo;
+    if (outHi) *outHi = hi;
+    if (outFrac) *outFrac = frac;
+}
+
+bool ScrollBar_beginDrag(ScrollBar *s, float trackLenPx, float trackPosPx, float thumbLenPx) {
+    if (!s || trackLenPx <= 0.0f)
+        return false;
+    float travel = trackLenPx - thumbLenPx;
+    if (travel < 0.0f)
+        travel = 0.0f;
+    float frac = 0.0f;
+    valueSpan(s, nullptr, nullptr, &frac);
+    float thumbStart = frac * travel;
+    if (trackPosPx >= thumbStart && trackPosPx <= thumbStart + thumbLenPx)
+        (*s).dragGrab = trackPosPx - thumbStart;   // grabbed the thumb
+    else
+        (*s).dragGrab = thumbLenPx * 0.5f;         // track click: center it
+    (*s).dragging = true;
+    (*s).velocity = 0.0f;                          // a grab stops any glide
+    return ScrollBar_dragTo(s, trackLenPx, trackPosPx, thumbLenPx);
+}
+
+bool ScrollBar_dragTo(ScrollBar *s, float trackLenPx, float trackPosPx, float thumbLenPx) {
+    if (!s || !(*s).dragging)
+        return false;
+    float travel = trackLenPx - thumbLenPx;
+    if (travel <= 0.0f)
+        return false;
+    float thumbStart = trackPosPx - (*s).dragGrab;
+    float frac = thumbStart / travel;
+    frac = pin01(frac);
+    float lo = 0.0f, hi = 0.0f;
+    valueSpan(s, &lo, &hi, nullptr);
+    (*s).value = lo + frac * (hi - lo);
+    return true;
+}
+
+void ScrollBar_endDrag(ScrollBar *s) {
+    if (!s)
+        return;
+    (*s).dragging = false;
+}
+
+bool ScrollBar_isDragging(const ScrollBar *s) {
+    return s ? (*s).dragging : false;
 }
 
 float ScrollBar_applyInput(ScrollBar *s, float deltaPx, uint64_t nowMs) {

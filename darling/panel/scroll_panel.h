@@ -26,6 +26,9 @@
 // content/viewport bounds; bars derive from the absolute every layout pass,
 // so a live resize never drifts them (BUG-008).
 
+// Extra grab area around a bar's track (px), so a 12px bar is easy to hold.
+#define SCROLLPANEL_DRAG_HIT_PAD 4.0f
+
 typedef struct ScrollPanel {
     Panel base;                 // the viewport itself (same properties as a whole)
     Panel *contentPanel;        // borrowed content (detach-only, never freed)
@@ -38,6 +41,7 @@ typedef struct ScrollPanel {
     bool hVisible;              // horizontal bar master visibility
     bool vVisible;              // vertical bar master visibility
     uint64_t lastTickMs;        // caller clock for overlay auto-hide
+    int32_t dragAxis;           // -1 none, 0 vertical bar, 1 horizontal bar
 } ScrollPanel;
 
 // Constructors:
@@ -67,6 +71,13 @@ void ScrollPanel_scrollInputAt(ScrollPanel *sp, float dx, float dy, uint64_t now
 // bubbles to the caller (dest-last) so a parent continues at the inner end.
 void ScrollPanel_scrollInputChainedAt(ScrollPanel *sp, float dx, float dy, uint64_t nowMs,
                                       float *outDx, float *outDy);
+// Pointer drag on the bars: begin grabs the bar under the viewport-local
+// point (thumb or track), dragTo tracks the held pointer, end releases.
+// Viewport-local coordinates (0,0 = panel top-left).
+bool ScrollPanel_barDragBegin(ScrollPanel *sp, float localX, float localY);
+void ScrollPanel_barDragTo(ScrollPanel *sp, float localX, float localY);
+void ScrollPanel_barDragEnd(ScrollPanel *sp);
+bool ScrollPanel_isBarDragging(const ScrollPanel *sp);
 void ScrollPanel_tick(ScrollPanel *sp, uint64_t nowMs);
 // Immediate-mode paint: viewport stages, scissored content subtree shifted
 // by the offsets, bars last. skip (nullable) excludes one subtree — the

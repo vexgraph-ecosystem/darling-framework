@@ -57,6 +57,7 @@
  *   bool hVisible;              // horizontal bar master visibility
  *   bool vVisible;              // vertical bar master visibility
  *   uint64_t lastTickMs;        // caller clock for overlay auto-hide
+ *   int32_t dragAxis;           // -1 none, 0 vertical bar, 1 horizontal bar
  *
  * PRIVATE HELPERS:
  * ----------------------------------------------------------------------------
@@ -85,8 +86,12 @@
  *   - ScrollPanel_scrollByChained(sp, dx, dy, nowMs, outDx, outDy)
  *   - ScrollPanel_scrollInputAt(sp, dx, dy, nowMs)
  *   - ScrollPanel_scrollInputChainedAt(sp, dx, dy, nowMs, outDx, outDy)
+ *   - ScrollPanel_barDragBegin(sp, localX, localY)
+ *   - ScrollPanel_barDragTo(sp, localX, localY)
+ *   - ScrollPanel_barDragEnd(sp)
+ *   - ScrollPanel_isBarDragging(sp)
  *   - ScrollPanel_tick(sp, nowMs)
- *   - ScrollPanel_paint(sp, rect, skip)
+ *   - ScrollPanel_paint(sp, rect, skip) / ScrollPanel_paintSkips(sp, rect, skips, n)
  *   - ScrollPanel_setViewportSize(sp, w, h)
  *   - ScrollPanel_setContentSize(sp, w, h)
  *   - ScrollPanel_layoutBars(sp)
@@ -96,7 +101,7 @@
  * Private Core Functions: (.c static)
  *   - pinOffset / offsetBounds / raiseBars / resolveContentAuto / dockBar /
  *     applyBarVisible / noteBarsScrolled / placeContent / paintSubtree /
- *     fillPanelGraphics
+ *     fillPanelGraphics / barGeometry / barHit / barBeginDrag / barDragTo
  *
  * Public verticalScroll Part Verbs: (.h)
  *   - ScrollPanel_verticalScroll_setThickness/setInset/setVisible/setRange/setValue
@@ -167,6 +172,7 @@ ScrollPanel *ScrollPanel_2(float viewW, float viewH) {
     (*sp).hVisible = true;
     (*sp).vVisible = true;
     (*sp).lastTickMs = 0u;
+    (*sp).dragAxis = -1;
     Panel *self = &(*sp).base;
     Component *c = &(*self).component;
     GraphicsComponent_setSize(c, viewW, viewH);
@@ -422,6 +428,104 @@ void ScrollPanel_scrollInputChainedAt(ScrollPanel *sp, float dx, float dy, uint6
             sy = ScrollBar_applyInput((*sp).vBar, dy, nowMs);
     }
     ScrollPanel_scrollByChained(sp, sx, sy, nowMs, outDx, outDy);
+}
+
+// The bar's docked track + thumb rects, in viewport-local coordinates (the
+// panel's own rect), derived through the R3 holder so docking has one home.
+static void barGeometry(const ScrollPanel *sp, const ScrollBar *bar, bool horizontal,
+                        Rectangle *trackOut, Rectangle *thumbOut) {
+    Rectangle view;
+    const Panel *b = &(*sp).base;
+    view.x = 0.0f;
+    view.y = 0.0f;
+    view.width = Component_getWidth(&(*b).component);
+    view.height = Component_getHeight(&(*b).component);
+    ScrollBarGraphics g;
+    ScrollBar_fillGraphics(bar, &g);
+    if (horizontal)
+        g.orientation = SCROLL_GRAPHICS_HORIZONTAL;
+    else
+        g.orientation = SCROLL_GRAPHICS_VERTICAL;
+    ScrollBarGraphics_trackRect(&g, &view, trackOut);
+    ScrollBarGraphics_thumbRect(&g, &view, thumbOut);
+}
+
+static bool barHit(const ScrollPanel *sp, const ScrollBar *bar, bool horizontal,
+                   float localX, float localY) {
+    if (!bar)
+        return false;
+    Rectangle track, thumb;
+    barGeometry(sp, bar, horizontal, &track, &thumb);
+    (void) thumb;
+    float pad = SCROLLPANEL_DRAG_HIT_PAD;
+    if (localX < track.x - pad || localX > track.x + track.width + pad)
+        return false;
+    if (localY < track.y - pad || localY > track.y + track.height + pad)
+        return false;
+    return true;
+}
+
+static bool barBeginDrag(ScrollPanel *sp, ScrollBar *bar, bool horizontal, float localX, float localY) {
+    Rectangle track, thumb;
+    barGeometry(sp, bar, horizontal, &track, &thumb);
+    float trackLen = horizontal ? track.width : track.height;
+    float thumbLen = horizontal ? thumb.width : thumb.height;
+    float trackPos = horizontal ? (localX - track.x) : (localY - track.y);
+    return ScrollBar_beginDrag(bar, trackLen, trackPos, thumbLen);
+}
+
+static void barDragTo(ScrollPanel *sp, ScrollBar *bar, bool horizontal, float localX, float localY) {
+    Rectangle track, thumb;
+    barGeometry(sp, bar, horizontal, &track, &thumb);
+    float trackLen = horizontal ? track.width : track.height;
+    float thumbLen = horizontal ? thumb.width : thumb.height;
+    float trackPos = horizontal ? (localX - track.x) : (localY - track.y);
+    ScrollBar_dragTo(bar, trackLen, trackPos, thumbLen);
+}
+
+bool ScrollPanel_barDragBegin(ScrollPanel *sp, float localX, float localY) {
+    if (!sp)
+        return false;
+    if (barHit(sp, (*sp).vBar, false, localX, localY)) {
+        (*sp).dragAxis = 0;
+        if (barBeginDrag(sp, (*sp).vBar, false, localX, localY)) {
+            ScrollPanel_syncFromBars(sp);
+            return true;
+        }
+    }
+    if (barHit(sp, (*sp).hBar, true, localX, localY)) {
+        (*sp).dragAxis = 1;
+        if (barBeginDrag(sp, (*sp).hBar, true, localX, localY)) {
+            ScrollPanel_syncFromBars(sp);
+            return true;
+        }
+    }
+    (*sp).dragAxis = -1;
+    return false;
+}
+
+void ScrollPanel_barDragTo(ScrollPanel *sp, float localX, float localY) {
+    if (!sp || (*sp).dragAxis < 0)
+        return;
+    if ((*sp).dragAxis == 0)
+        barDragTo(sp, (*sp).vBar, false, localX, localY);
+    else
+        barDragTo(sp, (*sp).hBar, true, localX, localY);
+    ScrollPanel_syncFromBars(sp);
+}
+
+void ScrollPanel_barDragEnd(ScrollPanel *sp) {
+    if (!sp)
+        return;
+    if ((*sp).dragAxis == 0 && (*sp).vBar)
+        ScrollBar_endDrag((*sp).vBar);
+    else if ((*sp).dragAxis == 1 && (*sp).hBar)
+        ScrollBar_endDrag((*sp).hBar);
+    (*sp).dragAxis = -1;
+}
+
+bool ScrollPanel_isBarDragging(const ScrollPanel *sp) {
+    return sp ? ((*sp).dragAxis >= 0) : false;
 }
 
 void ScrollPanel_scrollBy(ScrollPanel *sp, float dx, float dy) {

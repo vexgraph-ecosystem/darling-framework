@@ -76,6 +76,8 @@ typedef struct ScrollBar {
     uint64_t delayMs;          // Settle hold before glide begins
     float velocity;            // Remaining px carried by momentum (current var)
     uint64_t lastInputMs;      // Clock of the last input (momentum arming)
+    bool dragging;             // Pointer grab is active
+    float dragGrab;            // Px from the thumb start to the grab point
 } ScrollBar;
 
 // Constructors:
@@ -112,6 +114,13 @@ float ScrollBar_applyInput(ScrollBar *s, float deltaPx, uint64_t nowMs);
 // decays velocity (0 when step-mode, friction 0, within the delay hold, or
 // settled below SCROLL_BAR_GLIDE_MIN_PX).
 float ScrollBar_glideStep(ScrollBar *s, uint64_t nowMs, uint64_t dtMs);
+// Pointer drag (thumb or track grab). All positions are track-local px
+// along the axis (trackPos from the track start). begin grabs the thumb
+// (or centers it on a track click); dragTo tracks the pointer; end releases.
+bool ScrollBar_beginDrag(ScrollBar *s, float trackLenPx, float trackPosPx, float thumbLenPx);
+bool ScrollBar_dragTo(ScrollBar *s, float trackLenPx, float trackPosPx, float thumbLenPx);
+void ScrollBar_endDrag(ScrollBar *s);
+bool ScrollBar_isDragging(const ScrollBar *s);
 
 // Activity (overlay auto-hide driven by an explicit caller clock — no
 // threads; note on scroll, tick on idle; dest-last outputs stay last).
