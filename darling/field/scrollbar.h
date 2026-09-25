@@ -122,6 +122,11 @@ float ScrollBar_applyInput(ScrollBar *s, float deltaPx, uint64_t nowMs);
 // decays velocity (0 when step-mode, friction 0, within the delay hold, or
 // settled below SCROLL_BAR_GLIDE_MIN_PX).
 float ScrollBar_glideStep(ScrollBar *s, uint64_t nowMs, uint64_t dtMs);
+// Kill momentum (the gravity owns the axis now: a stretch must not be fought
+// by the glide, which is what made an overscrolled elastic axis vibrate).
+void ScrollBar_stopMomentum(ScrollBar *s);
+// Clock of the last input (for the elastic release/hold decision).
+uint64_t ScrollBar_getLastInputMs(const ScrollBar *s);
 // Pointer drag (thumb or track grab). All positions are track-local px
 // along the axis (trackPos from the track start). begin grabs the thumb
 // (or centers it on a track click); dragTo tracks the pointer; end releases.

@@ -109,6 +109,7 @@
  *   - ScrollBar_paint(s, trackRect)
  *   - ScrollBar_applyInput(s, deltaPx, nowMs)
  *   - ScrollBar_glideStep(s, nowMs, dtMs)
+ *   - ScrollBar_stopMomentum(s) / ScrollBar_getLastInputMs(s)
  *   - ScrollBar_beginDrag(s, trackLen, trackPos, thumbLen)
  *   - ScrollBar_dragTo(s, trackLen, trackPos, thumbLen)
  *   - ScrollBar_endDrag(s) / ScrollBar_isDragging(s)
@@ -474,6 +475,16 @@ void ScrollBar_endDrag(ScrollBar *s) {
 
 bool ScrollBar_isDragging(const ScrollBar *s) {
     return s ? (*s).dragging : false;
+}
+
+void ScrollBar_stopMomentum(ScrollBar *s) {
+    if (!s)
+        return;
+    (*s).velocity = 0.0f;
+}
+
+uint64_t ScrollBar_getLastInputMs(const ScrollBar *s) {
+    return s ? (*s).lastInputMs : 0u;
 }
 
 float ScrollBar_applyInput(ScrollBar *s, float deltaPx, uint64_t nowMs) {

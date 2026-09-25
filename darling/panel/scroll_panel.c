@@ -204,6 +204,15 @@ static float pinOffset(float value, float lo, float hi) {
 static void offsetBounds(const ScrollPanel *sp, float *outLoX, float *outHiX,
                          float *outLoY, float *outHiY);
 
+// True once the axis's last input is old enough that the hand has released
+// (the elastic stretch then springs home; before that it is held).
+static bool elasticReleased(const ScrollBar *bar, uint64_t nowMs) {
+    uint64_t last = ScrollBar_getLastInputMs(bar);
+    if (last == 0u || nowMs < last)
+        return true;
+    return (nowMs - last) >= SCROLLPANEL_ELASTIC_RELEASE_MS;
+}
+
 // True when the axis's bar is in elastic mode (stretches past the ends).
 static bool axisElastic(const ScrollPanel *sp, bool horizontal) {
     const ScrollBar *bar = horizontal ? (*sp).hBar : (*sp).vBar;
@@ -582,30 +591,48 @@ void ScrollPanel_tick(ScrollPanel *sp, uint64_t nowMs) {
         return;
     uint64_t dt = nowMs >= (*sp).lastTickMs ? nowMs - (*sp).lastTickMs : 0u;
     (*sp).lastTickMs = nowMs;
-    // Momentum glide first (friction/delay live on each bar): the leftover
-    // velocity carries the offset, decaying every tick. No glide in step
-    // mode or with friction 0 — the bar returns 0 and the offset stands.
-    if (dt > 0u) {
-        float gx = (*sp).hBar ? ScrollBar_glideStep((*sp).hBar, nowMs, dt) : 0.0f;
-        float gy = (*sp).vBar ? ScrollBar_glideStep((*sp).vBar, nowMs, dt) : 0.0f;
-        if (gx != 0.0f || gy != 0.0f)
-            ScrollPanel_setOffsetAt(sp, (*sp).offsetX + gx, (*sp).offsetY + gy, nowMs);
-    }
-    // Elastic spring: an overscrolled offset (past the hard bounds) eases
-    // home. Deterministic from dt (no frame stepping); a no-op off the ends.
     if (dt > 0u) {
         float loX = 0.0f, hiX = 0.0f, loY = 0.0f, hiY = 0.0f;
         offsetBounds(sp, &loX, &hiX, &loY, &hiY);
-        float tx = (*sp).offsetX < loX ? loX : ((*sp).offsetX > hiX ? hiX : (*sp).offsetX);
-        float ty = (*sp).offsetY < loY ? loY : ((*sp).offsetY > hiY ? hiY : (*sp).offsetY);
-        if (tx != (*sp).offsetX || ty != (*sp).offsetY) {
+        bool overH = (*sp).offsetX < loX || (*sp).offsetX > hiX;
+        bool overV = (*sp).offsetY < loY || (*sp).offsetY > hiY;
+        // Momentum glide — but NOT on an overscrolled axis: gravity owns it,
+        // so kill the velocity instead of letting it fight the spring (the
+        // old vibration). No glide in step mode or with friction 0 either.
+        float gx = 0.0f, gy = 0.0f;
+        if ((*sp).hBar) {
+            if (overH) ScrollBar_stopMomentum((*sp).hBar);
+            else gx = ScrollBar_glideStep((*sp).hBar, nowMs, dt);
+        }
+        if ((*sp).vBar) {
+            if (overV) ScrollBar_stopMomentum((*sp).vBar);
+            else gy = ScrollBar_glideStep((*sp).vBar, nowMs, dt);
+        }
+        if (gx != 0.0f || gy != 0.0f)
+            ScrollPanel_setOffsetAt(sp, (*sp).offsetX + gx, (*sp).offsetY + gy, nowMs);
+        // Elastic spring: an overscrolled offset eases home, but ONLY once
+        // released — while input keeps arriving the stretch is held (slinky
+        // rubber), so the panel does not fight the user's hand.
+        float nx = (*sp).offsetX;
+        float ny = (*sp).offsetY;
+        bool springH = overH && axisElastic(sp, true) && (*sp).hBar
+            && elasticReleased((*sp).hBar, nowMs);
+        bool springV = overV && axisElastic(sp, false) && (*sp).vBar
+            && elasticReleased((*sp).vBar, nowMs);
+        if (springH || springV) {
             float factor = 1.0f - expf(-(float) dt / SCROLLPANEL_SPRING_TAU_MS);
-            float nx = (*sp).offsetX + (tx - (*sp).offsetX) * factor;
-            float ny = (*sp).offsetY + (ty - (*sp).offsetY) * factor;
-            if (nx - tx < SCROLLPANEL_SPRING_SNAP_PX && tx - nx < SCROLLPANEL_SPRING_SNAP_PX)
-                nx = tx;
-            if (ny - ty < SCROLLPANEL_SPRING_SNAP_PX && ty - ny < SCROLLPANEL_SPRING_SNAP_PX)
-                ny = ty;
+            if (springH) {
+                float tx = (*sp).offsetX < loX ? loX : hiX;
+                nx = (*sp).offsetX + (tx - (*sp).offsetX) * factor;
+                if (nx - tx < SCROLLPANEL_SPRING_SNAP_PX && tx - nx < SCROLLPANEL_SPRING_SNAP_PX)
+                    nx = tx;
+            }
+            if (springV) {
+                float ty = (*sp).offsetY < loY ? loY : hiY;
+                ny = (*sp).offsetY + (ty - (*sp).offsetY) * factor;
+                if (ny - ty < SCROLLPANEL_SPRING_SNAP_PX && ty - ny < SCROLLPANEL_SPRING_SNAP_PX)
+                    ny = ty;
+            }
             (*sp).offsetX = nx;
             (*sp).offsetY = ny;
             placeContent(sp);

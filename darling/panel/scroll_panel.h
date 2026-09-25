@@ -33,6 +33,10 @@
 #define SCROLLPANEL_OVERSCROLL_LIMIT_DEFAULT 80.0f
 #define SCROLLPANEL_SPRING_TAU_MS            120.0f
 #define SCROLLPANEL_SPRING_SNAP_PX           0.5f
+// While input keeps arriving within this window the stretch is HELD (slinky
+// rubber); only after release does the spring pull it home. This is also what
+// stops the overscrolled axis from vibrating (no glide fighting the spring).
+#define SCROLLPANEL_ELASTIC_RELEASE_MS       90u
 
 typedef struct ScrollPanel {
     Panel base;                 // the viewport itself (same properties as a whole)
