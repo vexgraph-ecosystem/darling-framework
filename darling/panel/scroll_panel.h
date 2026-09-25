@@ -52,6 +52,7 @@ typedef struct ScrollPanel {
     uint64_t lastTickMs;        // caller clock for overlay auto-hide
     int32_t dragAxis;           // -1 none, 0 vertical bar, 1 horizontal bar
     float overscrollLimit;      // Elastic stretch past an end (px)
+    bool gestureHeld;           // A live gesture owns the panel: gravity waits
 } ScrollPanel;
 
 // Constructors:
@@ -103,6 +104,13 @@ void ScrollPanel_setViewportSize(ScrollPanel *sp, float w, float h);
 void ScrollPanel_setContentSize(ScrollPanel *sp, float w, float h);
 void ScrollPanel_setOverscrollLimit(ScrollPanel *sp, float px);
 float ScrollPanel_getOverscrollLimit(const ScrollPanel *sp);
+// Gesture hold: while true, an elastic overscroll is HELD (no gravity); the
+// moment it goes false the spring pulls home. The host sets it from the
+// real down/up (NSEvent phase began/ended, or pointer down/up).
+void ScrollPanel_setGestureHeld(ScrollPanel *sp, bool held);
+bool ScrollPanel_isGestureHeld(const ScrollPanel *sp);
+// Kill any in-flight glide on both bars (hand-off to OS momentum on release).
+void ScrollPanel_stopGlide(ScrollPanel *sp);
 void ScrollPanel_layoutBars(ScrollPanel *sp);
 void ScrollPanel_syncToBars(ScrollPanel *sp);
 void ScrollPanel_syncFromBars(ScrollPanel *sp);

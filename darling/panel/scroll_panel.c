@@ -60,6 +60,7 @@
  *   bool vVisible;              // vertical bar master visibility
  *   uint64_t lastTickMs;        // caller clock for overlay auto-hide
  *   int32_t dragAxis;           // -1 none, 0 vertical bar, 1 horizontal bar
+ *   bool gestureHeld;           // A live gesture owns the panel: gravity waits
  *
  * PRIVATE HELPERS:
  * ----------------------------------------------------------------------------
@@ -98,6 +99,8 @@
  *   - ScrollPanel_setViewportSize(sp, w, h)
  *   - ScrollPanel_setContentSize(sp, w, h)
  *   - ScrollPanel_setOverscrollLimit(sp, px) / ScrollPanel_getOverscrollLimit(sp)
+ *   - ScrollPanel_setGestureHeld(sp, held) / ScrollPanel_isGestureHeld(sp)
+ *   - ScrollPanel_stopGlide(sp)
  *   - ScrollPanel_layoutBars(sp)
  *   - ScrollPanel_syncToBars(sp)
  *   - ScrollPanel_syncFromBars(sp)
@@ -181,6 +184,7 @@ ScrollPanel *ScrollPanel_2(float viewW, float viewH) {
     (*sp).lastTickMs = 0u;
     (*sp).dragAxis = -1;
     (*sp).overscrollLimit = SCROLLPANEL_OVERSCROLL_LIMIT_DEFAULT;
+    (*sp).gestureHeld = false;
     Panel *self = &(*sp).base;
     Component *c = &(*self).component;
     GraphicsComponent_setSize(c, viewW, viewH);
@@ -534,6 +538,7 @@ bool ScrollPanel_barDragBegin(ScrollPanel *sp, float localX, float localY) {
         && barHit(sp, (*sp).vBar, false, localX, localY)) {
         (*sp).dragAxis = 0;
         if (barBeginDrag(sp, (*sp).vBar, false, localX, localY)) {
+            (*sp).gestureHeld = true;
             ScrollPanel_syncFromBars(sp);
             return true;
         }
@@ -542,6 +547,7 @@ bool ScrollPanel_barDragBegin(ScrollPanel *sp, float localX, float localY) {
         && barHit(sp, (*sp).hBar, true, localX, localY)) {
         (*sp).dragAxis = 1;
         if (barBeginDrag(sp, (*sp).hBar, true, localX, localY)) {
+            (*sp).gestureHeld = true;
             ScrollPanel_syncFromBars(sp);
             return true;
         }
@@ -568,6 +574,7 @@ void ScrollPanel_barDragEnd(ScrollPanel *sp) {
     else if ((*sp).dragAxis == 1 && (*sp).hBar)
         ScrollBar_endDrag((*sp).hBar);
     (*sp).dragAxis = -1;
+    (*sp).gestureHeld = false;   // release -> gravity may now pull home
 }
 
 bool ScrollPanel_isBarDragging(const ScrollPanel *sp) {
@@ -615,9 +622,12 @@ void ScrollPanel_tick(ScrollPanel *sp, uint64_t nowMs) {
         // rubber), so the panel does not fight the user's hand.
         float nx = (*sp).offsetX;
         float ny = (*sp).offsetY;
-        bool springH = overH && axisElastic(sp, true) && (*sp).hBar
+        // Gravity waits for the release: while a gesture holds the panel, the
+        // stretch stays put (the tick must not creep it home under the hand).
+        bool canSpring = !(*sp).gestureHeld;
+        bool springH = canSpring && overH && axisElastic(sp, true) && (*sp).hBar
             && elasticReleased((*sp).hBar, nowMs);
-        bool springV = overV && axisElastic(sp, false) && (*sp).vBar
+        bool springV = canSpring && overV && axisElastic(sp, false) && (*sp).vBar
             && elasticReleased((*sp).vBar, nowMs);
         if (springH || springV) {
             float factor = 1.0f - expf(-(float) dt / SCROLLPANEL_SPRING_TAU_MS);
@@ -669,6 +679,25 @@ void ScrollPanel_setOverscrollLimit(ScrollPanel *sp, float px) {
 
 float ScrollPanel_getOverscrollLimit(const ScrollPanel *sp) {
     return sp ? (*sp).overscrollLimit : 0.0f;
+}
+
+void ScrollPanel_setGestureHeld(ScrollPanel *sp, bool held) {
+    if (!sp)
+        return;
+    (*sp).gestureHeld = held;
+}
+
+bool ScrollPanel_isGestureHeld(const ScrollPanel *sp) {
+    return sp ? (*sp).gestureHeld : false;
+}
+
+void ScrollPanel_stopGlide(ScrollPanel *sp) {
+    if (!sp)
+        return;
+    if ((*sp).hBar)
+        ScrollBar_stopMomentum((*sp).hBar);
+    if ((*sp).vBar)
+        ScrollBar_stopMomentum((*sp).vBar);
 }
 
 void ScrollPanel_setContentSize(ScrollPanel *sp, float w, float h) {
@@ -942,6 +971,7 @@ void ScrollPanel_verticalScroll_setGrappable(ScrollPanel *sp, bool grappable) {
     if (!grappable && (*sp).dragAxis == 0) {
         ScrollBar_endDrag((*sp).vBar);
         (*sp).dragAxis = -1;
+        (*sp).gestureHeld = false;
     }
 }
 
@@ -1174,6 +1204,7 @@ void ScrollPanel_horizontalScroll_setGrappable(ScrollPanel *sp, bool grappable) 
     if (!grappable && (*sp).dragAxis == 1) {
         ScrollBar_endDrag((*sp).hBar);
         (*sp).dragAxis = -1;
+        (*sp).gestureHeld = false;
     }
 }
 
