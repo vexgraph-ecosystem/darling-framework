@@ -59,7 +59,7 @@ typedef struct ScrollPanel {
     bool vVisible;              // vertical bar master visibility
     uint64_t lastTickMs;        // caller clock for overlay auto-hide
     int32_t dragAxis;           // -1 none, 0 vertical bar, 1 horizontal bar
-    bool gestureHeld;           // A live gesture owns the panel: gravity waits
+    bool gestureHeld;           // Live CONTACT holds the spring; momentum never does
     bool nativeMomentum;        // Native momentum is authoritative while true
     float rawPullX;             // Signed uncompressed elastic pull
     float rawPullY;

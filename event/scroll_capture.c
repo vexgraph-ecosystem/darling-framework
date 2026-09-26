@@ -82,8 +82,11 @@ static void finish(ScrollCapture *self, bool cancel) {
     if (owner) {
         if (cancel)
             ScrollPanel_cancelMotion(owner);
-        else
+        else if ((*self).state == SCROLL_CAPTURE_DIRECT
+                 || (*self).state == SCROLL_CAPTURE_WHEEL_BURST)
             ScrollPanel_directEnd(owner, (*self).lastEventMs);
+        // MOMENTUM_GRACE already released the panel at contact end, so there is
+        // nothing left to release here.
     }
     (*self).owner = nullptr;
     (*self).state = SCROLL_CAPTURE_IDLE;
@@ -119,6 +122,10 @@ void ScrollCapture_directEnd(ScrollCapture *self, uint64_t nowMs) {
         (*self).state = SCROLL_CAPTURE_IDLE;
         return;
     }
+    // Fingers up: release the rubber band NOW so the spring starts this frame
+    // (no dead beat), but retain the owner so a following momentum stream
+    // reuses the same panel.
+    ScrollPanel_directEnd((*self).owner, nowMs);
     (*self).state = SCROLL_CAPTURE_MOMENTUM_GRACE;
 }
 

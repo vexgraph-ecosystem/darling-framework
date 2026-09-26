@@ -65,7 +65,7 @@
  *   bool vVisible;              // vertical bar master visibility
  *   uint64_t lastTickMs;        // caller clock for overlay auto-hide
  *   int32_t dragAxis;           // -1 none, 0 vertical bar, 1 horizontal bar
- *   bool gestureHeld;           // Direct/native contact holds spring return
+ *   bool gestureHeld;           // Live CONTACT holds the spring; momentum never does
  *   bool nativeMomentum;        // Native momentum is authoritative
  *   float rawPullX, rawPullY;    // Signed uncompressed elastic pulls
  *   float velocityX, velocityY; // Time-derived fallback velocity (px/sec)
@@ -729,13 +729,19 @@ void ScrollPanel_directEnd(ScrollPanel *sp, uint64_t nowMs) {
 void ScrollPanel_nativeMomentumBegin(ScrollPanel *sp, uint64_t nowMs) {
     if (!sp)
         return;
-    (*sp).gestureHeld = true;
+    // The fingers are already up, so the contact hold is NOT reasserted. An
+    // axis the spring already owns keeps rebounding; momentum owns only the
+    // axes still inside their bounds.
     (*sp).nativeMomentum = true;
-    (*sp).velocityX = 0.0f;
-    (*sp).velocityY = 0.0f;
     (*sp).lastTickMs = nowMs;
-    (*sp).motionWriterX = SCROLLPANEL_MOTION_NATIVE;
-    (*sp).motionWriterY = SCROLLPANEL_MOTION_NATIVE;
+    if ((*sp).motionWriterX != SCROLLPANEL_MOTION_SPRING) {
+        (*sp).velocityX = 0.0f;
+        (*sp).motionWriterX = SCROLLPANEL_MOTION_NATIVE;
+    }
+    if ((*sp).motionWriterY != SCROLLPANEL_MOTION_SPRING) {
+        (*sp).velocityY = 0.0f;
+        (*sp).motionWriterY = SCROLLPANEL_MOTION_NATIVE;
+    }
 }
 
 void ScrollPanel_nativeMomentumChange(ScrollPanel *sp, float dx, float dy, uint64_t nowMs) {
@@ -745,8 +751,19 @@ void ScrollPanel_nativeMomentumChange(ScrollPanel *sp, float dx, float dy, uint6
         * (double) ScrollPanel_horizontalScroll_getScrollSensitivity(sp));
     float sy = finiteFloat((double) dy
         * (double) ScrollPanel_verticalScroll_getScrollSensitivity(sp));
-    applyAxisDelta(sp, true, sx);
-    applyAxisDelta(sp, false, sy);
+    // A spring-owned axis ignores momentum (the rubber band is already pulling
+    // it home); the other axis consumes its share as usual.
+    if ((*sp).motionWriterX != SCROLLPANEL_MOTION_SPRING)
+        applyAxisDelta(sp, true, sx);
+    if ((*sp).motionWriterY != SCROLLPANEL_MOTION_SPRING)
+        applyAxisDelta(sp, false, sy);
+    // Momentum that carries an axis past the edge hands that axis to the
+    // spring now, so it rebounds instead of parking in mid-air until the tail
+    // finally ends.
+    if ((*sp).rawPullX != 0.0f && (*sp).motionWriterX != SCROLLPANEL_MOTION_SPRING)
+        transitionReleasedAxis(sp, true, false);
+    if ((*sp).rawPullY != 0.0f && (*sp).motionWriterY != SCROLLPANEL_MOTION_SPRING)
+        transitionReleasedAxis(sp, false, false);
     placeContent(sp);
     ScrollPanel_syncToBars(sp);
     noteBarsScrolled(sp, nowMs);
@@ -756,8 +773,9 @@ void ScrollPanel_nativeMomentumEnd(ScrollPanel *sp, uint64_t nowMs) {
     if (!sp)
         return;
     (*sp).nativeMomentum = false;
-    (*sp).gestureHeld = false;
     (*sp).lastTickMs = nowMs;
+    // No synthetic continuation after native momentum: an overscrolled axis
+    // keeps rebounding, an in-bounds axis stops cleanly.
     transitionReleasedAxis(sp, true, false);
     transitionReleasedAxis(sp, false, false);
 }
@@ -936,7 +954,7 @@ void ScrollPanel_tick(ScrollPanel *sp, uint64_t nowMs) {
         return;
     uint64_t dt = nowMs >= (*sp).lastTickMs ? nowMs - (*sp).lastTickMs : 0u;
     (*sp).lastTickMs = nowMs;
-    if (dt > 0u && !(*sp).gestureHeld && !(*sp).nativeMomentum) {
+    if (dt > 0u && !(*sp).gestureHeld) {
         float seconds = (float) dt / 1000.0f;
         bool changed = false;
         for (int i = 0; i < 2; i++) {
@@ -998,6 +1016,12 @@ void ScrollPanel_tick(ScrollPanel *sp, uint64_t nowMs) {
                 continue;
             }
             if (writer == SCROLLPANEL_MOTION_SYNTHETIC) {
+                // Fallback glide is only for phase-less wheels; native momentum
+                // is authoritative and never also runs synthetic continuation.
+                if ((*sp).nativeMomentum) {
+                    setAxisMotionWriter(sp, horizontal, SCROLLPANEL_MOTION_IDLE);
+                    continue;
+                }
                 float velocity = horizontal ? (*sp).velocityX : (*sp).velocityY;
                 float tauMs = horizontal ? (*sp).decelerationTauMsX : (*sp).decelerationTauMsY;
                 float stop = horizontal ? (*sp).stopVelocityX : (*sp).stopVelocityY;

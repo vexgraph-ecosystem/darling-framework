@@ -145,3 +145,8 @@ nothing in event/tick paths. A hard-stop child is skipped only when already bloc
 in every attempted direction; any movable attempted axis captures the whole vector.
 An overflowing elastic axis captures at its edge, while a fitting elastic axis does
 not. Direct contact, native momentum, and wheel bursts never retarget after capture.
+The contact hold ends at fingers-up, not at momentum-end: releasing an elastic
+overscroll starts the spring that frame, and a later momentum packet aimed at a
+spring-owned axis is ignored rather than deepening the pull. Momentum that carries
+an axis past the edge hands that axis to the spring immediately, so an overscroll
+never parks in mid-air waiting out the inertia tail.
