@@ -111,3 +111,37 @@ It exercises the actual Graphics raster row; the current build has no GPU Graphi
 row for this widget. Pass an absolute PNG path to render a reproducible offscreen
 preview. Test sources live in each repo's `tests/` for standalone use and are linked
 from umbrella `_tests/<subsystem>/` paths.
+
+## ScrollPanel and ScrollCapture motion contract
+
+`ScrollPanel` owns the only offset integrator. Its per-axis state stores displayed
+offset, uncompressed elastic pull, sampled px/sec velocity, critically damped spring
+velocity, writer identity, and runtime tuning for rubber coefficient, overscroll
+extent, sample tau, deceleration tau/stop velocity, spring omega, and spring snap
+distance/velocity. The compatibility panel-wide overscroll setter writes both axes;
+the `verticalScroll_*` and `horizontalScroll_*` part APIs tune axes independently.
+Direct input uses UIScrollView resistance
+`raw*dimension*coefficient/(dimension+coefficient*raw)`, with dimension safely
+bounded by configured extent and viewport. Reversal consumes raw pull before moving
+inside hard bounds. Layout and paint preserve active pull rather than clamping it.
+Fallback deceleration integrates elapsed time exactly; spring return is the exact
+critical solution. `motionWriterX` and `motionWriterY` are authoritative and each
+axis takes exactly one tick branch: synthetic, spring, or idle/native/direct hold.
+A synthetic axis that reaches elastic pull changes to spring for the next tick;
+it never runs both integrators in one tick, and one axis cannot stop the other.
+Spring acquisition carries sampled inward velocity up to the no-cross critical
+limit and discards outward velocity, yielding a monotonic non-oscillating return.
+Native momentum clears fallback momentum and transitions only overscrolled axes
+to spring on end. A zero effective extent or coefficient is a hard stop with no
+invisible raw pull. `commitAxisOffset` is the sole runtime offset write seam, keeping
+content placement and bar synchronization at operation boundaries. ScrollBar remains
+range, chrome, and compatibility configuration, not a second offset integrator.
+
+`ScrollCapture` (`event/scroll_capture.h`) borrows one `ScrollPanel *owner`, stores
+lifecycle state and caller clocks, and runtime-configures phase-less wheel idle and
+native handoff grace timeouts (defaults 120ms and 80ms). It accepts a transient
+caller-owned deepest-to-ancestor candidate span only during acquisition and allocates
+nothing in event/tick paths. A hard-stop child is skipped only when already blocked
+in every attempted direction; any movable attempted axis captures the whole vector.
+An overflowing elastic axis captures at its edge, while a fitting elastic axis does
+not. Direct contact, native momentum, and wheel bursts never retarget after capture.

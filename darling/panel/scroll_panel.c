@@ -12,6 +12,7 @@
 #include "oop/type.h"
 
 #include <math.h>
+#include <float.h>
 
 ;;DEFINITION
 /**
@@ -23,10 +24,14 @@
  * a content panel. Successor to ScrollContainer (single vertical bar only):
  * this panel owns the h/v pair from construction, speaks geometry part verbs
  * per bar (thickness/inset/visibility/range/value/thumb), and resolves AUTO
- * content to the viewport. Scroll offsets are the single source of truth,
- * clamped to the content/viewport bounds; bars derive from the absolute on
- * every layoutBars pass, so a live resize re-derives bar edges from the same
- * abs the compositor paints — no per-step drift (BUG-008).
+ * content to the viewport. ScrollPanel is the sole offset physics writer:
+ * direct, native, fallback deceleration, and exact critical spring states are
+ * mutually coordinated per axis. UIScrollView-style nonlinear resistance
+ * preserves raw pull for reversal, while bars remain configuration and chrome.
+ * Every layoutBars pass re-derives edges without clamping valid active
+ * overscroll, but discards pull when current geometry no longer overflows.
+ * Non-finite cold tuning is rejected and non-finite hot packets are dropped.
+ * A successful bar grab cancels both axes before bar values become offsets.
  *
  * The content panel is borrowed (detach-only, never freed); the bars are
  * arena-lifetime (never freed, like the donor). Bar geometry resolves through
@@ -43,9 +48,9 @@
  * LEVEL: L2 — Behavior (viewport + h/v scrollbars + content panel)
  * ============================================================================
  * SUMMARY:
- *   Viewport Panel + owned h/v ScrollBars + borrowed content Panel. Offsets
- *   clamp to bounds; AUTO content hugs the viewport; bars dock + derive from
- *   the absolute every layout pass.
+ *   Viewport Panel + owned h/v ScrollBars + borrowed content Panel. It owns
+ *   captured offset physics; AUTO content hugs the viewport; bars dock and
+ *   derive from the absolute without integrating motion.
  *
  * STRUCT FIELDS (Mirroring darling/panel/scroll_panel.h):
  * ----------------------------------------------------------------------------
@@ -53,14 +58,28 @@
  *   Panel *contentPanel;        // borrowed content (detach-only, never freed)
  *   ScrollBar *hBar;            // owned horizontal bar (arena lifetime)
  *   ScrollBar *vBar;            // owned vertical bar (arena lifetime)
- *   float offsetX, offsetY;     // scroll offsets (single source of truth)
+ *   float offsetX, offsetY;     // displayed scroll offsets (single source of truth)
  *   bool contentAutoW;          // AUTO content hugs the viewport width
  *   bool contentAutoH;          // AUTO content hugs the viewport height
  *   bool hVisible;              // horizontal bar master visibility
  *   bool vVisible;              // vertical bar master visibility
  *   uint64_t lastTickMs;        // caller clock for overlay auto-hide
  *   int32_t dragAxis;           // -1 none, 0 vertical bar, 1 horizontal bar
- *   bool gestureHeld;           // A live gesture owns the panel: gravity waits
+ *   bool gestureHeld;           // Direct/native contact holds spring return
+ *   bool nativeMomentum;        // Native momentum is authoritative
+ *   float rawPullX, rawPullY;    // Signed uncompressed elastic pulls
+ *   float velocityX, velocityY; // Time-derived fallback velocity (px/sec)
+ *   float springVelocityX, springVelocityY; // Critical spring raw velocity
+ *   uint64_t lastInputXMs, lastInputYMs;     // Velocity sample clocks
+ *   int motionWriterX, motionWriterY;        // Single writer per axis
+ *   float rubberCoefficientX, rubberCoefficientY; // Resistance coefficients
+ *   float overscrollExtentX, overscrollExtentY;   // Resistance asymptotes
+ *   float velocitySampleTauMsX, velocitySampleTauMsY; // EWMA constants
+ *   float decelerationTauMsX, decelerationTauMsY; // Exponential decay constants
+ *   float stopVelocityX, stopVelocityY;       // Deceleration stop thresholds
+ *   float springOmegaX, springOmegaY;         // Critical spring rates
+ *   float springSnapDistanceX, springSnapDistanceY; // Snap distances
+ *   float springSnapVelocityX, springSnapVelocityY; // Snap velocities
  *
  * PRIVATE HELPERS:
  * ----------------------------------------------------------------------------
@@ -86,9 +105,11 @@
  *   - ScrollPanel_setOffsetAt(sp, x, y, nowMs)
  *   - ScrollPanel_scrollBy(sp, dx, dy)
  *   - ScrollPanel_scrollByAt(sp, dx, dy, nowMs)
- *   - ScrollPanel_scrollByChained(sp, dx, dy, nowMs, outDx, outDy)
  *   - ScrollPanel_scrollInputAt(sp, dx, dy, nowMs)
- *   - ScrollPanel_scrollInputChainedAt(sp, dx, dy, nowMs, outDx, outDy)
+ *   - ScrollPanel_directBegin/directChange/directEnd
+ *   - ScrollPanel_nativeMomentumBegin/nativeMomentumChange/nativeMomentumEnd
+ *   - ScrollPanel_cancelMotion
+ *   - ScrollPanel_canScrollHorizontal/canScrollVertical/canAcquire
  *   - ScrollPanel_barDragBegin(sp, localX, localY)
  *   - ScrollPanel_barDragTo(sp, localX, localY)
  *   - ScrollPanel_barDragEnd(sp)
@@ -106,7 +127,10 @@
  *   - ScrollPanel_syncFromBars(sp)
  *
  * Private Core Functions: (.c static)
- *   - pinOffset / offsetBounds / axisElastic / offsetBoundsElastic / raiseBars /
+ *   - pinOffset / offsetBounds / axisElastic / axisResistanceEnabled /
+ *     finiteFloat / rubberDistance / commitAxisOffset / setAxisMotionWriter /
+ *     getAxisMotionWriter / transitionReleasedAxis / cancelMotionForBarDrag /
+ *     raiseBars /
  *     resolveContentAuto / dockBar / applyBarVisible / noteBarsScrolled /
  *     placeContent / paintSubtree / fillPanelGraphics / barGeometry / barHit /
  *     barBeginDrag / barDragTo
@@ -119,6 +143,11 @@
  *   - ScrollPanel_verticalScroll_setScrollMode/setScrollFriction/setScrollSensitivity/setScrollDelay
  *   - ScrollPanel_verticalScroll_getScrollMode/getScrollFriction/getScrollSensitivity/getScrollDelay
  *   - ScrollPanel_verticalScroll_isNeeded
+ *   - ScrollPanel_verticalScroll_set/getRubberCoefficient/set/getOverscrollExtent
+ *   - ScrollPanel_verticalScroll_set/getVelocitySampleTauMs/set/getDecelerationTauMs
+ *   - ScrollPanel_verticalScroll_set/getStopVelocity/set/getSpringOmega
+ *   - ScrollPanel_verticalScroll_set/getSpringSnapDistance/set/getSpringSnapVelocity
+ *   - ScrollPanel_verticalScroll_getMotionWriter
  *   - ScrollPanel_verticalScroll_getRange/getThumbRect
  *
  * Public horizontalScroll Part Verbs: (.h)
@@ -129,6 +158,11 @@
  *   - ScrollPanel_horizontalScroll_setScrollMode/setScrollFriction/setScrollSensitivity/setScrollDelay
  *   - ScrollPanel_horizontalScroll_getScrollMode/getScrollFriction/getScrollSensitivity/getScrollDelay
  *   - ScrollPanel_horizontalScroll_isNeeded
+ *   - ScrollPanel_horizontalScroll_set/getRubberCoefficient/set/getOverscrollExtent
+ *   - ScrollPanel_horizontalScroll_set/getVelocitySampleTauMs/set/getDecelerationTauMs
+ *   - ScrollPanel_horizontalScroll_set/getStopVelocity/set/getSpringOmega
+ *   - ScrollPanel_horizontalScroll_set/getSpringSnapDistance/set/getSpringSnapVelocity
+ *   - ScrollPanel_horizontalScroll_getMotionWriter
  *   - ScrollPanel_horizontalScroll_getRange/getThumbRect
  *
  * Public contentPanel Part Verbs: (.h)
@@ -183,8 +217,34 @@ ScrollPanel *ScrollPanel_2(float viewW, float viewH) {
     (*sp).vVisible = true;
     (*sp).lastTickMs = 0u;
     (*sp).dragAxis = -1;
-    (*sp).overscrollLimit = SCROLLPANEL_OVERSCROLL_LIMIT_DEFAULT;
     (*sp).gestureHeld = false;
+    (*sp).nativeMomentum = false;
+    (*sp).rawPullX = 0.0f;
+    (*sp).rawPullY = 0.0f;
+    (*sp).velocityX = 0.0f;
+    (*sp).velocityY = 0.0f;
+    (*sp).springVelocityX = 0.0f;
+    (*sp).springVelocityY = 0.0f;
+    (*sp).lastInputXMs = 0u;
+    (*sp).lastInputYMs = 0u;
+    (*sp).motionWriterX = SCROLLPANEL_MOTION_IDLE;
+    (*sp).motionWriterY = SCROLLPANEL_MOTION_IDLE;
+    (*sp).rubberCoefficientX = SCROLLPANEL_RUBBER_COEFFICIENT_DEFAULT;
+    (*sp).rubberCoefficientY = SCROLLPANEL_RUBBER_COEFFICIENT_DEFAULT;
+    (*sp).overscrollExtentX = SCROLLPANEL_OVERSCROLL_LIMIT_DEFAULT;
+    (*sp).overscrollExtentY = SCROLLPANEL_OVERSCROLL_LIMIT_DEFAULT;
+    (*sp).velocitySampleTauMsX = SCROLLPANEL_VELOCITY_SAMPLE_TAU_MS_DEFAULT;
+    (*sp).velocitySampleTauMsY = SCROLLPANEL_VELOCITY_SAMPLE_TAU_MS_DEFAULT;
+    (*sp).decelerationTauMsX = SCROLLPANEL_DECELERATION_TAU_MS_DEFAULT;
+    (*sp).decelerationTauMsY = SCROLLPANEL_DECELERATION_TAU_MS_DEFAULT;
+    (*sp).stopVelocityX = SCROLLPANEL_STOP_VELOCITY_DEFAULT;
+    (*sp).stopVelocityY = SCROLLPANEL_STOP_VELOCITY_DEFAULT;
+    (*sp).springOmegaX = SCROLLPANEL_SPRING_OMEGA_DEFAULT;
+    (*sp).springOmegaY = SCROLLPANEL_SPRING_OMEGA_DEFAULT;
+    (*sp).springSnapDistanceX = SCROLLPANEL_SPRING_SNAP_PX_DEFAULT;
+    (*sp).springSnapDistanceY = SCROLLPANEL_SPRING_SNAP_PX_DEFAULT;
+    (*sp).springSnapVelocityX = SCROLLPANEL_SPRING_SNAP_VELOCITY_DEFAULT;
+    (*sp).springSnapVelocityY = SCROLLPANEL_SPRING_SNAP_VELOCITY_DEFAULT;
     Panel *self = &(*sp).base;
     Component *c = &(*self).component;
     GraphicsComponent_setSize(c, viewW, viewH);
@@ -198,6 +258,8 @@ ScrollPanel *ScrollPanel_2(float viewW, float viewH) {
 // CORE FUNCTIONS (PUBLIC & PRIVATE)
 
 static float pinOffset(float value, float lo, float hi) {
+    if (!isfinite(value))
+        return lo;
     if (value < lo)
         return lo;
     if (value > hi)
@@ -205,39 +267,61 @@ static float pinOffset(float value, float lo, float hi) {
     return value;
 }
 
+static float finiteFloat(double value) {
+    if (value > (double) FLT_MAX)
+        return FLT_MAX;
+    if (value < (double) -FLT_MAX)
+        return -FLT_MAX;
+    if (!isfinite(value))
+        return 0.0f;
+    return (float) value;
+}
+
 static void offsetBounds(const ScrollPanel *sp, float *outLoX, float *outHiX,
                          float *outLoY, float *outHiY);
 
 // True once the axis's last input is old enough that the hand has released
 // (the elastic stretch then springs home; before that it is held).
-static bool elasticReleased(const ScrollBar *bar, uint64_t nowMs) {
-    uint64_t last = ScrollBar_getLastInputMs(bar);
-    if (last == 0u || nowMs < last)
-        return true;
-    return (nowMs - last) >= SCROLLPANEL_ELASTIC_RELEASE_MS;
-}
-
 // True when the axis's bar is in elastic mode (stretches past the ends).
 static bool axisElastic(const ScrollPanel *sp, bool horizontal) {
     const ScrollBar *bar = horizontal ? (*sp).hBar : (*sp).vBar;
     return bar && ScrollBar_getScrollMode(bar) == SCROLL_BAR_ELASTIC;
 }
 
+static bool axisResistanceEnabled(const ScrollPanel *sp, bool horizontal) {
+    float extent = horizontal ? (*sp).overscrollExtentX : (*sp).overscrollExtentY;
+    float coefficient = horizontal ? (*sp).rubberCoefficientX : (*sp).rubberCoefficientY;
+    return axisElastic(sp, horizontal) && extent > 0.0f && coefficient > 0.0f;
+}
+
+// The sole runtime offset writer. Constructor zero-initialization is the only
+// direct offset assignment outside this helper.
+static void commitAxisOffset(ScrollPanel *sp, bool horizontal, float offset, float rawPull) {
+    if (horizontal) {
+        (*sp).offsetX = offset;
+        (*sp).rawPullX = rawPull;
+    } else {
+        (*sp).offsetY = offset;
+        (*sp).rawPullY = rawPull;
+    }
+}
+
 // Scrollable bounds per axis: [0, max(0, content - viewport)]. The *Elastic
 // variant widens a scrollable elastic axis by the overscroll limit, so the
 // offset may stretch past an end (and springs home on tick).
-static void offsetBoundsElastic(const ScrollPanel *sp, float *outLoX, float *outHiX,
-                                float *outLoY, float *outHiY) {
-    offsetBounds(sp, outLoX, outHiX, outLoY, outHiY);
-    float lim = (*sp).overscrollLimit;
-    if (outLoX && outHiX && *outHiX > *outLoX && axisElastic(sp, true)) {
-        *outLoX -= lim;
-        *outHiX += lim;
-    }
-    if (outLoY && outHiY && *outHiY > *outLoY && axisElastic(sp, false)) {
-        *outLoY -= lim;
-        *outHiY += lim;
-    }
+static float rubberDistance(float raw, float viewport, float extent, float coefficient) {
+    if (!isfinite(raw) || !isfinite(viewport) || !isfinite(extent) || !isfinite(coefficient))
+        return 0.0f;
+    float magnitude = raw < 0.0f ? -raw : raw;
+    float dimension = extent;
+    if (viewport > 0.0f && dimension > viewport)
+        dimension = viewport;
+    if (dimension <= 0.0f || coefficient <= 0.0f)
+        return 0.0f;
+    double scaled = (double) coefficient * (double) magnitude;
+    double resistedWide = (double) dimension * scaled / ((double) dimension + scaled);
+    float resisted = resistedWide > (double) FLT_MAX ? FLT_MAX : (float) resistedWide;
+    return raw < 0.0f ? -resisted : resisted;
 }
 
 // Scrollable bounds per axis: [0, max(0, content - viewport)].
@@ -248,14 +332,24 @@ static void offsetBounds(const ScrollPanel *sp, float *outLoX, float *outHiX,
         const Panel *b = &(*sp).base;
         viewW = Component_getWidth(&(*b).component);
         viewH = Component_getHeight(&(*b).component);
+        if (!isfinite(viewW) || viewW < 0.0f)
+            viewW = 0.0f;
+        if (!isfinite(viewH) || viewH < 0.0f)
+            viewH = 0.0f;
         Panel *content = (*sp).contentPanel;
         if (content) {
             contentW = Component_getWidth(&(*content).component);
             contentH = Component_getHeight(&(*content).component);
+            if (!isfinite(contentW) || contentW < 0.0f)
+                contentW = 0.0f;
+            if (!isfinite(contentH) || contentH < 0.0f)
+                contentH = 0.0f;
         }
     }
-    float hx = contentW - viewW;
-    float hy = contentH - viewH;
+    double hxWide = (double) contentW - (double) viewW;
+    double hyWide = (double) contentH - (double) viewH;
+    float hx = hxWide > (double) FLT_MAX ? FLT_MAX : (float) hxWide;
+    float hy = hyWide > (double) FLT_MAX ? FLT_MAX : (float) hyWide;
     if (hx < 0.0f)
         hx = 0.0f;
     if (hy < 0.0f)
@@ -419,62 +513,294 @@ void ScrollPanel_setOffset(ScrollPanel *sp, float x, float y) {
 }
 
 void ScrollPanel_setOffsetAt(ScrollPanel *sp, float x, float y, uint64_t nowMs) {
-    if (!sp)
+    if (!sp || !isfinite(x) || !isfinite(y))
         return;
     float loX = 0.0f, hiX = 0.0f, loY = 0.0f, hiY = 0.0f;
-    offsetBoundsElastic(sp, &loX, &hiX, &loY, &hiY);
-    (*sp).offsetX = pinOffset(x, loX, hiX);
-    (*sp).offsetY = pinOffset(y, loY, hiY);
+    offsetBounds(sp, &loX, &hiX, &loY, &hiY);
+    Panel *base = &(*sp).base;
+    float viewW = Component_getWidth(&(*base).component);
+    float viewH = Component_getHeight(&(*base).component);
+    if (x < loX && hiX > loX && axisResistanceEnabled(sp, true)) {
+        float raw = x - loX;
+        float offset = loX + rubberDistance(raw, viewW, (*sp).overscrollExtentX,
+                                             (*sp).rubberCoefficientX);
+        commitAxisOffset(sp, true, offset, raw);
+    } else if (x > hiX && hiX > loX && axisResistanceEnabled(sp, true)) {
+        float raw = x - hiX;
+        float offset = hiX + rubberDistance(raw, viewW, (*sp).overscrollExtentX,
+                                             (*sp).rubberCoefficientX);
+        commitAxisOffset(sp, true, offset, raw);
+    } else {
+        commitAxisOffset(sp, true, pinOffset(x, loX, hiX), 0.0f);
+    }
+    if (y < loY && hiY > loY && axisResistanceEnabled(sp, false)) {
+        float raw = y - loY;
+        float offset = loY + rubberDistance(raw, viewH, (*sp).overscrollExtentY,
+                                             (*sp).rubberCoefficientY);
+        commitAxisOffset(sp, false, offset, raw);
+    } else if (y > hiY && hiY > loY && axisResistanceEnabled(sp, false)) {
+        float raw = y - hiY;
+        float offset = hiY + rubberDistance(raw, viewH, (*sp).overscrollExtentY,
+                                             (*sp).rubberCoefficientY);
+        commitAxisOffset(sp, false, offset, raw);
+    } else {
+        commitAxisOffset(sp, false, pinOffset(y, loY, hiY), 0.0f);
+    }
     placeContent(sp);
     ScrollPanel_syncToBars(sp);
     noteBarsScrolled(sp, nowMs);
 }
 
-void ScrollPanel_scrollByChained(ScrollPanel *sp, float dx, float dy, uint64_t nowMs,
-                                 float *outDx, float *outDy) {
-    float leftX = dx;
-    float leftY = dy;
-    if (sp) {
-        float loX = 0.0f, hiX = 0.0f, loY = 0.0f, hiY = 0.0f;
-        offsetBoundsElastic(sp, &loX, &hiX, &loY, &hiY);
-        float wantX = pinOffset((*sp).offsetX + dx, loX, hiX);
-        float wantY = pinOffset((*sp).offsetY + dy, loY, hiY);
-        float gotX = wantX - (*sp).offsetX;
-        float gotY = wantY - (*sp).offsetY;
-        leftX = dx - gotX;
-        leftY = dy - gotY;
-        if (gotX != 0.0f || gotY != 0.0f)
-            ScrollPanel_setOffsetAt(sp, wantX, wantY, nowMs);
-    }
-    if (outDx)
-        *outDx = leftX;
-    if (outDy)
-        *outDy = leftY;
-}
-
 void ScrollPanel_scrollInputAt(ScrollPanel *sp, float dx, float dy, uint64_t nowMs) {
     if (!sp)
         return;
-    float sx = dx;
-    float sy = dy;
-    if ((*sp).hBar)
-        sx = ScrollBar_applyInput((*sp).hBar, dx, nowMs);
-    if ((*sp).vBar)
-        sy = ScrollBar_applyInput((*sp).vBar, dy, nowMs);
-    ScrollPanel_scrollByAt(sp, sx, sy, nowMs);
+    ScrollPanel_directChange(sp, dx, dy, nowMs);
+    ScrollPanel_directEnd(sp, nowMs);
 }
 
-void ScrollPanel_scrollInputChainedAt(ScrollPanel *sp, float dx, float dy, uint64_t nowMs,
-                                      float *outDx, float *outDy) {
-    float sx = dx;
-    float sy = dy;
-    if (sp) {
-        if ((*sp).hBar)
-            sx = ScrollBar_applyInput((*sp).hBar, dx, nowMs);
-        if ((*sp).vBar)
-            sy = ScrollBar_applyInput((*sp).vBar, dy, nowMs);
+static void applyAxisDelta(ScrollPanel *sp, bool horizontal, float delta) {
+    float loX = 0.0f, hiX = 0.0f, loY = 0.0f, hiY = 0.0f;
+    offsetBounds(sp, &loX, &hiX, &loY, &hiY);
+    float lo = horizontal ? loX : loY;
+    float hi = horizontal ? hiX : hiY;
+    float offset = horizontal ? (*sp).offsetX : (*sp).offsetY;
+    float raw = horizontal ? (*sp).rawPullX : (*sp).rawPullY;
+    Panel *base = &(*sp).base;
+    float viewport = horizontal ? Component_getWidth(&(*base).component)
+                                : Component_getHeight(&(*base).component);
+    float extent = horizontal ? (*sp).overscrollExtentX : (*sp).overscrollExtentY;
+    float coefficient = horizontal ? (*sp).rubberCoefficientX : (*sp).rubberCoefficientY;
+    if (hi <= lo) {
+        commitAxisOffset(sp, horizontal, lo, 0.0f);
+        return;
     }
-    ScrollPanel_scrollByChained(sp, sx, sy, nowMs, outDx, outDy);
+    if (raw != 0.0f && !axisResistanceEnabled(sp, horizontal)) {
+        offset = raw < 0.0f ? lo : hi;
+        raw = 0.0f;
+        commitAxisOffset(sp, horizontal, offset, raw);
+    }
+    if (raw != 0.0f) {
+        bool reversing = (raw > 0.0f && delta < 0.0f) || (raw < 0.0f && delta > 0.0f);
+        if (reversing) {
+            float next = finiteFloat((double) raw + (double) delta);
+            bool crossed = (raw > 0.0f && next < 0.0f) || (raw < 0.0f && next > 0.0f);
+            if (!crossed) {
+                raw = next;
+                float edge = raw < 0.0f ? lo : hi;
+                commitAxisOffset(sp, horizontal,
+                                 edge + rubberDistance(raw, viewport, extent, coefficient), raw);
+                return;
+            }
+            delta = next;
+            raw = 0.0f;
+            offset = delta < 0.0f ? hi : lo;
+        } else {
+            raw = finiteFloat((double) raw + (double) delta);
+            float edge = raw < 0.0f ? lo : hi;
+            commitAxisOffset(sp, horizontal,
+                             edge + rubberDistance(raw, viewport, extent, coefficient), raw);
+            return;
+        }
+    }
+    float next = finiteFloat((double) offset + (double) delta);
+    if (next >= lo && next <= hi) {
+        commitAxisOffset(sp, horizontal, next, 0.0f);
+        return;
+    }
+    float edge = next < lo ? lo : hi;
+    float excess = next - edge;
+    if (axisResistanceEnabled(sp, horizontal)) {
+        raw = excess;
+        commitAxisOffset(sp, horizontal,
+                         edge + rubberDistance(raw, viewport, extent, coefficient), raw);
+    } else {
+        commitAxisOffset(sp, horizontal, edge, 0.0f);
+    }
+}
+
+static float sampledVelocity(float oldVelocity, float delta, uint64_t elapsedMs, float tauMs) {
+    if (elapsedMs == 0u)
+        return oldVelocity;
+    double instantWide = (double) delta * 1000.0 / (double) elapsedMs;
+    float instant = finiteFloat(instantWide);
+    if (tauMs <= 0.0f)
+        return instant;
+    double alpha = 1.0 - exp(-(double) elapsedMs / (double) tauMs);
+    return finiteFloat((double) oldVelocity + ((double) instant - (double) oldVelocity) * alpha);
+}
+
+static void setAxisMotionWriter(ScrollPanel *sp, bool horizontal, int writer) {
+    if (horizontal)
+        (*sp).motionWriterX = writer;
+    else
+        (*sp).motionWriterY = writer;
+}
+
+static int getAxisMotionWriter(const ScrollPanel *sp, bool horizontal) {
+    return horizontal ? (*sp).motionWriterX : (*sp).motionWriterY;
+}
+
+static void transitionReleasedAxis(ScrollPanel *sp, bool horizontal, bool allowSynthetic) {
+    float raw = horizontal ? (*sp).rawPullX : (*sp).rawPullY;
+    float velocity = horizontal ? (*sp).velocityX : (*sp).velocityY;
+    float omega = horizontal ? (*sp).springOmegaX : (*sp).springOmegaY;
+    if (raw != 0.0f && axisResistanceEnabled(sp, horizontal)) {
+        // Outward release velocity would first deepen the pull. The spring
+        // owns return, so retain only inward velocity and clamp it to the
+        // fastest no-cross critical trajectory.
+        if ((raw > 0.0f && velocity > 0.0f) || (raw < 0.0f && velocity < 0.0f))
+            velocity = 0.0f;
+        float crossingLimit = finiteFloat(-(double) omega * (double) raw);
+        if (raw > 0.0f && velocity < crossingLimit)
+            velocity = crossingLimit;
+        if (raw < 0.0f && velocity > crossingLimit)
+            velocity = crossingLimit;
+        if (horizontal) {
+            (*sp).springVelocityX = velocity;
+            (*sp).velocityX = 0.0f;
+        } else {
+            (*sp).springVelocityY = velocity;
+            (*sp).velocityY = 0.0f;
+        }
+        setAxisMotionWriter(sp, horizontal, SCROLLPANEL_MOTION_SPRING);
+        return;
+    }
+    ScrollBar *bar = horizontal ? (*sp).hBar : (*sp).vBar;
+    int mode = bar ? ScrollBar_getScrollMode(bar) : SCROLL_BAR_STEP;
+    float friction = bar ? ScrollBar_getScrollFriction(bar) : 0.0f;
+    if (allowSynthetic && mode != SCROLL_BAR_STEP && friction > 0.0f && velocity != 0.0f) {
+        setAxisMotionWriter(sp, horizontal, SCROLLPANEL_MOTION_SYNTHETIC);
+        return;
+    }
+    if (horizontal) {
+        (*sp).velocityX = 0.0f;
+        (*sp).springVelocityX = 0.0f;
+    } else {
+        (*sp).velocityY = 0.0f;
+        (*sp).springVelocityY = 0.0f;
+    }
+    setAxisMotionWriter(sp, horizontal, SCROLLPANEL_MOTION_IDLE);
+}
+
+void ScrollPanel_directBegin(ScrollPanel *sp, uint64_t nowMs) {
+    if (!sp)
+        return;
+    (*sp).gestureHeld = true;
+    (*sp).nativeMomentum = false;
+    (*sp).velocityX = 0.0f;
+    (*sp).velocityY = 0.0f;
+    (*sp).lastInputXMs = nowMs;
+    (*sp).lastInputYMs = nowMs;
+    (*sp).motionWriterX = SCROLLPANEL_MOTION_DIRECT;
+    (*sp).motionWriterY = SCROLLPANEL_MOTION_DIRECT;
+}
+
+void ScrollPanel_directChange(ScrollPanel *sp, float dx, float dy, uint64_t nowMs) {
+    if (!sp || !isfinite(dx) || !isfinite(dy))
+        return;
+    float sx = finiteFloat((double) dx
+        * (double) ScrollPanel_horizontalScroll_getScrollSensitivity(sp));
+    float sy = finiteFloat((double) dy
+        * (double) ScrollPanel_verticalScroll_getScrollSensitivity(sp));
+    uint64_t dtX = nowMs >= (*sp).lastInputXMs ? nowMs - (*sp).lastInputXMs : 0u;
+    uint64_t dtY = nowMs >= (*sp).lastInputYMs ? nowMs - (*sp).lastInputYMs : 0u;
+    (*sp).velocityX = sampledVelocity((*sp).velocityX, sx, dtX, (*sp).velocitySampleTauMsX);
+    (*sp).velocityY = sampledVelocity((*sp).velocityY, sy, dtY, (*sp).velocitySampleTauMsY);
+    (*sp).lastInputXMs = nowMs;
+    (*sp).lastInputYMs = nowMs;
+    (*sp).motionWriterX = SCROLLPANEL_MOTION_DIRECT;
+    (*sp).motionWriterY = SCROLLPANEL_MOTION_DIRECT;
+    applyAxisDelta(sp, true, sx);
+    applyAxisDelta(sp, false, sy);
+    placeContent(sp);
+    ScrollPanel_syncToBars(sp);
+    noteBarsScrolled(sp, nowMs);
+}
+
+void ScrollPanel_directEnd(ScrollPanel *sp, uint64_t nowMs) {
+    if (!sp)
+        return;
+    (*sp).gestureHeld = false;
+    (*sp).lastTickMs = nowMs;
+    transitionReleasedAxis(sp, true, true);
+    transitionReleasedAxis(sp, false, true);
+}
+
+void ScrollPanel_nativeMomentumBegin(ScrollPanel *sp, uint64_t nowMs) {
+    if (!sp)
+        return;
+    (*sp).gestureHeld = true;
+    (*sp).nativeMomentum = true;
+    (*sp).velocityX = 0.0f;
+    (*sp).velocityY = 0.0f;
+    (*sp).lastTickMs = nowMs;
+    (*sp).motionWriterX = SCROLLPANEL_MOTION_NATIVE;
+    (*sp).motionWriterY = SCROLLPANEL_MOTION_NATIVE;
+}
+
+void ScrollPanel_nativeMomentumChange(ScrollPanel *sp, float dx, float dy, uint64_t nowMs) {
+    if (!sp || !(*sp).nativeMomentum || !isfinite(dx) || !isfinite(dy))
+        return;
+    float sx = finiteFloat((double) dx
+        * (double) ScrollPanel_horizontalScroll_getScrollSensitivity(sp));
+    float sy = finiteFloat((double) dy
+        * (double) ScrollPanel_verticalScroll_getScrollSensitivity(sp));
+    applyAxisDelta(sp, true, sx);
+    applyAxisDelta(sp, false, sy);
+    placeContent(sp);
+    ScrollPanel_syncToBars(sp);
+    noteBarsScrolled(sp, nowMs);
+}
+
+void ScrollPanel_nativeMomentumEnd(ScrollPanel *sp, uint64_t nowMs) {
+    if (!sp)
+        return;
+    (*sp).nativeMomentum = false;
+    (*sp).gestureHeld = false;
+    (*sp).lastTickMs = nowMs;
+    transitionReleasedAxis(sp, true, false);
+    transitionReleasedAxis(sp, false, false);
+}
+
+void ScrollPanel_cancelMotion(ScrollPanel *sp) {
+    if (!sp)
+        return;
+    (*sp).nativeMomentum = false;
+    (*sp).gestureHeld = false;
+    (*sp).velocityX = 0.0f;
+    (*sp).velocityY = 0.0f;
+    transitionReleasedAxis(sp, true, false);
+    transitionReleasedAxis(sp, false, false);
+}
+
+bool ScrollPanel_canScrollHorizontal(const ScrollPanel *sp, float dx) {
+    if (!sp || dx == 0.0f)
+        return false;
+    float loX = 0.0f, hiX = 0.0f;
+    offsetBounds(sp, &loX, &hiX, nullptr, nullptr);
+    if (hiX <= loX)
+        return false;
+    if (axisResistanceEnabled(sp, true))
+        return true;
+    float current = pinOffset((*sp).offsetX, loX, hiX);
+    return dx < 0.0f ? current > loX : current < hiX;
+}
+
+bool ScrollPanel_canScrollVertical(const ScrollPanel *sp, float dy) {
+    if (!sp || dy == 0.0f)
+        return false;
+    float loY = 0.0f, hiY = 0.0f;
+    offsetBounds(sp, nullptr, nullptr, &loY, &hiY);
+    if (hiY <= loY)
+        return false;
+    if (axisResistanceEnabled(sp, false))
+        return true;
+    float current = pinOffset((*sp).offsetY, loY, hiY);
+    return dy < 0.0f ? current > loY : current < hiY;
+}
+
+bool ScrollPanel_canAcquire(const ScrollPanel *sp, float dx, float dy) {
+    return ScrollPanel_canScrollHorizontal(sp, dx) || ScrollPanel_canScrollVertical(sp, dy);
 }
 
 // The bar's docked track + thumb rects, in viewport-local coordinates (the
@@ -530,6 +856,16 @@ static void barDragTo(ScrollPanel *sp, ScrollBar *bar, bool horizontal, float lo
     ScrollBar_dragTo(bar, trackLen, trackPos, thumbLen);
 }
 
+static void cancelMotionForBarDrag(ScrollPanel *sp) {
+    (*sp).nativeMomentum = false;
+    (*sp).velocityX = 0.0f;
+    (*sp).velocityY = 0.0f;
+    (*sp).springVelocityX = 0.0f;
+    (*sp).springVelocityY = 0.0f;
+    (*sp).motionWriterX = SCROLLPANEL_MOTION_IDLE;
+    (*sp).motionWriterY = SCROLLPANEL_MOTION_IDLE;
+}
+
 bool ScrollPanel_barDragBegin(ScrollPanel *sp, float localX, float localY) {
     if (!sp)
         return false;
@@ -538,6 +874,7 @@ bool ScrollPanel_barDragBegin(ScrollPanel *sp, float localX, float localY) {
         && barHit(sp, (*sp).vBar, false, localX, localY)) {
         (*sp).dragAxis = 0;
         if (barBeginDrag(sp, (*sp).vBar, false, localX, localY)) {
+            cancelMotionForBarDrag(sp);
             (*sp).gestureHeld = true;
             ScrollPanel_syncFromBars(sp);
             return true;
@@ -547,6 +884,7 @@ bool ScrollPanel_barDragBegin(ScrollPanel *sp, float localX, float localY) {
         && barHit(sp, (*sp).hBar, true, localX, localY)) {
         (*sp).dragAxis = 1;
         if (barBeginDrag(sp, (*sp).hBar, true, localX, localY)) {
+            cancelMotionForBarDrag(sp);
             (*sp).gestureHeld = true;
             ScrollPanel_syncFromBars(sp);
             return true;
@@ -574,7 +912,7 @@ void ScrollPanel_barDragEnd(ScrollPanel *sp) {
     else if ((*sp).dragAxis == 1 && (*sp).hBar)
         ScrollBar_endDrag((*sp).hBar);
     (*sp).dragAxis = -1;
-    (*sp).gestureHeld = false;   // release -> gravity may now pull home
+    (*sp).gestureHeld = false;   // release lets gravity pull home
 }
 
 bool ScrollPanel_isBarDragging(const ScrollPanel *sp) {
@@ -598,53 +936,108 @@ void ScrollPanel_tick(ScrollPanel *sp, uint64_t nowMs) {
         return;
     uint64_t dt = nowMs >= (*sp).lastTickMs ? nowMs - (*sp).lastTickMs : 0u;
     (*sp).lastTickMs = nowMs;
-    if (dt > 0u) {
-        float loX = 0.0f, hiX = 0.0f, loY = 0.0f, hiY = 0.0f;
-        offsetBounds(sp, &loX, &hiX, &loY, &hiY);
-        bool overH = (*sp).offsetX < loX || (*sp).offsetX > hiX;
-        bool overV = (*sp).offsetY < loY || (*sp).offsetY > hiY;
-        // Momentum glide — but NOT on an overscrolled axis: gravity owns it,
-        // so kill the velocity instead of letting it fight the spring (the
-        // old vibration). No glide in step mode or with friction 0 either.
-        float gx = 0.0f, gy = 0.0f;
-        if ((*sp).hBar) {
-            if (overH) ScrollBar_stopMomentum((*sp).hBar);
-            else gx = ScrollBar_glideStep((*sp).hBar, nowMs, dt);
-        }
-        if ((*sp).vBar) {
-            if (overV) ScrollBar_stopMomentum((*sp).vBar);
-            else gy = ScrollBar_glideStep((*sp).vBar, nowMs, dt);
-        }
-        if (gx != 0.0f || gy != 0.0f)
-            ScrollPanel_setOffsetAt(sp, (*sp).offsetX + gx, (*sp).offsetY + gy, nowMs);
-        // Elastic spring: an overscrolled offset eases home, but ONLY once
-        // released — while input keeps arriving the stretch is held (slinky
-        // rubber), so the panel does not fight the user's hand.
-        float nx = (*sp).offsetX;
-        float ny = (*sp).offsetY;
-        // Gravity waits for the release: while a gesture holds the panel, the
-        // stretch stays put (the tick must not creep it home under the hand).
-        bool canSpring = !(*sp).gestureHeld;
-        bool springH = canSpring && overH && axisElastic(sp, true) && (*sp).hBar
-            && elasticReleased((*sp).hBar, nowMs);
-        bool springV = canSpring && overV && axisElastic(sp, false) && (*sp).vBar
-            && elasticReleased((*sp).vBar, nowMs);
-        if (springH || springV) {
-            float factor = 1.0f - expf(-(float) dt / SCROLLPANEL_SPRING_TAU_MS);
-            if (springH) {
-                float tx = (*sp).offsetX < loX ? loX : hiX;
-                nx = (*sp).offsetX + (tx - (*sp).offsetX) * factor;
-                if (nx - tx < SCROLLPANEL_SPRING_SNAP_PX && tx - nx < SCROLLPANEL_SPRING_SNAP_PX)
-                    nx = tx;
+    if (dt > 0u && !(*sp).gestureHeld && !(*sp).nativeMomentum) {
+        float seconds = (float) dt / 1000.0f;
+        bool changed = false;
+        for (int i = 0; i < 2; i++) {
+            bool horizontal = i == 0;
+            int writer = getAxisMotionWriter(sp, horizontal);
+            if (writer == SCROLLPANEL_MOTION_SPRING) {
+                float raw = horizontal ? (*sp).rawPullX : (*sp).rawPullY;
+                float springVelocity = horizontal ? (*sp).springVelocityX
+                                                   : (*sp).springVelocityY;
+                float omega = horizontal ? (*sp).springOmegaX : (*sp).springOmegaY;
+                float snapDistance = horizontal ? (*sp).springSnapDistanceX
+                                                : (*sp).springSnapDistanceY;
+                float snapVelocity = horizontal ? (*sp).springSnapVelocityX
+                                                : (*sp).springSnapVelocityY;
+                float loX = 0.0f, hiX = 0.0f, loY = 0.0f, hiY = 0.0f;
+                offsetBounds(sp, &loX, &hiX, &loY, &hiY);
+                float lo = horizontal ? loX : loY;
+                float hi = horizontal ? hiX : hiY;
+                double exponent = (double) omega * (double) seconds;
+                double decay = exp(-exponent);
+                if (!isfinite(exponent) || decay == 0.0) {
+                    float edge = raw < 0.0f ? lo : hi;
+                    commitAxisOffset(sp, horizontal, edge, 0.0f);
+                    if (horizontal)
+                        (*sp).springVelocityX = 0.0f;
+                    else
+                        (*sp).springVelocityY = 0.0f;
+                    setAxisMotionWriter(sp, horizontal, SCROLLPANEL_MOTION_IDLE);
+                    changed = true;
+                    continue;
+                }
+                double c2 = (double) springVelocity + (double) omega * (double) raw;
+                float nextRaw = finiteFloat(((double) raw + c2 * (double) seconds) * decay);
+                float nextVelocity = finiteFloat(((double) springVelocity
+                    - (double) omega * c2 * (double) seconds) * decay);
+                Panel *base = &(*sp).base;
+                float viewport = horizontal ? Component_getWidth(&(*base).component)
+                                            : Component_getHeight(&(*base).component);
+                float extent = horizontal ? (*sp).overscrollExtentX : (*sp).overscrollExtentY;
+                float coefficient = horizontal ? (*sp).rubberCoefficientX
+                                                : (*sp).rubberCoefficientY;
+                float distance = rubberDistance(nextRaw, viewport, extent, coefficient);
+                float distanceMagnitude = distance < 0.0f ? -distance : distance;
+                float velocityMagnitude = nextVelocity < 0.0f ? -nextVelocity : nextVelocity;
+                if (distanceMagnitude <= snapDistance && velocityMagnitude <= snapVelocity) {
+                    float edge = raw < 0.0f ? lo : hi;
+                    commitAxisOffset(sp, horizontal, edge, 0.0f);
+                    nextVelocity = 0.0f;
+                    setAxisMotionWriter(sp, horizontal, SCROLLPANEL_MOTION_IDLE);
+                } else {
+                    float edge = nextRaw < 0.0f ? lo : hi;
+                    commitAxisOffset(sp, horizontal, edge + distance, nextRaw);
+                }
+                if (horizontal)
+                    (*sp).springVelocityX = nextVelocity;
+                else
+                    (*sp).springVelocityY = nextVelocity;
+                changed = true;
+                continue;
             }
-            if (springV) {
-                float ty = (*sp).offsetY < loY ? loY : hiY;
-                ny = (*sp).offsetY + (ty - (*sp).offsetY) * factor;
-                if (ny - ty < SCROLLPANEL_SPRING_SNAP_PX && ty - ny < SCROLLPANEL_SPRING_SNAP_PX)
-                    ny = ty;
+            if (writer == SCROLLPANEL_MOTION_SYNTHETIC) {
+                float velocity = horizontal ? (*sp).velocityX : (*sp).velocityY;
+                float tauMs = horizontal ? (*sp).decelerationTauMsX : (*sp).decelerationTauMsY;
+                float stop = horizontal ? (*sp).stopVelocityX : (*sp).stopVelocityY;
+                uint64_t inputMs = horizontal ? (*sp).lastInputXMs : (*sp).lastInputYMs;
+                ScrollBar *bar = horizontal ? (*sp).hBar : (*sp).vBar;
+                float friction = bar ? ScrollBar_getScrollFriction(bar) : 0.0f;
+                uint64_t delayMs = bar ? ScrollBar_getScrollDelay(bar) : 0u;
+                bool waiting = nowMs >= inputMs && nowMs - inputMs < delayMs;
+                if (waiting)
+                    continue;
+                double effectiveTauMs = (double) tauMs * (double) friction;
+                double factor = effectiveTauMs > 0.0
+                    ? exp(-(double) dt / effectiveTauMs) : 0.0;
+                double deltaWide = effectiveTauMs > 0.0
+                    ? (double) velocity * (effectiveTauMs / 1000.0) * (1.0 - factor)
+                    : (double) velocity * (double) seconds;
+                float delta = finiteFloat(deltaWide);
+                applyAxisDelta(sp, horizontal, delta);
+                velocity = finiteFloat((double) velocity * factor);
+                if (horizontal)
+                    (*sp).velocityX = velocity;
+                else
+                    (*sp).velocityY = velocity;
+                float raw = horizontal ? (*sp).rawPullX : (*sp).rawPullY;
+                if (raw != 0.0f) {
+                    transitionReleasedAxis(sp, horizontal, false);
+                } else {
+                    float magnitude = velocity < 0.0f ? -velocity : velocity;
+                    if (magnitude < stop) {
+                        if (horizontal)
+                            (*sp).velocityX = 0.0f;
+                        else
+                            (*sp).velocityY = 0.0f;
+                        setAxisMotionWriter(sp, horizontal, SCROLLPANEL_MOTION_IDLE);
+                    }
+                }
+                changed = true;
             }
-            (*sp).offsetX = nx;
-            (*sp).offsetY = ny;
+        }
+        if (changed) {
             placeContent(sp);
             ScrollPanel_syncToBars(sp);
         }
@@ -661,7 +1054,7 @@ void ScrollPanel_tick(ScrollPanel *sp, uint64_t nowMs) {
 }
 
 void ScrollPanel_setViewportSize(ScrollPanel *sp, float w, float h) {
-    if (!sp)
+    if (!sp || !isfinite(w) || !isfinite(h))
         return;
     Panel *self = &(*sp).base;
     GraphicsComponent_setSize(&(*self).component, w, h);
@@ -669,16 +1062,17 @@ void ScrollPanel_setViewportSize(ScrollPanel *sp, float w, float h) {
 }
 
 void ScrollPanel_setOverscrollLimit(ScrollPanel *sp, float px) {
-    if (!sp)
+    if (!sp || !isfinite(px))
         return;
     if (px < 0.0f)
         px = 0.0f;
-    (*sp).overscrollLimit = px;
+    (*sp).overscrollExtentX = px;
+    (*sp).overscrollExtentY = px;
     ScrollPanel_layoutBars(sp);
 }
 
 float ScrollPanel_getOverscrollLimit(const ScrollPanel *sp) {
-    return sp ? (*sp).overscrollLimit : 0.0f;
+    return sp ? (*sp).overscrollExtentY : 0.0f;
 }
 
 void ScrollPanel_setGestureHeld(ScrollPanel *sp, bool held) {
@@ -698,10 +1092,16 @@ void ScrollPanel_stopGlide(ScrollPanel *sp) {
         ScrollBar_stopMomentum((*sp).hBar);
     if ((*sp).vBar)
         ScrollBar_stopMomentum((*sp).vBar);
+    (*sp).velocityX = 0.0f;
+    (*sp).velocityY = 0.0f;
+    if ((*sp).motionWriterX == SCROLLPANEL_MOTION_SYNTHETIC)
+        (*sp).motionWriterX = SCROLLPANEL_MOTION_IDLE;
+    if ((*sp).motionWriterY == SCROLLPANEL_MOTION_SYNTHETIC)
+        (*sp).motionWriterY = SCROLLPANEL_MOTION_IDLE;
 }
 
 void ScrollPanel_setContentSize(ScrollPanel *sp, float w, float h) {
-    if (!sp)
+    if (!sp || !isfinite(w) || !isfinite(h))
         return;
     // AUTO arms the hug for that dim (the flag persists); concrete clears it.
     (*sp).contentAutoW = Size_isAutoF(w);
@@ -722,12 +1122,36 @@ void ScrollPanel_layoutBars(ScrollPanel *sp) {
     dockBar(sp, (*sp).vBar, false);
     float loX = 0.0f, hiX = 0.0f, loY = 0.0f, hiY = 0.0f;
     offsetBounds(sp, &loX, &hiX, &loY, &hiY);
-    (*sp).offsetX = pinOffset((*sp).offsetX, loX, hiX);
-    (*sp).offsetY = pinOffset((*sp).offsetY, loY, hiY);
+    bool hadRawX = (*sp).rawPullX != 0.0f;
+    bool hadRawY = (*sp).rawPullY != 0.0f;
+    Panel *base = &(*sp).base;
+    float viewW = Component_getWidth(&(*base).component);
+    float viewH = Component_getHeight(&(*base).component);
+    if ((*sp).rawPullX != 0.0f && hiX > loX && axisResistanceEnabled(sp, true)) {
+        float edge = (*sp).rawPullX < 0.0f ? loX : hiX;
+        float offset = edge + rubberDistance((*sp).rawPullX, viewW,
+            (*sp).overscrollExtentX, (*sp).rubberCoefficientX);
+        commitAxisOffset(sp, true, offset, (*sp).rawPullX);
+    } else {
+        commitAxisOffset(sp, true, pinOffset((*sp).offsetX, loX, hiX), 0.0f);
+        if (hadRawX) {
+            (*sp).springVelocityX = 0.0f;
+            setAxisMotionWriter(sp, true, SCROLLPANEL_MOTION_IDLE);
+        }
+    }
+    if ((*sp).rawPullY != 0.0f && hiY > loY && axisResistanceEnabled(sp, false)) {
+        float edge = (*sp).rawPullY < 0.0f ? loY : hiY;
+        float offset = edge + rubberDistance((*sp).rawPullY, viewH,
+            (*sp).overscrollExtentY, (*sp).rubberCoefficientY);
+        commitAxisOffset(sp, false, offset, (*sp).rawPullY);
+    } else {
+        commitAxisOffset(sp, false, pinOffset((*sp).offsetY, loY, hiY), 0.0f);
+        if (hadRawY) {
+            (*sp).springVelocityY = 0.0f;
+            setAxisMotionWriter(sp, false, SCROLLPANEL_MOTION_IDLE);
+        }
+    }
     placeContent(sp);
-    Panel *b = &(*sp).base;
-    float viewW = Component_getWidth(&(*b).component);
-    float viewH = Component_getHeight(&(*b).component);
     float contentW = viewW;
     float contentH = viewH;
     if ((*sp).contentPanel) {
@@ -757,9 +1181,20 @@ void ScrollPanel_syncToBars(ScrollPanel *sp) {
             continue;
         float extent = his[i] - los[i];
         float t = extent > 0.0f ? (offsets[i] - los[i]) / extent : 0.0f;
+        if (!isfinite(t))
+            t = 0.0f;
+        if (t < 0.0f)
+            t = 0.0f;
+        if (t > 1.0f)
+            t = 1.0f;
         float bmin = 0.0f, bmax = 1.0f;
         ScrollBar_getRange(bar, &bmin, &bmax);
-        ScrollBar_setValue(bar, bmin + t * (bmax - bmin));
+        if (!isfinite(bmin) || !isfinite(bmax)) {
+            bmin = 0.0f;
+            bmax = 1.0f;
+        }
+        ScrollBar_setValue(bar, finiteFloat((double) bmin
+            + (double) t * ((double) bmax - (double) bmin)));
     }
 }
 
@@ -777,17 +1212,19 @@ void ScrollPanel_syncFromBars(ScrollPanel *sp) {
             continue;
         float bmin = 0.0f, bmax = 1.0f;
         ScrollBar_getRange(bar, &bmin, &bmax);
-        float span = bmax - bmin;
-        float t = span != 0.0f ? (ScrollBar_getValue(bar) - bmin) / span : 0.0f;
+        float barValue = ScrollBar_getValue(bar);
+        if (!isfinite(bmin) || !isfinite(bmax) || !isfinite(barValue))
+            continue;
+        double span = (double) bmax - (double) bmin;
+        float t = span != 0.0
+            ? finiteFloat(((double) barValue - (double) bmin) / span) : 0.0f;
         if (t < 0.0f)
             t = 0.0f;
         if (t > 1.0f)
             t = 1.0f;
-        float extent = his[i] - los[i];
-        if (i == 0)
-            (*sp).offsetX = los[i] + t * extent;
-        else
-            (*sp).offsetY = los[i] + t * extent;
+        double extent = (double) his[i] - (double) los[i];
+        float offset = finiteFloat((double) los[i] + (double) t * extent);
+        commitAxisOffset(sp, i == 0, offset, 0.0f);
     }
     placeContent(sp);
     noteBarsScrolled(sp, (*sp).lastTickMs);
@@ -797,7 +1234,7 @@ void ScrollPanel_syncFromBars(ScrollPanel *sp) {
 
 ;;SETTER
 void ScrollPanel_verticalScroll_setThickness(ScrollPanel *sp, float px) {
-    if (!sp || !(*sp).vBar)
+    if (!sp || !(*sp).vBar || !isfinite(px))
         return;
     ScrollBar_setThickness((*sp).vBar, px);
     ScrollPanel_layoutBars(sp);
@@ -805,7 +1242,7 @@ void ScrollPanel_verticalScroll_setThickness(ScrollPanel *sp, float px) {
 
 ;;SETTER
 void ScrollPanel_verticalScroll_setInset(ScrollPanel *sp, float px) {
-    if (!sp || !(*sp).vBar)
+    if (!sp || !(*sp).vBar || !isfinite(px))
         return;
     ScrollBar_setInset((*sp).vBar, px);
     ScrollPanel_layoutBars(sp);
@@ -821,7 +1258,7 @@ void ScrollPanel_verticalScroll_setVisible(ScrollPanel *sp, bool visible) {
 
 ;;SETTER
 void ScrollPanel_verticalScroll_setRange(ScrollPanel *sp, float min, float max) {
-    if (!sp || !(*sp).vBar)
+    if (!sp || !(*sp).vBar || !isfinite(min) || !isfinite(max))
         return;
     ScrollBar_setRange((*sp).vBar, min, max);
     ScrollPanel_syncToBars(sp);
@@ -829,7 +1266,7 @@ void ScrollPanel_verticalScroll_setRange(ScrollPanel *sp, float min, float max) 
 
 ;;SETTER
 void ScrollPanel_verticalScroll_setValue(ScrollPanel *sp, float value) {
-    if (!sp || !(*sp).vBar)
+    if (!sp || !(*sp).vBar || !isfinite(value))
         return;
     ScrollBar_setValue((*sp).vBar, value);
     ScrollPanel_syncFromBars(sp);
@@ -852,7 +1289,7 @@ float ScrollPanel_verticalScroll_getInset(const ScrollPanel *sp) {
 
 ;;SETTER
 void ScrollPanel_verticalScroll_setShortLengthLimit(ScrollPanel *sp, float percent) {
-    if (!sp || !(*sp).vBar)
+    if (!sp || !(*sp).vBar || !isfinite(percent))
         return;
     ScrollBar_setShortLengthLimit((*sp).vBar, percent);
 }
@@ -867,7 +1304,7 @@ void ScrollPanel_verticalScroll_setHideWhenUnused(ScrollPanel *sp, bool hide) {
 
 ;;SETTER
 void ScrollPanel_verticalScroll_setOpacity(ScrollPanel *sp, float opacity) {
-    if (!sp || !(*sp).vBar)
+    if (!sp || !(*sp).vBar || !isfinite(opacity))
         return;
     ScrollBar_setOpacity((*sp).vBar, opacity);
 }
@@ -913,18 +1350,19 @@ void ScrollPanel_verticalScroll_setScrollMode(ScrollPanel *sp, int mode) {
     if (!sp || !(*sp).vBar)
         return;
     ScrollBar_setScrollMode((*sp).vBar, mode);
+    ScrollPanel_layoutBars(sp);
 }
 
 ;;SETTER
 void ScrollPanel_verticalScroll_setScrollFriction(ScrollPanel *sp, float friction) {
-    if (!sp || !(*sp).vBar)
+    if (!sp || !(*sp).vBar || !isfinite(friction))
         return;
     ScrollBar_setScrollFriction((*sp).vBar, friction);
 }
 
 ;;SETTER
 void ScrollPanel_verticalScroll_setScrollSensitivity(ScrollPanel *sp, float sensitivity) {
-    if (!sp || !(*sp).vBar)
+    if (!sp || !(*sp).vBar || !isfinite(sensitivity))
         return;
     ScrollBar_setScrollSensitivity((*sp).vBar, sensitivity);
 }
@@ -1030,7 +1468,7 @@ void ScrollPanel_verticalScroll_getThumbRect(const ScrollPanel *sp,
 
 ;;SETTER
 void ScrollPanel_horizontalScroll_setThickness(ScrollPanel *sp, float px) {
-    if (!sp || !(*sp).hBar)
+    if (!sp || !(*sp).hBar || !isfinite(px))
         return;
     ScrollBar_setThickness((*sp).hBar, px);
     ScrollPanel_layoutBars(sp);
@@ -1038,7 +1476,7 @@ void ScrollPanel_horizontalScroll_setThickness(ScrollPanel *sp, float px) {
 
 ;;SETTER
 void ScrollPanel_horizontalScroll_setInset(ScrollPanel *sp, float px) {
-    if (!sp || !(*sp).hBar)
+    if (!sp || !(*sp).hBar || !isfinite(px))
         return;
     ScrollBar_setInset((*sp).hBar, px);
     ScrollPanel_layoutBars(sp);
@@ -1054,7 +1492,7 @@ void ScrollPanel_horizontalScroll_setVisible(ScrollPanel *sp, bool visible) {
 
 ;;SETTER
 void ScrollPanel_horizontalScroll_setRange(ScrollPanel *sp, float min, float max) {
-    if (!sp || !(*sp).hBar)
+    if (!sp || !(*sp).hBar || !isfinite(min) || !isfinite(max))
         return;
     ScrollBar_setRange((*sp).hBar, min, max);
     ScrollPanel_syncToBars(sp);
@@ -1062,7 +1500,7 @@ void ScrollPanel_horizontalScroll_setRange(ScrollPanel *sp, float min, float max
 
 ;;SETTER
 void ScrollPanel_horizontalScroll_setValue(ScrollPanel *sp, float value) {
-    if (!sp || !(*sp).hBar)
+    if (!sp || !(*sp).hBar || !isfinite(value))
         return;
     ScrollBar_setValue((*sp).hBar, value);
     ScrollPanel_syncFromBars(sp);
@@ -1085,7 +1523,7 @@ float ScrollPanel_horizontalScroll_getInset(const ScrollPanel *sp) {
 
 ;;SETTER
 void ScrollPanel_horizontalScroll_setShortLengthLimit(ScrollPanel *sp, float percent) {
-    if (!sp || !(*sp).hBar)
+    if (!sp || !(*sp).hBar || !isfinite(percent))
         return;
     ScrollBar_setShortLengthLimit((*sp).hBar, percent);
 }
@@ -1100,7 +1538,7 @@ void ScrollPanel_horizontalScroll_setHideWhenUnused(ScrollPanel *sp, bool hide) 
 
 ;;SETTER
 void ScrollPanel_horizontalScroll_setOpacity(ScrollPanel *sp, float opacity) {
-    if (!sp || !(*sp).hBar)
+    if (!sp || !(*sp).hBar || !isfinite(opacity))
         return;
     ScrollBar_setOpacity((*sp).hBar, opacity);
 }
@@ -1146,18 +1584,19 @@ void ScrollPanel_horizontalScroll_setScrollMode(ScrollPanel *sp, int mode) {
     if (!sp || !(*sp).hBar)
         return;
     ScrollBar_setScrollMode((*sp).hBar, mode);
+    ScrollPanel_layoutBars(sp);
 }
 
 ;;SETTER
 void ScrollPanel_horizontalScroll_setScrollFriction(ScrollPanel *sp, float friction) {
-    if (!sp || !(*sp).hBar)
+    if (!sp || !(*sp).hBar || !isfinite(friction))
         return;
     ScrollBar_setScrollFriction((*sp).hBar, friction);
 }
 
 ;;SETTER
 void ScrollPanel_horizontalScroll_setScrollSensitivity(ScrollPanel *sp, float sensitivity) {
-    if (!sp || !(*sp).hBar)
+    if (!sp || !(*sp).hBar || !isfinite(sensitivity))
         return;
     ScrollBar_setScrollSensitivity((*sp).hBar, sensitivity);
 }
@@ -1263,7 +1702,7 @@ void ScrollPanel_horizontalScroll_getThumbRect(const ScrollPanel *sp,
 
 ;;SETTER
 void ScrollPanel_contentPanel_setSize(ScrollPanel *sp, float w, float h) {
-    if (!sp)
+    if (!sp || !isfinite(w) || !isfinite(h))
         return;
     // AUTO arms the hug for that dim (the flag persists); concrete clears it.
     (*sp).contentAutoW = Size_isAutoF(w);
@@ -1319,6 +1758,50 @@ bool ScrollPanel_isContentAutoHeight(const ScrollPanel *sp) {
     return sp ? (*sp).contentAutoH : false;
 }
 
+// MOTION TUNING PART VERBS (PUBLIC)
+
+#define DEFINE_AXIS_FLOAT_ACCESSORS(PREFIX, FIELD, STORAGE, DEFAULT_VALUE) \
+    void ScrollPanel_##PREFIX##_set##FIELD(ScrollPanel *sp, float value) { \
+        if (!sp || !isfinite(value)) \
+            return; \
+        if (value < 0.0f) \
+            value = 0.0f; \
+        (*sp).STORAGE = value; \
+        ScrollPanel_layoutBars(sp); \
+    } \
+    float ScrollPanel_##PREFIX##_get##FIELD(const ScrollPanel *sp) { \
+        return sp ? (*sp).STORAGE : DEFAULT_VALUE; \
+    }
+
+// The private macro stamps symmetric, null-safe part accessors. Its tokenized
+// field names map directly to the mirrored struct fields above.
+DEFINE_AXIS_FLOAT_ACCESSORS(verticalScroll, RubberCoefficient, rubberCoefficientY, SCROLLPANEL_RUBBER_COEFFICIENT_DEFAULT)
+DEFINE_AXIS_FLOAT_ACCESSORS(verticalScroll, OverscrollExtent, overscrollExtentY, SCROLLPANEL_OVERSCROLL_LIMIT_DEFAULT)
+DEFINE_AXIS_FLOAT_ACCESSORS(verticalScroll, VelocitySampleTauMs, velocitySampleTauMsY, SCROLLPANEL_VELOCITY_SAMPLE_TAU_MS_DEFAULT)
+DEFINE_AXIS_FLOAT_ACCESSORS(verticalScroll, DecelerationTauMs, decelerationTauMsY, SCROLLPANEL_DECELERATION_TAU_MS_DEFAULT)
+DEFINE_AXIS_FLOAT_ACCESSORS(verticalScroll, StopVelocity, stopVelocityY, SCROLLPANEL_STOP_VELOCITY_DEFAULT)
+DEFINE_AXIS_FLOAT_ACCESSORS(verticalScroll, SpringOmega, springOmegaY, SCROLLPANEL_SPRING_OMEGA_DEFAULT)
+DEFINE_AXIS_FLOAT_ACCESSORS(verticalScroll, SpringSnapDistance, springSnapDistanceY, SCROLLPANEL_SPRING_SNAP_PX_DEFAULT)
+DEFINE_AXIS_FLOAT_ACCESSORS(verticalScroll, SpringSnapVelocity, springSnapVelocityY, SCROLLPANEL_SPRING_SNAP_VELOCITY_DEFAULT)
+DEFINE_AXIS_FLOAT_ACCESSORS(horizontalScroll, RubberCoefficient, rubberCoefficientX, SCROLLPANEL_RUBBER_COEFFICIENT_DEFAULT)
+DEFINE_AXIS_FLOAT_ACCESSORS(horizontalScroll, OverscrollExtent, overscrollExtentX, SCROLLPANEL_OVERSCROLL_LIMIT_DEFAULT)
+DEFINE_AXIS_FLOAT_ACCESSORS(horizontalScroll, VelocitySampleTauMs, velocitySampleTauMsX, SCROLLPANEL_VELOCITY_SAMPLE_TAU_MS_DEFAULT)
+DEFINE_AXIS_FLOAT_ACCESSORS(horizontalScroll, DecelerationTauMs, decelerationTauMsX, SCROLLPANEL_DECELERATION_TAU_MS_DEFAULT)
+DEFINE_AXIS_FLOAT_ACCESSORS(horizontalScroll, StopVelocity, stopVelocityX, SCROLLPANEL_STOP_VELOCITY_DEFAULT)
+DEFINE_AXIS_FLOAT_ACCESSORS(horizontalScroll, SpringOmega, springOmegaX, SCROLLPANEL_SPRING_OMEGA_DEFAULT)
+DEFINE_AXIS_FLOAT_ACCESSORS(horizontalScroll, SpringSnapDistance, springSnapDistanceX, SCROLLPANEL_SPRING_SNAP_PX_DEFAULT)
+DEFINE_AXIS_FLOAT_ACCESSORS(horizontalScroll, SpringSnapVelocity, springSnapVelocityX, SCROLLPANEL_SPRING_SNAP_VELOCITY_DEFAULT)
+
+#undef DEFINE_AXIS_FLOAT_ACCESSORS
+
+int ScrollPanel_verticalScroll_getMotionWriter(const ScrollPanel *sp) {
+    return sp ? (*sp).motionWriterY : SCROLLPANEL_MOTION_IDLE;
+}
+
+int ScrollPanel_horizontalScroll_getMotionWriter(const ScrollPanel *sp) {
+    return sp ? (*sp).motionWriterX : SCROLLPANEL_MOTION_IDLE;
+}
+
 // PAINT (PUBLIC)
 
 // Generic subtree paint: each node paints its own stages into its
@@ -1358,7 +1841,7 @@ static void paintSubtree(Panel *node, float dx, float dy,
         paintSubtree(Panel_getChild(node, i), x, y, skips, skipCount);
 }
 
-// The R4 -> R3 handoff: map the panel's two bars into the R3 chrome holder
+// The R4-to-R3 handoff maps the panel's two bars into the R3 chrome holder
 // (which docks + paints both bars). The panel background stays R4
 // (Panel_paintParts); the holder's own fill is left off here.
 static void fillPanelGraphics(const ScrollPanel *sp, ScrollPanelGraphics *g) {

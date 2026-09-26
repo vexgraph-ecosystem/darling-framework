@@ -62,6 +62,7 @@
 #include "event/value.h"
 #include "event/tree.h"
 #include "event/gesture.h"
+#include "event/scroll_capture.h"
 #include "darling/cursor/cursor.h"
 
 ;;DEFINITION
@@ -184,6 +185,7 @@ static const EmitRow kRows[] = {
     { "ID_COMPONENT", (uint64_t) TYPE_COMPONENT_SINGLETON, ID_COMPONENT, sizeof(Component) },
     { "ID_SCROLLPANEL", (uint64_t) TYPE_SCROLLPANEL_SINGLETON, ID_SCROLLPANEL, sizeof(ScrollPanel) },
     { "ID_FLEX_CONTAINER", (uint64_t) TYPE_FLEX_CONTAINER_SINGLETON, ID_FLEX_CONTAINER, sizeof(FlexContainer) },
+    { "ID_SCROLL_CAPTURE", (uint64_t) TYPE_SCROLL_CAPTURE_SINGLETON, ID_SCROLL_CAPTURE, sizeof(ScrollCapture) },
 };
 
 _Static_assert(sizeof(kRows) / sizeof(kRows[0]) == DARLING_PARENT_COUNT - 1u,

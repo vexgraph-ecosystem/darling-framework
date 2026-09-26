@@ -103,6 +103,7 @@
 // ScrollContainer, which keeps ID_SCROLL_PANEL; this class takes the next
 // free number per the registry rule) ---
 #define ID_SCROLLPANEL  57u
+#define ID_SCROLL_CAPTURE  59u
 
 // --- STRUCTURAL SINGLETONS (darling tree) ---
 #define TYPE_PANEL_SINGLETON       (PROJ_DARLING | FORM_SINGLETON | ID_PANEL)
@@ -173,5 +174,6 @@
 
 // --- STRUCTURAL LEAF SINGLETONS ---
 #define TYPE_COMPONENT_SINGLETON      (PROJ_DARLING | FORM_SINGLETON | ID_COMPONENT)
+#define TYPE_SCROLL_CAPTURE_SINGLETON (PROJ_DARLING | FORM_SINGLETON | ID_SCROLL_CAPTURE)
 
 #endif

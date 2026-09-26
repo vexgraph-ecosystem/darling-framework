@@ -135,6 +135,8 @@ const char *Darling_kindName(uint64_t classId) {
         return "ExpandableListContainer";
     if (cls == ID_FLEX_CONTAINER)
         return "FlexContainer";
+    if (cls == ID_SCROLL_CAPTURE)
+        return "ScrollCapture";
     if (cls == ID_BUTTON)
         return "Button";
     if (cls == ID_SWITCH)

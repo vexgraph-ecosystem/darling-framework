@@ -23,20 +23,28 @@
 // content panel is NOT stuck to the viewport: it keeps its own size unless it
 // carries SIZE_AUTO, in which case it hugs the viewport (the Absolute Size
 // and Location Law). Offsets are the single source of truth, clamped to the
-// content/viewport bounds; bars derive from the absolute every layout pass,
-// so a live resize never drifts them (BUG-008).
+// content/viewport bounds plus resisted elastic pull; bars derive from the
+// absolute every layout pass, so a live resize never drifts or erases pull.
 
 // Extra grab area around a bar's track (px), so a 12px bar is easy to hold.
 #define SCROLLPANEL_DRAG_HIT_PAD 4.0f
-// Elastic (slinky) overscroll: how far past an end an elastic axis may
-// stretch, and the spring time constant that pulls it home.
-#define SCROLLPANEL_OVERSCROLL_LIMIT_DEFAULT 80.0f
-#define SCROLLPANEL_SPRING_TAU_MS            120.0f
-#define SCROLLPANEL_SPRING_SNAP_PX           0.5f
-// While input keeps arriving within this window the stretch is HELD (slinky
-// rubber); only after release does the spring pull it home. This is also what
-// stops the overscrolled axis from vibrating (no glide fighting the spring).
-#define SCROLLPANEL_ELASTIC_RELEASE_MS       90u
+// Named, runtime-backed motion defaults (the No Hardcoding Law).
+// Public float tuning rejects NaN and infinity; hot motion drops any packet
+// containing a non-finite component.
+#define SCROLLPANEL_OVERSCROLL_LIMIT_DEFAULT       80.0f
+#define SCROLLPANEL_RUBBER_COEFFICIENT_DEFAULT      0.55f
+#define SCROLLPANEL_VELOCITY_SAMPLE_TAU_MS_DEFAULT 40.0f
+#define SCROLLPANEL_DECELERATION_TAU_MS_DEFAULT   325.0f
+#define SCROLLPANEL_STOP_VELOCITY_DEFAULT           5.0f
+#define SCROLLPANEL_SPRING_OMEGA_DEFAULT            18.0f
+#define SCROLLPANEL_SPRING_SNAP_PX_DEFAULT           0.5f
+#define SCROLLPANEL_SPRING_SNAP_VELOCITY_DEFAULT     5.0f
+
+#define SCROLLPANEL_MOTION_IDLE       0
+#define SCROLLPANEL_MOTION_DIRECT     1
+#define SCROLLPANEL_MOTION_NATIVE     2
+#define SCROLLPANEL_MOTION_SYNTHETIC  3
+#define SCROLLPANEL_MOTION_SPRING     4
 
 typedef struct ScrollPanel {
     Panel base;                 // the viewport itself (same properties as a whole)
@@ -51,8 +59,34 @@ typedef struct ScrollPanel {
     bool vVisible;              // vertical bar master visibility
     uint64_t lastTickMs;        // caller clock for overlay auto-hide
     int32_t dragAxis;           // -1 none, 0 vertical bar, 1 horizontal bar
-    float overscrollLimit;      // Elastic stretch past an end (px)
     bool gestureHeld;           // A live gesture owns the panel: gravity waits
+    bool nativeMomentum;        // Native momentum is authoritative while true
+    float rawPullX;             // Signed uncompressed elastic pull
+    float rawPullY;
+    float velocityX;            // Time-derived fallback velocity (px/sec)
+    float velocityY;
+    float springVelocityX;      // Critically damped raw-pull velocity
+    float springVelocityY;
+    uint64_t lastInputXMs;      // Per-axis velocity sample clocks
+    uint64_t lastInputYMs;
+    int motionWriterX;          // SCROLLPANEL_MOTION_* single-writer state
+    int motionWriterY;
+    float rubberCoefficientX;   // UIScrollView-style resistance coefficient
+    float rubberCoefficientY;
+    float overscrollExtentX;    // Configured resistance asymptote (px)
+    float overscrollExtentY;
+    float velocitySampleTauMsX; // EWMA sample time constant
+    float velocitySampleTauMsY;
+    float decelerationTauMsX;   // Exact exponential decay time constant
+    float decelerationTauMsY;
+    float stopVelocityX;        // Deceleration stop threshold (px/sec)
+    float stopVelocityY;
+    float springOmegaX;         // Critical spring angular rate (1/sec)
+    float springOmegaY;
+    float springSnapDistanceX;  // Spring snap distance (px)
+    float springSnapDistanceY;
+    float springSnapVelocityX;  // Spring snap velocity (px/sec)
+    float springSnapVelocityY;
 } ScrollPanel;
 
 // Constructors:
@@ -70,18 +104,22 @@ void ScrollPanel_setOffset(ScrollPanel *sp, float x, float y);
 void ScrollPanel_setOffsetAt(ScrollPanel *sp, float x, float y, uint64_t nowMs);
 void ScrollPanel_scrollBy(ScrollPanel *sp, float dx, float dy);
 void ScrollPanel_scrollByAt(ScrollPanel *sp, float dx, float dy, uint64_t nowMs);
-// Chained scroll for nesting: consume what fits inside the bounds, report
-// the leftover in outDx/outDy (dest-last) so the caller can bubble it to
-// the parent — when the inner panel is at its end, the outer continues.
-void ScrollPanel_scrollByChained(ScrollPanel *sp, float dx, float dy, uint64_t nowMs,
-                                 float *outDx, float *outDy);
-// Wheel/trackpad input entry: each axis scales by its bar's sensitivity and
-// arms that bar's momentum; the offset then moves and glides on tick.
+// Legacy one-packet input entry: scales by per-axis sensitivity, applies the
+// packet, and releases into ScrollPanel-owned fallback motion.
 void ScrollPanel_scrollInputAt(ScrollPanel *sp, float dx, float dy, uint64_t nowMs);
-// Input + chaining in one: sensitivity + momentum arm, then the leftover
-// bubbles to the caller (dest-last) so a parent continues at the inner end.
-void ScrollPanel_scrollInputChainedAt(ScrollPanel *sp, float dx, float dy, uint64_t nowMs,
-                                      float *outDx, float *outDy);
+// Captured-gesture motion. Acquisition belongs to ScrollCapture; these calls
+// never hit-test or retarget. Native momentum never arms synthetic momentum.
+void ScrollPanel_directBegin(ScrollPanel *sp, uint64_t nowMs);
+void ScrollPanel_directChange(ScrollPanel *sp, float dx, float dy, uint64_t nowMs);
+void ScrollPanel_directEnd(ScrollPanel *sp, uint64_t nowMs);
+void ScrollPanel_nativeMomentumBegin(ScrollPanel *sp, uint64_t nowMs);
+void ScrollPanel_nativeMomentumChange(ScrollPanel *sp, float dx, float dy, uint64_t nowMs);
+void ScrollPanel_nativeMomentumEnd(ScrollPanel *sp, uint64_t nowMs);
+void ScrollPanel_cancelMotion(ScrollPanel *sp);
+// Public acquisition queries: no external field inspection is required.
+bool ScrollPanel_canScrollHorizontal(const ScrollPanel *sp, float dx);
+bool ScrollPanel_canScrollVertical(const ScrollPanel *sp, float dy);
+bool ScrollPanel_canAcquire(const ScrollPanel *sp, float dx, float dy);
 // Pointer drag on the bars: begin grabs the bar under the viewport-local
 // point (thumb or track), dragTo tracks the held pointer, end releases.
 // Viewport-local coordinates (0,0 = panel top-left).
@@ -133,6 +171,14 @@ void ScrollPanel_verticalScroll_setScrollSensitivity(ScrollPanel *sp, float sens
 void ScrollPanel_verticalScroll_setScrollDelay(ScrollPanel *sp, uint64_t delayMs);
 void ScrollPanel_verticalScroll_setFadeOutMs(ScrollPanel *sp, uint64_t fadeOutMs);
 void ScrollPanel_verticalScroll_setGrappable(ScrollPanel *sp, bool grappable);
+void ScrollPanel_verticalScroll_setRubberCoefficient(ScrollPanel *sp, float coefficient);
+void ScrollPanel_verticalScroll_setOverscrollExtent(ScrollPanel *sp, float px);
+void ScrollPanel_verticalScroll_setVelocitySampleTauMs(ScrollPanel *sp, float tauMs);
+void ScrollPanel_verticalScroll_setDecelerationTauMs(ScrollPanel *sp, float tauMs);
+void ScrollPanel_verticalScroll_setStopVelocity(ScrollPanel *sp, float pxPerSecond);
+void ScrollPanel_verticalScroll_setSpringOmega(ScrollPanel *sp, float omega);
+void ScrollPanel_verticalScroll_setSpringSnapDistance(ScrollPanel *sp, float px);
+void ScrollPanel_verticalScroll_setSpringSnapVelocity(ScrollPanel *sp, float pxPerSecond);
 float ScrollPanel_verticalScroll_getValue(const ScrollPanel *sp);
 float ScrollPanel_verticalScroll_getThickness(const ScrollPanel *sp);
 float ScrollPanel_verticalScroll_getInset(const ScrollPanel *sp);
@@ -148,6 +194,15 @@ uint64_t ScrollPanel_verticalScroll_getFadeOutMs(const ScrollPanel *sp);
 bool ScrollPanel_verticalScroll_isGrappable(const ScrollPanel *sp);
 bool ScrollPanel_verticalScroll_isEffectiveVisible(const ScrollPanel *sp);
 bool ScrollPanel_verticalScroll_isNeeded(const ScrollPanel *sp);
+float ScrollPanel_verticalScroll_getRubberCoefficient(const ScrollPanel *sp);
+float ScrollPanel_verticalScroll_getOverscrollExtent(const ScrollPanel *sp);
+float ScrollPanel_verticalScroll_getVelocitySampleTauMs(const ScrollPanel *sp);
+float ScrollPanel_verticalScroll_getDecelerationTauMs(const ScrollPanel *sp);
+float ScrollPanel_verticalScroll_getStopVelocity(const ScrollPanel *sp);
+float ScrollPanel_verticalScroll_getSpringOmega(const ScrollPanel *sp);
+float ScrollPanel_verticalScroll_getSpringSnapDistance(const ScrollPanel *sp);
+float ScrollPanel_verticalScroll_getSpringSnapVelocity(const ScrollPanel *sp);
+int ScrollPanel_verticalScroll_getMotionWriter(const ScrollPanel *sp);
 void ScrollPanel_verticalScroll_getRange(const ScrollPanel *sp, float *outMin, float *outMax);
 void ScrollPanel_verticalScroll_getThumbRect(const ScrollPanel *sp,
                                              float *outX, float *outY, float *outW, float *outH);
@@ -168,6 +223,14 @@ void ScrollPanel_horizontalScroll_setScrollSensitivity(ScrollPanel *sp, float se
 void ScrollPanel_horizontalScroll_setScrollDelay(ScrollPanel *sp, uint64_t delayMs);
 void ScrollPanel_horizontalScroll_setFadeOutMs(ScrollPanel *sp, uint64_t fadeOutMs);
 void ScrollPanel_horizontalScroll_setGrappable(ScrollPanel *sp, bool grappable);
+void ScrollPanel_horizontalScroll_setRubberCoefficient(ScrollPanel *sp, float coefficient);
+void ScrollPanel_horizontalScroll_setOverscrollExtent(ScrollPanel *sp, float px);
+void ScrollPanel_horizontalScroll_setVelocitySampleTauMs(ScrollPanel *sp, float tauMs);
+void ScrollPanel_horizontalScroll_setDecelerationTauMs(ScrollPanel *sp, float tauMs);
+void ScrollPanel_horizontalScroll_setStopVelocity(ScrollPanel *sp, float pxPerSecond);
+void ScrollPanel_horizontalScroll_setSpringOmega(ScrollPanel *sp, float omega);
+void ScrollPanel_horizontalScroll_setSpringSnapDistance(ScrollPanel *sp, float px);
+void ScrollPanel_horizontalScroll_setSpringSnapVelocity(ScrollPanel *sp, float pxPerSecond);
 float ScrollPanel_horizontalScroll_getValue(const ScrollPanel *sp);
 float ScrollPanel_horizontalScroll_getThickness(const ScrollPanel *sp);
 float ScrollPanel_horizontalScroll_getInset(const ScrollPanel *sp);
@@ -183,6 +246,15 @@ uint64_t ScrollPanel_horizontalScroll_getFadeOutMs(const ScrollPanel *sp);
 bool ScrollPanel_horizontalScroll_isGrappable(const ScrollPanel *sp);
 bool ScrollPanel_horizontalScroll_isEffectiveVisible(const ScrollPanel *sp);
 bool ScrollPanel_horizontalScroll_isNeeded(const ScrollPanel *sp);
+float ScrollPanel_horizontalScroll_getRubberCoefficient(const ScrollPanel *sp);
+float ScrollPanel_horizontalScroll_getOverscrollExtent(const ScrollPanel *sp);
+float ScrollPanel_horizontalScroll_getVelocitySampleTauMs(const ScrollPanel *sp);
+float ScrollPanel_horizontalScroll_getDecelerationTauMs(const ScrollPanel *sp);
+float ScrollPanel_horizontalScroll_getStopVelocity(const ScrollPanel *sp);
+float ScrollPanel_horizontalScroll_getSpringOmega(const ScrollPanel *sp);
+float ScrollPanel_horizontalScroll_getSpringSnapDistance(const ScrollPanel *sp);
+float ScrollPanel_horizontalScroll_getSpringSnapVelocity(const ScrollPanel *sp);
+int ScrollPanel_horizontalScroll_getMotionWriter(const ScrollPanel *sp);
 void ScrollPanel_horizontalScroll_getRange(const ScrollPanel *sp, float *outMin, float *outMax);
 void ScrollPanel_horizontalScroll_getThumbRect(const ScrollPanel *sp,
                                                float *outX, float *outY, float *outW, float *outH);

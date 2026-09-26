@@ -100,6 +100,7 @@ add_library(darling STATIC
     event/value.c
     event/tree.c
     event/gesture.c
+    event/scroll_capture.c
     event/bridge.c
     text/text_select.c
     io/bake.c
@@ -232,6 +233,14 @@ if(NOT TARGET scroll_panel_test AND EXISTS "${DARLING_TEST_DIR}/scroll_panel_tes
     )
     target_link_libraries(scroll_panel_test PRIVATE darling graphvex vexspoke)
     target_compile_options(scroll_panel_test PRIVATE -Wall -Wextra -Werror)
+endif()
+
+if(NOT TARGET scroll_capture_test AND EXISTS "${DARLING_TEST_DIR}/scroll_capture_test.c")
+    add_executable(scroll_capture_test
+        "${DARLING_TEST_DIR}/scroll_capture_test.c"
+    )
+    target_link_libraries(scroll_capture_test PRIVATE darling graphvex vexspoke)
+    target_compile_options(scroll_capture_test PRIVATE -Wall -Wextra -Werror)
 endif()
 
 if(NOT TARGET checkbox_test AND EXISTS "${DARLING_TEST_DIR}/checkbox_test.c")
