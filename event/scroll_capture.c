@@ -134,6 +134,11 @@ void ScrollCapture_nativeMomentumBegin(ScrollCapture *self, uint64_t nowMs) {
         return;
     if ((*self).state != SCROLL_CAPTURE_DIRECT && (*self).state != SCROLL_CAPTURE_MOMENTUM_GRACE)
         return;
+    // AppKit can report fingers-up and momentum-began in one event. The host
+    // sends the momentum phase, so release contact here if no distinct END
+    // packet arrived. This also gives the spring its per-axis momentum latch.
+    if ((*self).state == SCROLL_CAPTURE_DIRECT)
+        ScrollPanel_directEnd((*self).owner, nowMs);
     (*self).lastEventMs = nowMs;
     (*self).state = SCROLL_CAPTURE_NATIVE_MOMENTUM;
     ScrollPanel_nativeMomentumBegin((*self).owner, nowMs);

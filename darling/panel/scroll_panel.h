@@ -61,6 +61,8 @@ typedef struct ScrollPanel {
     int32_t dragAxis;           // -1 none, 0 vertical bar, 1 horizontal bar
     bool gestureHeld;           // Live CONTACT holds the spring; momentum never does
     bool nativeMomentum;        // Native momentum is authoritative while true
+    bool springConsumedMomentumX; // Same gesture cannot repull after spring snaps
+    bool springConsumedMomentumY;
     float rawPullX;             // Signed uncompressed elastic pull
     float rawPullY;
     float velocityX;            // Time-derived fallback velocity (px/sec)

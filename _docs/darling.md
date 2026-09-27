@@ -131,8 +131,11 @@ A synthetic axis that reaches elastic pull changes to spring for the next tick;
 it never runs both integrators in one tick, and one axis cannot stop the other.
 Spring acquisition carries sampled inward velocity up to the no-cross critical
 limit and discards outward velocity, yielding a monotonic non-oscillating return.
-Native momentum clears fallback momentum and transitions only overscrolled axes
-to spring on end. A zero effective extent or coefficient is a hard stop with no
+Native momentum clears fallback momentum and hands an overscrolled axis to the
+spring immediately; momentum-end preserves an already-running spring. Each axis
+remembers that spring handoff until the native tail ends, so a late packet cannot
+start a second outward excursion after the spring has snapped to its edge.
+A zero effective extent or coefficient is a hard stop with no
 invisible raw pull. `commitAxisOffset` is the sole runtime offset write seam, keeping
 content placement and bar synchronization at operation boundaries. ScrollBar remains
 range, chrome, and compatibility configuration, not a second offset integrator.
@@ -150,3 +153,5 @@ overscroll starts the spring that frame, and a later momentum packet aimed at a
 spring-owned axis is ignored rather than deepening the pull. Momentum that carries
 an axis past the edge hands that axis to the spring immediately, so an overscroll
 never parks in mid-air waiting out the inertia tail.
+If contact-end and momentum-begin arrive as one event, capture releases contact
+before starting momentum so the spring is never held by a missing END packet.

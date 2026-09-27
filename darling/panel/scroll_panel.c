@@ -663,6 +663,10 @@ static void transitionReleasedAxis(ScrollPanel *sp, bool horizontal, bool allowS
             (*sp).velocityY = 0.0f;
         }
         setAxisMotionWriter(sp, horizontal, SCROLLPANEL_MOTION_SPRING);
+        if (horizontal)
+            (*sp).springConsumedMomentumX = true;
+        else
+            (*sp).springConsumedMomentumY = true;
         return;
     }
     ScrollBar *bar = horizontal ? (*sp).hBar : (*sp).vBar;
@@ -687,6 +691,8 @@ void ScrollPanel_directBegin(ScrollPanel *sp, uint64_t nowMs) {
         return;
     (*sp).gestureHeld = true;
     (*sp).nativeMomentum = false;
+    (*sp).springConsumedMomentumX = false;
+    (*sp).springConsumedMomentumY = false;
     (*sp).velocityX = 0.0f;
     (*sp).velocityY = 0.0f;
     (*sp).lastInputXMs = nowMs;
@@ -753,9 +759,9 @@ void ScrollPanel_nativeMomentumChange(ScrollPanel *sp, float dx, float dy, uint6
         * (double) ScrollPanel_verticalScroll_getScrollSensitivity(sp));
     // A spring-owned axis ignores momentum (the rubber band is already pulling
     // it home); the other axis consumes its share as usual.
-    if ((*sp).motionWriterX != SCROLLPANEL_MOTION_SPRING)
+    if (!(*sp).springConsumedMomentumX && (*sp).motionWriterX != SCROLLPANEL_MOTION_SPRING)
         applyAxisDelta(sp, true, sx);
-    if ((*sp).motionWriterY != SCROLLPANEL_MOTION_SPRING)
+    if (!(*sp).springConsumedMomentumY && (*sp).motionWriterY != SCROLLPANEL_MOTION_SPRING)
         applyAxisDelta(sp, false, sy);
     // Momentum that carries an axis past the edge hands that axis to the
     // spring now, so it rebounds instead of parking in mid-air until the tail
@@ -775,9 +781,13 @@ void ScrollPanel_nativeMomentumEnd(ScrollPanel *sp, uint64_t nowMs) {
     (*sp).nativeMomentum = false;
     (*sp).lastTickMs = nowMs;
     // No synthetic continuation after native momentum: an overscrolled axis
-    // keeps rebounding, an in-bounds axis stops cleanly.
-    transitionReleasedAxis(sp, true, false);
-    transitionReleasedAxis(sp, false, false);
+    // keeps its existing spring trajectory; an in-bounds axis stops cleanly.
+    if ((*sp).motionWriterX != SCROLLPANEL_MOTION_SPRING)
+        transitionReleasedAxis(sp, true, false);
+    if ((*sp).motionWriterY != SCROLLPANEL_MOTION_SPRING)
+        transitionReleasedAxis(sp, false, false);
+    (*sp).springConsumedMomentumX = false;
+    (*sp).springConsumedMomentumY = false;
 }
 
 void ScrollPanel_cancelMotion(ScrollPanel *sp) {
@@ -789,6 +799,8 @@ void ScrollPanel_cancelMotion(ScrollPanel *sp) {
     (*sp).velocityY = 0.0f;
     transitionReleasedAxis(sp, true, false);
     transitionReleasedAxis(sp, false, false);
+    (*sp).springConsumedMomentumX = false;
+    (*sp).springConsumedMomentumY = false;
 }
 
 bool ScrollPanel_canScrollHorizontal(const ScrollPanel *sp, float dx) {
@@ -876,6 +888,8 @@ static void barDragTo(ScrollPanel *sp, ScrollBar *bar, bool horizontal, float lo
 
 static void cancelMotionForBarDrag(ScrollPanel *sp) {
     (*sp).nativeMomentum = false;
+    (*sp).springConsumedMomentumX = false;
+    (*sp).springConsumedMomentumY = false;
     (*sp).velocityX = 0.0f;
     (*sp).velocityY = 0.0f;
     (*sp).springVelocityX = 0.0f;
