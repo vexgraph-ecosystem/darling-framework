@@ -1,4 +1,13 @@
 cmake_minimum_required(VERSION 3.28)
+
+# Platform Support Floor Law: Apple Silicon only (arm64), macOS 14.0+.
+# Cache entries set before project() so a standalone build enforces the same
+# floor as the umbrella. A user -D override is preserved.
+if(APPLE)
+    set(CMAKE_OSX_ARCHITECTURES "arm64" CACHE STRING "Platform Support Floor Law: Apple Silicon only (arm64)")
+    set(CMAKE_OSX_DEPLOYMENT_TARGET "14.0" CACHE STRING "Platform Support Floor Law: macOS 14.0+")
+endif()
+
 project(darling C)
 
 set(CMAKE_C_STANDARD 23)
@@ -109,7 +118,7 @@ add_library(darling STATIC
 
 target_include_directories(darling PUBLIC ${CMAKE_CURRENT_SOURCE_DIR})
 target_compile_definitions(darling PUBLIC $<$<CONFIG:Debug>:DEBUG_BORROW_CHECK=1>)
-target_compile_options(darling PRIVATE -Wall -Wextra -Werror -mcpu=native)
+target_compile_options(darling PRIVATE -Wall -Wextra -Werror -mcpu=apple-m1)
 
 find_package(Vulkan QUIET)
 if(Vulkan_FOUND)
