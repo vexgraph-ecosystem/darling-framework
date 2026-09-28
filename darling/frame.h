@@ -69,6 +69,11 @@ Board *Frame_getSceneBoard(const Frame *frame);
 // composited, drawing through the active Graphics row in native pixels. ---
 void Frame_setDrawFn(Frame *frame, GraphicsFrameFn draw, void *userdata);
 
+// The demand probe: called every demand-loop step BEFORE the demand decision. A
+// client whose content changed out-of-band (a Reactive tick, an animation, a
+// caret) marks the frame dirty here. This is what wakes a present with no input.
+void Frame_setFrameFn(Frame *frame, GraphicsFrameFn probe, void *userdata);
+
 // --- The present hook (registered with the demand loop; also callable directly) ---
 // Composite scene -> content -> the UI draw fn into the seam and present.
 bool Frame_present(Frame *frame);

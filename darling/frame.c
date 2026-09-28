@@ -79,6 +79,8 @@ struct Frame {
     float scale;            // native px per logical point (the display backing scale)
     GraphicsFrameFn draw;   // the UI draw callback (inside the present hook)
     void *drawCtx;
+    GraphicsFrameFn probe;  // the demand probe (each loop step)
+    void *probeCtx;
     bool valid;             // the device came up
 };
 
@@ -89,12 +91,20 @@ static bool framePresentFn(void *window, double dt, void *userdata) {
     return Frame_present((Frame*) userdata);
 }
 
+// The demand loop's per-step probe: forward to the frame's installed probe.
+static void frameProbeFn(void *userdata, double dt) {
+    Frame *frame = (Frame*) userdata;
+    if (frame != nullptr && (*frame).probe != nullptr)
+        (*frame).probe((*frame).probeCtx, dt);
+}
+
 static void frameRefreshClient(Frame *frame) {
     GraphicsClient *client = GraphicsLoop_findClient((*frame).loop, frame);
     if (client == nullptr)
         return;
     (*client).content = (*frame).content;
     (*client).scene = (*frame).scene;
+    (*client).frameFn = frameProbeFn;
     (*client).presentFn = framePresentFn;
     (*client).userdata = frame;
 }
@@ -264,6 +274,14 @@ void Frame_setDrawFn(Frame *frame, GraphicsFrameFn draw, void *userdata) {
     (*frame).drawCtx = userdata;
 }
 
+void Frame_setFrameFn(Frame *frame, GraphicsFrameFn probe, void *userdata) {
+    if (frame == nullptr)
+        return;
+    (*frame).probe = probe;
+    (*frame).probeCtx = userdata;
+    frameRefreshClient(frame);
+}
+
 // THE PRESENT HOOK (PUBLIC)
 
 bool Frame_present(Frame *frame) {
@@ -274,6 +292,7 @@ bool Frame_present(Frame *frame) {
     int h = (int) Device_height((*frame).device);
     if (w <= 0 || h <= 0)
         return false;
+    Graphics_setPixelScale(Frame_getScale(frame));   // glyphs scale with the display
     if (!Graphics_begin())
         return false;
     if (!Graphics_clear(0x1E1E24FFu)) {
