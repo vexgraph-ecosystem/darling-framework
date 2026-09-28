@@ -115,6 +115,8 @@ add_library(darling STATIC
     io/bake.c
     io/mmap.c
     effect/visual_effect.c
+    darling/frame.c
+    darling/frame_stub.c
 )
 
 target_include_directories(darling PUBLIC ${CMAKE_CURRENT_SOURCE_DIR})
@@ -168,7 +170,6 @@ if(APPLE)
 else()
     target_sources(darling PRIVATE
         text/text_core_stub.c
-        darling/frame_stub.c
     )
 endif() # APPLE
 endif() # NOT TARGET darling
@@ -219,6 +220,15 @@ if(APPLE AND EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/tests/visual_effect_test.m" AND
     target_compile_options(visual_effect_test PRIVATE -Wall -Wextra -Werror -UNDEBUG)
     set_source_files_properties(tests/visual_effect_test.m PROPERTIES COMPILE_OPTIONS "-fobjc-arc")
     add_test(NAME visual_effect_test COMMAND visual_effect_test)
+endif()
+
+# The Frame assembly (Device + two Boards + the demand loop client), headless.
+if(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/tests/frame_test.c" AND NOT TARGET frame_test)
+    add_executable(frame_test tests/frame_test.c)
+    target_link_libraries(frame_test PRIVATE darling graphvex vexspoke)
+    target_compile_options(frame_test PRIVATE -Wall -Wextra -Werror -mcpu=apple-m1 -UNDEBUG)
+    add_test(NAME frame_test COMMAND frame_test)
+    set_tests_properties(frame_test PROPERTIES SKIP_RETURN_CODE 77)
 endif()
 
 # Picture: Panel + a fitted image — background color, the image inside, and the

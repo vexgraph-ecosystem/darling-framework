@@ -1,68 +1,34 @@
-#ifndef __APPLE__
-
 #include "darling/frame.h"
-#include "annotation/definition.h"
-#include "annotation/overview.h"
 
-;;DEFINITION
-/**
- * ============================================================================
- * DEFINITION: FrameStub
- * ============================================================================
- * The non-Apple stub implementation of the Frame platform hooks
- * (Frame_platformAttach / Frame_platformDetach /
- * Frame_platformSyncTransaction / Frame_platformReassertResizeHook /
- * Frame_platformSyncLayer): every hook is a no-op because there is no AppKit
- * window, no NSVisualEffectView, and no CAMetalLayer seam off Apple. The live
- * counterpart is objc/frame_cocoa.m, which establishes the NSWindow ->
- * NSVisualEffectView -> CAMetalLayer hierarchy, the sticky manual seam
- * geometry, and the single-transaction live-resize hook. The whole file is
- * guarded by #ifndef __APPLE__ so the stub and the Cocoa shim never compile
- * together; it owns no struct — the Frame it operates on is owned by
- * darling/frame.h.
- * ============================================================================
- */
+#include "annotation/overview.h"
 
 ;;OVERVIEW
 /**
  * ============================================================================
- * CLASS: FrameStub
- * LEVEL: L4 — Self-Management (Non-Apple platform Frame fallback)
+ * MODULE: FrameStub (darling/frame_stub.c)
  * ============================================================================
- * Stub implementation of platform hooks for non-Apple environments.
+ * The platform hooks for a frame with no AppKit: Frame_show builds nothing and
+ * returns false, and teardown is a no-op. On Apple, objc/frame_cocoa.m provides
+ * the real NSWindow -> NSVisualEffectView -> CAMetalLayer hierarchy and replaces
+ * this file in the build. The stub owns no struct — the Frame it operates on is
+ * owned by darling/frame.h.
  *
- * STRUCT FIELDS: none — procedural stub (owns no struct; operates on the
- * Frame owned by darling/frame.h).
- *
+ * STRUCT FIELDS: none — procedural stub.
  * FUNCTION REGISTRY:
- * ----------------------------------------------------------------------------
- * Core Functions:
- *   - Frame_platformAttach(frame)
- *   - Frame_platformDetach(frame)
- *   - Frame_platformSyncTransaction(frame)
+ *   Core Functions:
+ *     - Frame_platformShow(frame, width, height, title)
+ *     - Frame_platformFree(frame)
  * ============================================================================
  */
 
-void Frame_platformAttach(Frame *frame) {
-    (void) frame;
-}
-
-void Frame_platformDetach(Frame *frame) {
-    (void) frame;
-}
-
-void Frame_platformSyncTransaction(Frame *frame) {
-    (void) frame;
-}
-
-void Frame_platformReassertResizeHook(Frame *frame) {
-    (void) frame;
-}
-
-void Frame_platformSyncLayer(Frame *frame, int width, int height) {
+bool Frame_platformShow(Frame *frame, int width, int height, const char *title) {
     (void) frame;
     (void) width;
     (void) height;
+    (void) title;
+    return false;   // no platform window here
 }
 
-#endif // !__APPLE__
+void Frame_platformFree(Frame *frame) {
+    (void) frame;
+}
