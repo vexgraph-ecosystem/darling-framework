@@ -142,15 +142,17 @@ void Frame_free(Frame *frame) {
         return;
     if ((*frame).loop != nullptr)
         GraphicsLoop_removeClient((*frame).loop, frame);
-    Frame_platformFree(frame);
+    // The device and surface borrow the Context the platform layer created, so
+    // they die BEFORE the platform teardown destroys it (the Teardown Order Law).
     if ((*frame).content != nullptr)
         Board_destroy((*frame).content);
     if ((*frame).scene != nullptr)
         Board_destroy((*frame).scene);
-    if ((*frame).surface != nullptr)
-        Surface_destroy((*frame).surface);
     if ((*frame).device != nullptr)
         Device_destroy((*frame).device);
+    if ((*frame).surface != nullptr)
+        Surface_destroy((*frame).surface);
+    Frame_platformFree(frame);
     VisualEffect_free((*frame).vfx);
     free(frame);
 }
@@ -288,6 +290,11 @@ void Frame_setDevice(Frame *frame, Device *device) {
 void Frame_setPlatformWindow(Frame *frame, void *window) {
     if (frame != nullptr)
         (*frame).window = window;
+}
+
+;;GETTER
+void *Frame_getPlatformWindow(const Frame *frame) {
+    return frame ? (*frame).window : nullptr;
 }
 
 // GETTERS (PUBLIC & PRIVATE)

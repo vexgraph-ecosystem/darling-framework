@@ -76,5 +76,6 @@ GraphicsLoop *Frame_getLoop(const Frame *frame);
 void Frame_setSurface(Frame *frame, Surface *surface);
 void Frame_setDevice(Frame *frame, Device *device);
 void Frame_setPlatformWindow(Frame *frame, void *window);
+void *Frame_getPlatformWindow(const Frame *frame);
 
 #endif // DARLING_FRAME_H

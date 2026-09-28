@@ -116,7 +116,6 @@ add_library(darling STATIC
     io/mmap.c
     effect/visual_effect.c
     darling/frame.c
-    darling/frame_stub.c
 )
 
 target_include_directories(darling PUBLIC ${CMAKE_CURRENT_SOURCE_DIR})
@@ -149,6 +148,7 @@ if(APPLE)
     target_sources(darling PRIVATE
         objc/text_core.m
         objc/visual_effect_cocoa.m
+        objc/frame_cocoa.m
     )
     set_source_files_properties(
         objc/text_core.m
@@ -156,6 +156,10 @@ if(APPLE)
     )
     set_source_files_properties(
         objc/visual_effect_cocoa.m
+        PROPERTIES COMPILE_OPTIONS "-fobjc-arc"
+    )
+    set_source_files_properties(
+        objc/frame_cocoa.m
         PROPERTIES COMPILE_OPTIONS "-fobjc-arc"
     )
     target_link_libraries(darling PUBLIC
@@ -170,6 +174,7 @@ if(APPLE)
 else()
     target_sources(darling PRIVATE
         text/text_core_stub.c
+        darling/frame_stub.c
     )
 endif() # APPLE
 endif() # NOT TARGET darling
