@@ -110,6 +110,18 @@ static DarlingSeam *s_seam = nil;
     // (the stretch). Paint synchronously inside the event.
     (void) Frame_present(frame);
 }
+
+// Deferred twin: a window transition reports its event BEFORE AppKit finishes
+// re-laying the view (notably exiting fullscreen / zoom), so the bounds read now
+// are stale and the seam lands at the wrong extent (the shrunk panels). Re-derive
+// once now (immediate paint) and once on the next runloop turn against the
+// settled bounds.
+- (void)resyncSoon {
+    [self resync];
+    dispatch_async(dispatch_get_main_queue(), ^{
+        [self resync];
+    });
+}
 @end
 
 static void frameCocoaResized(void *self, Window *window, int width, int height) {
@@ -118,14 +130,14 @@ static void frameCocoaResized(void *self, Window *window, int width, int height)
     (void) width;
     (void) height;
     if (s_seam != nil)
-        [s_seam resync];
+        [s_seam resyncSoon];
 }
 
 static void frameCocoaNoArg(void *self, Window *window) {
     (void) self;
     (void) window;
     if (s_seam != nil)
-        [s_seam resync];
+        [s_seam resyncSoon];
 }
 
 bool Frame_platformShow(Frame *frame, int width, int height, const char *title) {
