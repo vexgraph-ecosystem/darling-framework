@@ -114,6 +114,7 @@ add_library(darling STATIC
     text/text_select.c
     io/bake.c
     io/mmap.c
+    effect/visual_effect.c
 )
 
 target_include_directories(darling PUBLIC ${CMAKE_CURRENT_SOURCE_DIR})
@@ -145,9 +146,14 @@ if(APPLE)
     # graphvex effect module (effect/visual_effect.h). It returns with frame.
     target_sources(darling PRIVATE
         objc/text_core.m
+        objc/visual_effect_cocoa.m
     )
     set_source_files_properties(
         objc/text_core.m
+        PROPERTIES COMPILE_OPTIONS "-fobjc-arc"
+    )
+    set_source_files_properties(
+        objc/visual_effect_cocoa.m
         PROPERTIES COMPILE_OPTIONS "-fobjc-arc"
     )
     target_link_libraries(darling PUBLIC
@@ -205,6 +211,15 @@ endif()
 #   slider_test (kept below), switch_test (kept below), textarea_test,
 #   text_select_test (kept below), color_test (kept below)
 # ----------------------------------------------------------------------------
+
+# VisualEffect: the Frame's NSVisualEffectView chrome, on real AppKit (macOS).
+if(APPLE AND EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/tests/visual_effect_test.m" AND NOT TARGET visual_effect_test)
+    add_executable(visual_effect_test tests/visual_effect_test.m)
+    target_link_libraries(visual_effect_test PRIVATE darling)
+    target_compile_options(visual_effect_test PRIVATE -Wall -Wextra -Werror -UNDEBUG)
+    set_source_files_properties(tests/visual_effect_test.m PROPERTIES COMPILE_OPTIONS "-fobjc-arc")
+    add_test(NAME visual_effect_test COMMAND visual_effect_test)
+endif()
 
 # Picture: Panel + a fitted image — background color, the image inside, and the
 # eight modes (stretch / cover / contain / anchored source window) read back.
