@@ -79,6 +79,19 @@ static DarlingSeam *s_seam = nil;
     }
     [CATransaction commit];
     Frame_setScale(frame, (float) scale);
+    if (getenv("VEX_GEOMETRY_LOG") != nullptr) {
+        static CGSize lastLogged = { 0, 0 };
+        if (!CGSizeEqualToSize(lastLogged, backing.size)) {
+            lastLogged = backing.size;
+            fprintf(stderr,
+                    "seam: hostView bounds=%.0fx%.0f pt | backing=%.0fx%.0f px | scale=%.2f | "
+                    "layer bounds=%.0fx%.0f drawableSize=%.0fx%.0f contentsScale=%.2f\n",
+                    bounds.size.width, bounds.size.height, backing.size.width, backing.size.height,
+                    (double) scale, self.layer.bounds.size.width, self.layer.bounds.size.height,
+                    self.layer.drawableSize.width, self.layer.drawableSize.height,
+                    (double) self.layer.contentsScale);
+        }
+    }
     int w = (int) (backing.size.width + 0.5);
     int h = (int) (backing.size.height + 0.5);
     if (w > 0 && h > 0) {
@@ -90,6 +103,12 @@ static DarlingSeam *s_seam = nil;
             (void) Surface_resize(surface, (uint32_t) w, (uint32_t) h);
     }
     Frame_markDirty(frame);
+    // Immediate on-demand: a window event (resize/zoom/fullscreen/backing) is
+    // itself a demand ticket. AppKit's live-resize nested tracking loop blocks
+    // the display-link tick, so the demand loop cannot step — without painting
+    // NOW the seam changes extent while showing the PREVIOUS drawable, scaled
+    // (the stretch). Paint synchronously inside the event.
+    (void) Frame_present(frame);
 }
 @end
 
@@ -148,8 +167,10 @@ bool Frame_platformShow(Frame *frame, int width, int height, const char *title) 
         [hostLayer addSublayer:seam];
 
         Context *context = Context_1(LANG_BACKEND_VULKAN);
-        if (context == nullptr)
+        if (context == nullptr) {
+            fprintf(stderr, "frame_cocoa: no Vulkan context\n");
             return false;
+        }
         SurfaceDesc sd = { .backend = LANG_BACKEND_VULKAN, .native = (__bridge void*) seam,
                            .width = (uint32_t) (bounds.size.width * scale),
                            .height = (uint32_t) (bounds.size.height * scale),
@@ -158,11 +179,16 @@ bool Frame_platformShow(Frame *frame, int width, int height, const char *title) 
         Adapter *adapter = surface != nullptr ? Context_chooseAdapter(context, surface) : nullptr;
         Device *device = adapter != nullptr ? Adapter_createDevice(adapter, surface) : nullptr;
         if (device == nullptr) {
+            fprintf(stderr, "frame_cocoa: no device (surface=%p adapter=%p)\n",
+                    (void*) surface, (void*) adapter);
             if (surface != nullptr)
                 Surface_destroy(surface);
             Context_destroy(context);
             return false;
         }
+        fprintf(stderr, "frame_cocoa: seam %dx%d px scale=%.1f surface=%p device=%p\n",
+                (int) (bounds.size.width * scale), (int) (bounds.size.height * scale),
+                (double) scale, (void*) surface, (void*) device);
         Frame_setSurface(frame, surface);
         Frame_setDevice(frame, device);
 
