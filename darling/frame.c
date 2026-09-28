@@ -10,6 +10,7 @@
 #include "lang/graphics.h"
 #include "vulkan/vk_device.h"
 #include "vulkan/vk_graphics.h"
+#include "window/window.h"
 
 // Dialect-internal platform hooks: objc/frame_cocoa.m on Apple, frame_stub.c
 // elsewhere. frameShow builds the NSWindow -> NSVisualEffectView -> CAMetalLayer
@@ -137,6 +138,18 @@ Frame *Frame_0(void) {
     return frame;
 }
 
+// A frame that BORROWS a hotcwap R1 Window: R1 owns the window and its
+// lifecycle; the Frame builds the VisualEffect + seam into the window's content
+// view and never creates or closes it (the Layer Law).
+Frame *Frame_1(Window *window) {
+    Frame *frame = Frame_0();
+    if (frame == nullptr)
+        return nullptr;
+    if (window != nullptr)
+        Frame_setPlatformWindow(frame, window);
+    return frame;
+}
+
 void Frame_free(Frame *frame) {
     if (frame == nullptr)
         return;
@@ -169,9 +182,9 @@ void Frame_setSize(Frame *frame, int width, int height) {
         return;
     (*frame).width = width;
     (*frame).height = height;
-    // Offscreen the points ARE the pixels; a shown frame's platform layer
-    // overrides this with the native-pixel extent on resize.
-    if ((*frame).device != nullptr && (*frame).window == nullptr) {
+    if ((*frame).window != nullptr)
+        Window_setSize((Window*) (*frame).window, width, height);   // R1 resizes; the platform resync follows
+    else if ((*frame).device != nullptr) {
         Device_resize((*frame).device, (uint32_t) width, (uint32_t) height);
         frameEnsureTarget(frame);
     }
@@ -199,8 +212,9 @@ int Frame_getHeight(const Frame *frame) {
 }
 
 bool Frame_show(Frame *frame) {
-    if (frame == nullptr || (*frame).device == nullptr || (*frame).window != nullptr)
-        return false;
+    if (frame == nullptr || (*frame).window == nullptr)
+        return false;   // a frame shows a borrowed R1 window
+    Window_show((Window*) (*frame).window);
     bool shown = Frame_platformShow(frame, (*frame).width, (*frame).height, (*frame).title);
     if (shown)
         Frame_markDirty(frame);

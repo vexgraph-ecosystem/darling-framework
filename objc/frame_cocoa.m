@@ -11,30 +11,30 @@
 #include "lang/context.h"
 #include "lang/device.h"
 #include "lang/surface.h"
+#include "window/window.h"
+#include "window/window_event.h"
 
 ;;OVERVIEW
 /**
  * ============================================================================
  * MODULE: Frame_cocoa (objc/frame_cocoa.m)
  * ============================================================================
- * The macOS window for a Frame. Builds the Single-Seam Canvas hierarchy:
+ * Builds the Single-Seam Canvas hierarchy INSIDE a hotcwap R1 window (R1 owns
+ * the window; the Frame borrows its content view and never creates or closes it):
  *
- *   NSWindow -> contentView -> NSVisualEffectView -> CAMetalLayer (the one seam)
+ *   Window (R1) contentView -> NSVisualEffectView (VisualEffect) -> CAMetalLayer
  *
- * The NSVisualEffectView (VisualEffect) is ALWAYS the parent of the seam: it is
- * the blur chrome, and the seam is a sticky, TopLeft-pinned, non-sizable sublayer
- * of the material view's layer (never the contentView's own layer — AppKit owns a
- * backing layer and resets drawableSize with resize gravity on every live-resize
- * beat). The window's bounds clip it (masksToBounds).
+ * The VisualEffect (blur chrome) is ALWAYS the parent of the seam; the
+ * CAMetalLayer is a sticky, TopLeft-pinned, non-sizable sublayer of the material
+ * view's layer, and the window bounds clip it (masksToBounds). Creating the seam
+ * also assembles the object model on it: Context -> Surface -> Adapter -> Device.
  *
- * Creating the window also assembles the object model: Context -> Surface (the
- * seam) -> Adapter -> Device. A window-state change (resize, zoom/fill, enter/
- * exit fullscreen, a move to another display, a backing-scale change) re-derives
- * the seam's NATIVE-pixel extent and arms the demand loop (the Native Pixel Law
- * + the Continuous Real-Time Live Resize Law).
+ * Window-state changes arrive through hotcwap's WindowEvent (onResized,
+ * onZoomFilled/ZoomBack, onFullscreen, onRestored) and re-derive the seam's
+ * NATIVE-pixel extent, resize the Device + Surface, and arm the demand loop
+ * (the Native Pixel Law + the Continuous Real-Time Live Resize Law).
  *
- * STRUCT FIELDS: none — the view carries the frame pointer, the seam layer and
- * the Context it must destroy.
+ * STRUCT FIELDS: none (helper DarlingSeam holds the frame, seam and Context).
  * FUNCTION REGISTRY:
  *   Core Functions:
  *     - Frame_platformShow(frame, width, height, title)
@@ -42,40 +42,40 @@
  * ============================================================================
  */
 
-@interface DarlingFrameView : NSView <NSWindowDelegate>
-@property (assign, nonatomic) Frame *framePtr;
-@property (assign, nonatomic) CAMetalLayer *seamLayer;
-@property (assign, nonatomic) Context *context;   // owned: destroyed on free
+@interface DarlingSeam : NSObject
+@property (assign, nonatomic) Frame *frame;          // borrowed (C struct)
+@property (strong, nonatomic) CAMetalLayer *layer;   // the seam
+@property (assign, nonatomic) Context *context;      // owned here (C struct)
+@property (strong, nonatomic) NSView *host;          // the material view
+- (void)resync;
 @end
 
-@implementation DarlingFrameView
+// One frame per process for now (the probe scaffold); the R1/Kernel path drives
+// a single window, and multi-frame arrives with the Kernel registry.
+static DarlingSeam *s_seam = nil;
 
-// Re-derive the seam's native-pixel extent from the live window, resize the
-// device + surface to match, and arm the demand loop — on every window-state
-// change. One disabled-actions transaction so CoreAnimation never animates the
-// geometry (the slinky).
-- (void)syncSeam {
-    Frame *frame = self.framePtr;
+@implementation DarlingSeam
+- (void)resync {
+    Frame *frame = self.frame;
     if (frame == nullptr)
         return;
-    NSRect bounds = [self bounds];
-    NSRect backing = [self convertRectToBacking:bounds];
+    NSRect bounds = [self.host bounds];
+    NSRect backing = [self.host convertRectToBacking:bounds];
     CGFloat scale = bounds.size.width > 0.0 ? backing.size.width / bounds.size.width : 1.0;
     if (scale <= 0.0)
         scale = 1.0;
-    CAMetalLayer *seam = self.seamLayer;
     [CATransaction begin];
     [CATransaction setDisableActions:YES];
-    if (seam != nil) {
-        if (!CGRectEqualToRect(seam.frame, bounds))
-            seam.frame = bounds;
-        if (!CGRectEqualToRect(seam.bounds, bounds))
-            seam.bounds = bounds;
-        if (seam.contentsScale != scale)
-            seam.contentsScale = scale;
+    if (self.layer != nil) {
+        if (!CGRectEqualToRect(self.layer.frame, bounds))
+            self.layer.frame = bounds;
+        if (!CGRectEqualToRect(self.layer.bounds, bounds))
+            self.layer.bounds = bounds;
+        if (self.layer.contentsScale != scale)
+            self.layer.contentsScale = scale;
         CGSize px = CGSizeMake(backing.size.width, backing.size.height);
-        if (!CGSizeEqualToSize(seam.drawableSize, px))
-            seam.drawableSize = px;
+        if (!CGSizeEqualToSize(self.layer.drawableSize, px))
+            self.layer.drawableSize = px;
     }
     [CATransaction commit];
     int w = (int) (backing.size.width + 0.5);
@@ -90,78 +90,65 @@
     }
     Frame_markDirty(frame);
 }
-
-- (void)setFrameSize:(NSSize)newSize {
-    [super setFrameSize:newSize];
-    [self syncSeam];
-}
-- (void)windowDidResize:(NSNotification *)note { (void) note; [self syncSeam]; }
-- (void)windowDidEndLiveResize:(NSNotification *)note { (void) note; [self syncSeam]; }
-- (void)windowDidEnterFullScreen:(NSNotification *)note { (void) note; [self syncSeam]; }
-- (void)windowDidExitFullScreen:(NSNotification *)note { (void) note; [self syncSeam]; }
-- (void)windowWillEnterFullScreen:(NSNotification *)note { (void) note; [self syncSeam]; }
-- (void)windowWillExitFullScreen:(NSNotification *)note { (void) note; [self syncSeam]; }
-- (void)windowDidChangeScreen:(NSNotification *)note { (void) note; [self syncSeam]; }
-- (void)windowDidChangeBackingProperties:(NSNotification *)note { (void) note; [self syncSeam]; }
 @end
 
+static void frameCocoaResized(void *self, Window *window, int width, int height) {
+    (void) self;
+    (void) window;
+    (void) width;
+    (void) height;
+    if (s_seam != nil)
+        [s_seam resync];
+}
+
+static void frameCocoaNoArg(void *self, Window *window) {
+    (void) self;
+    (void) window;
+    if (s_seam != nil)
+        [s_seam resync];
+}
+
 bool Frame_platformShow(Frame *frame, int width, int height, const char *title) {
-    if (frame == nullptr || width <= 0 || height <= 0 || title == nullptr)
+    (void) width;
+    (void) height;
+    (void) title;
+    Window *window = (Window*) Frame_getPlatformWindow(frame);
+    if (frame == nullptr || window == nullptr)
+        return false;
+    void *contentPtr = Window_contentView(window);
+    if (contentPtr == nullptr)
         return false;
     @autoreleasepool {
-        [NSApplication sharedApplication];
-        [NSApp setActivationPolicy:NSApplicationActivationPolicyRegular];
-
-        NSRect rect = NSMakeRect(0.0, 0.0, (CGFloat) width, (CGFloat) height);
-        NSWindow *window = [[NSWindow alloc]
-            initWithContentRect:rect
-                      styleMask:(NSWindowStyleMaskTitled | NSWindowStyleMaskClosable
-                               | NSWindowStyleMaskMiniaturizable | NSWindowStyleMaskResizable)
-                        backing:NSBackingStoreBuffered
-                          defer:NO];
-        [window setTitle:[NSString stringWithUTF8String:title]];
-        [window setReleasedWhenClosed:NO];
-        [window setPreservesContentDuringLiveResize:NO];
-
-        DarlingFrameView *view = [[DarlingFrameView alloc] initWithFrame:rect];
-        view.framePtr = frame;
-        [window setContentView:view];
-        [window setDelegate:view];   // window-state events -> syncSeam
-
-        // The blur chrome behind the seam (Single-Seam Canvas Law).
+        NSView *content = (__bridge NSView*) contentPtr;
         VisualEffect *vfx = Frame_getVisualEffect(frame);
         if (vfx != nullptr)
-            (void) VisualEffect_attach(vfx, (__bridge void*) view);
+            (void) VisualEffect_attach(vfx, (__bridge void*) content);
         NSVisualEffectView *vfxView = vfx != nullptr
             ? (__bridge NSVisualEffectView*) VisualEffect_nativeHandle(vfx) : nil;
-        NSView *host = vfxView != nil ? vfxView : view;
+        NSView *host = vfxView != nil ? vfxView : content;
         [host setWantsLayer:YES];
         CALayer *hostLayer = [host layer];
-        hostLayer.masksToBounds = YES;   // window bounds clip the seam
+        hostLayer.masksToBounds = YES;   // the window bounds clip the seam
 
         NSRect bounds = [host bounds];
-        CGFloat scale = [[window screen] backingScaleFactor];
+        CGFloat scale = [[content window] backingScaleFactor];
         if (scale <= 0.0)
             scale = 1.0;
         CAMetalLayer *seam = [CAMetalLayer layer];
-        seam.presentsWithTransaction = YES;       // joined to the WindowServer transaction
-        seam.contentsGravity = kCAGravityTopLeft; // 1:1 crop, never scaled
+        seam.presentsWithTransaction = YES;
+        seam.contentsGravity = kCAGravityTopLeft;
         seam.anchorPoint = CGPointMake(0.0, 0.0);
-        seam.geometryFlipped = YES;               // Vulkan top-down in a non-flipped host
+        seam.geometryFlipped = YES;
         seam.autoresizingMask = kCALayerNotSizable;
         seam.contentsScale = scale;
         seam.frame = bounds;
         seam.bounds = bounds;
         seam.drawableSize = CGSizeMake(bounds.size.width * scale, bounds.size.height * scale);
         [hostLayer addSublayer:seam];
-        view.seamLayer = seam;
 
-        // The object model: Context -> Surface (the seam) -> Adapter -> Device.
         Context *context = Context_1(LANG_BACKEND_VULKAN);
-        if (context == nullptr) {
-            [window close];
+        if (context == nullptr)
             return false;
-        }
         SurfaceDesc sd = { .backend = LANG_BACKEND_VULKAN, .native = (__bridge void*) seam,
                            .width = (uint32_t) (bounds.size.width * scale),
                            .height = (uint32_t) (bounds.size.height * scale),
@@ -173,37 +160,42 @@ bool Frame_platformShow(Frame *frame, int width, int height, const char *title) 
             if (surface != nullptr)
                 Surface_destroy(surface);
             Context_destroy(context);
-            [window close];
             return false;
         }
-        view.context = context;                 // the view owns it; destroyed on free
         Frame_setSurface(frame, surface);
         Frame_setDevice(frame, device);
-        Frame_setPlatformWindow(frame, (__bridge_retained void*) window);
 
-        [window center];
-        [window makeKeyAndOrderFront:nil];
-        [NSApp activateIgnoringOtherApps:YES];
-        [view syncSeam];
+        DarlingSeam *state = [[DarlingSeam alloc] init];
+        state.frame = frame;
+        state.layer = seam;
+        state.context = context;
+        state.host = host;
+        s_seam = state;
+
+        WindowEvent *ev = Window_getLifecycle(window);
+        if (ev != nullptr) {
+            WindowEvent_setSelf(ev, frame);
+            WindowEvent_setOnResized(ev, frameCocoaResized);
+            WindowEvent_setOnFullscreen(ev, frameCocoaNoArg);
+            WindowEvent_setOnZoomFilled(ev, frameCocoaNoArg);
+            WindowEvent_setOnZoomBack(ev, frameCocoaNoArg);
+            WindowEvent_setOnRestored(ev, frameCocoaNoArg);
+        }
+        [state resync];
         return true;
     }
 }
 
 void Frame_platformFree(Frame *frame) {
-    void *windowPtr = Frame_getPlatformWindow(frame);
-    if (windowPtr == nullptr)
-        return;
     @autoreleasepool {
-        NSWindow *window = (__bridge_transfer NSWindow*) windowPtr;
-        DarlingFrameView *view = (DarlingFrameView*) [window contentView];
-        [window setDelegate:nil];
-        if (view != nil && view.context != nullptr) {
-            Context_destroy(view.context);   // after the device + surface are gone
-            view.context = nullptr;
-        }
         VisualEffect *vfx = Frame_getVisualEffect(frame);
         if (vfx != nullptr)
             VisualEffect_detach(vfx);
-        [window close];
+        if (s_seam != nil && s_seam.frame == frame) {
+            if (s_seam.context != nullptr)
+                Context_destroy(s_seam.context);   // after the device + surface are gone
+            s_seam = nil;
+        }
+        // The window belongs to R1: never closed here.
     }
 }

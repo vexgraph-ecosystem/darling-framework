@@ -9,6 +9,7 @@
 #include "lang/board.h"
 #include "lang/device.h"
 #include "lang/surface.h"
+#include "window/window.h"
 
 // darling/frame.h — the host frame (R4): a window, its one seam, its boards.
 //
@@ -31,8 +32,12 @@
 typedef struct Frame Frame;
 
 // --- Constructors (the arity-overloaded chooser idiom) ---
-//   Frame()   -> an offscreen frame (no window; the device + boards are usable)
+//   Frame()          -> an offscreen frame (no window; the device + boards are usable)
+//   Frame(window)    -> a frame that BORROWS a hotcwap R1 Window (R1 owns windows;
+//                       the Frame builds the VisualEffect + seam into its content
+//                       view and never creates or closes the window)
 Frame *Frame_0(void);
+Frame *Frame_1(Window *window);
 #define Frame(...) CONSTRUCTOR_DISPATCH(Frame, __VA_ARGS__)
 
 void Frame_free(Frame *frame);
