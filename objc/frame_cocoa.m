@@ -78,6 +78,7 @@ static DarlingSeam *s_seam = nil;
             self.layer.drawableSize = px;
     }
     [CATransaction commit];
+    Frame_setScale(frame, (float) scale);
     int w = (int) (backing.size.width + 0.5);
     int h = (int) (backing.size.height + 0.5);
     if (w > 0 && h > 0) {

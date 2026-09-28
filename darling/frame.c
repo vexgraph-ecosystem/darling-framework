@@ -75,6 +75,7 @@ struct Frame {
     int width;              // window size in logical points
     int height;
     char title[256];        // window title
+    float scale;            // native px per logical point (the display backing scale)
     GraphicsFrameFn draw;   // the UI draw callback (inside the present hook)
     void *drawCtx;
     bool valid;             // the device came up
@@ -124,6 +125,7 @@ Frame *Frame_0(void) {
     (*frame).loop = GraphicsLoop_default();
     (*frame).width = 800;
     (*frame).height = 600;
+    (*frame).scale = 1.0f;
     const char *title = "darling frame";
     memcpy((*frame).title, title, strlen(title) + 1u);
     if ((*frame).device != nullptr)
@@ -209,6 +211,16 @@ int Frame_getWidth(const Frame *frame) {
 ;;GETTER
 int Frame_getHeight(const Frame *frame) {
     return frame ? (*frame).height : 0;
+}
+
+void Frame_setScale(Frame *frame, float scale) {
+    if (frame != nullptr && scale > 0.0f)
+        (*frame).scale = scale;
+}
+
+;;GETTER
+float Frame_getScale(const Frame *frame) {
+    return (frame != nullptr && (*frame).scale > 0.0f) ? (*frame).scale : 1.0f;
 }
 
 bool Frame_show(Frame *frame) {

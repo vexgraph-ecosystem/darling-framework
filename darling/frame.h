@@ -49,6 +49,12 @@ void Frame_setTitle(Frame *frame, const char *title);
 int  Frame_getWidth(const Frame *frame);
 int  Frame_getHeight(const Frame *frame);
 
+// The backing scale (native px per logical point) the platform derived on the
+// current display. The UI draw fn uses it to map the tree's logical layout onto
+// the native-pixel target (the Native Pixel Law).
+void  Frame_setScale(Frame *frame, float scale);
+float Frame_getScale(const Frame *frame);
+
 // Present the platform window (the AppKit hierarchy: NSWindow -> NSVisualEffectView
 // -> CAMetalLayer). Off Apple this is a no-op that returns false. After show, the
 // Surface is live and the frame presents into the seam.
