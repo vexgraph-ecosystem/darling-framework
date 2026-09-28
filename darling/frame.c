@@ -1,5 +1,6 @@
 #include "darling/frame.h"
 
+#include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 
@@ -289,6 +290,12 @@ bool Frame_present(Frame *frame) {
     if (!Graphics_end())
         return false;
     bool presented = Graphics_present();
+    if (getenv("FRAME_TRACE") != nullptr) {
+        static unsigned frames = 0u;
+        if (frames++ < 5u)
+            fprintf(stderr, "frame_present: %dx%d boards(c=%p s=%p) presented=%d\n",
+                    w, h, (void*) (*frame).content, (void*) (*frame).scene, (int) presented);
+    }
     // Offscreen there is no seam to present: the completed render IS the frame.
     return presented || (*frame).surface == nullptr;
 }
@@ -308,7 +315,13 @@ void Frame_setSurface(Frame *frame, Surface *surface) {
 void Frame_setDevice(Frame *frame, Device *device) {
     if (frame == nullptr || device == nullptr)
         return;
-    // A windowed device replaces the offscreen one (the platform owns the swap).
+    // A windowed device supersedes the offscreen one: release the Graphics row
+    // binding the offscreen device held (VkGraphics_bind refuses to rebind while
+    // another device owns it), then drop the superseded device.
+    if ((*frame).device != nullptr && (*frame).device != device) {
+        VkGraphics_unbind();
+        Device_destroy((*frame).device);
+    }
     (*frame).device = device;
     (*frame).valid = true;
 }
