@@ -1078,6 +1078,9 @@ void ScrollPanel_tick(ScrollPanel *sp, uint64_t nowMs) {
         if (changed) {
             placeContent(sp);
             ScrollPanel_syncToBars(sp);
+            // Demand-on-motion: a moved offset requests ONE coalesced repaint of
+            // the window, so a scroll/spring animates with no caller polling.
+            GraphicsComponent_requestRepaint(&(*sp).base.component);
         }
     }
     float loX = 0.0f, hiX = 0.0f, loY = 0.0f, hiY = 0.0f;
