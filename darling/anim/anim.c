@@ -607,10 +607,10 @@ void Anim_play(Component *c, Anim *a, int kind) {
     (*b).a = a;
     (*b).kind = kind;
     (*b).elapsed = 0.0;
-    (*b).fromX = (*c).x;
-    (*b).fromY = (*c).y;
-    (*b).fromW = (*c).w;
-    (*b).fromH = (*c).h;
+    (*b).fromX = GraphicsComponent_getX(c);
+    (*b).fromY = GraphicsComponent_getY(c);
+    (*b).fromW = GraphicsComponent_getWidth(c);
+    (*b).fromH = GraphicsComponent_getHeight(c);
     (*b).fromSX = (*c).scaleX;
     (*b).fromSY = (*c).scaleY;
     (*b).fromFont = 12.0f;

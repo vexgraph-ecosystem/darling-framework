@@ -116,8 +116,8 @@ void Switch_handlePointer(Switch *s, int kind, float localX, float localY) {
         return;
     Panel *p = &(*s).base;
     Component *cnt = &(*p).component;
-    float w = (*cnt).w > 0.0f ? (*cnt).w : 44.0f;
-    float h = (*cnt).h > 0.0f ? (*cnt).h : 24.0f;
+    float w = GraphicsComponent_getWidth(cnt) > 0.0f ? GraphicsComponent_getWidth(cnt) : 44.0f;
+    float h = GraphicsComponent_getHeight(cnt) > 0.0f ? GraphicsComponent_getHeight(cnt) : 24.0f;
     bool inside = (localX >= 0.0f && localX <= w && localY >= 0.0f && localY <= h);
     if (kind == PTR_UP && inside)
         Switch_setOn(s, !(*s).on);

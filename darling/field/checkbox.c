@@ -124,8 +124,8 @@ void Checkbox_handlePointer(Checkbox *c, int kind, float localX, float localY) {
         return;
     Panel *p = &(*c).base;
     Component *cnt = &(*p).component;
-    float w = (*cnt).w > 0.0f ? (*cnt).w : 20.0f;
-    float h = (*cnt).h > 0.0f ? (*cnt).h : 20.0f;
+    float w = GraphicsComponent_getWidth(cnt) > 0.0f ? GraphicsComponent_getWidth(cnt) : 20.0f;
+    float h = GraphicsComponent_getHeight(cnt) > 0.0f ? GraphicsComponent_getHeight(cnt) : 20.0f;
     bool inside = (localX >= 0.0f && localX <= w && localY >= 0.0f && localY <= h);
     if (kind == PTR_UP && inside)
         Checkbox_toggle(c);

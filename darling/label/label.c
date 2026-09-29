@@ -231,7 +231,7 @@ int32_t Label_charIndexAt(const Label *label, float localX) {
     }
     const Panel *p = &(*label).base;
     const Component *c = &(*p).component;
-    float qw = (*c).w;
+    float qw = GraphicsComponent_getWidth(c);
     if ((*label).rasterW > 0) {
         float backing = (*label).rasterBacking > 0.0f ? (*label).rasterBacking : 1.0f;
         qw = (float) (*label).rasterW / backing;
@@ -262,8 +262,8 @@ void Label_handlePointer(Label *label, int kind, float localX, float localY, voi
         return;
     Panel *p = &(*label).base;
     Component *c = &(*p).component;
-    float w = (*c).w;
-    float h = (*c).h;
+    float w = GraphicsComponent_getWidth(c);
+    float h = GraphicsComponent_getHeight(c);
     if (w <= 0.0f && (*label).rasterW > 0) {
         float backing = (*label).rasterBacking > 0.0f ? (*label).rasterBacking : 1.0f;
         w = (float) (*label).rasterW / backing;

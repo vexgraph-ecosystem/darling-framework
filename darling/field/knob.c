@@ -134,7 +134,7 @@ void Knob_handlePointer(Knob *k, int kind, float localX, float localY) {
     Panel *p = &(*k).base;
     Component *cnt = &(*p).component;
     float d = (*k).diameter;
-    if (d <= 0.0f) d = (*cnt).w > 0.0f ? (*cnt).w : 40.0f;
+    if (d <= 0.0f) d = GraphicsComponent_getWidth(cnt) > 0.0f ? GraphicsComponent_getWidth(cnt) : 40.0f;
     float cx = d * 0.5f;
     float cy = d * 0.5f;
     float dx = localX - cx;

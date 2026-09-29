@@ -160,8 +160,8 @@ void RichLabel_handlePointer(RichLabel *label, int kind, float localX, float loc
         return;
     Panel *p = &(*label).base;
     Component *c = &(*p).component;
-    float w = (*c).w;
-    float h = (*c).h;
+    float w = GraphicsComponent_getWidth(c);
+    float h = GraphicsComponent_getHeight(c);
     const RichText *tm = (*label).textModel;
     if (w <= 0.0f && tm)
         w = (*tm).layoutWidth;

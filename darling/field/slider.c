@@ -143,8 +143,8 @@ void Slider_handlePointer(Slider *s, int kind, float localX, float localY) {
     if (!s) return;
     Panel *p = &(*s).base;
     Component *cnt = &(*p).component;
-    float w = (*cnt).w;
-    float h = (*cnt).h;
+    float w = GraphicsComponent_getWidth(cnt);
+    float h = GraphicsComponent_getHeight(cnt);
     if (w <= 0.0f) w = 100.0f;
     if (h <= 0.0f) h = 20.0f;
     if (kind != PTR_DOWN && kind != PTR_DRAG) return;

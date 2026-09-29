@@ -269,7 +269,7 @@ static float trackLen(const ScrollBar *s, bool horizontal) {
         return len;
     Panel *p = (Panel*) &(*s).base;
     Component *cnt = &(*p).component;
-    float fallback = horizontal ? (*cnt).w : (*cnt).h;
+    float fallback = horizontal ? GraphicsComponent_getWidth(cnt) : GraphicsComponent_getHeight(cnt);
     return fallback > 0.0f ? fallback : 100.0f;
 }
 

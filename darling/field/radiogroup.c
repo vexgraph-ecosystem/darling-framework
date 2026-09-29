@@ -156,8 +156,8 @@ void RadioGroup_handlePointer(RadioGroup *g, int kind, float localX, float local
         return;
     Panel *p = &(*g).base;
     Component *cnt = &(*p).component;
-    float w = (*cnt).w;
-    float h = (*cnt).h;
+    float w = GraphicsComponent_getWidth(cnt);
+    float h = GraphicsComponent_getHeight(cnt);
     if (w <= 0.0f)
         w = 120.0f;
     if (h <= 0.0f)

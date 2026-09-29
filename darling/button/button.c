@@ -357,7 +357,7 @@ static bool buttonPaintText(Panel *panel, void *renderer, void *cmdBuffer,
     float backing = (*b).rasterBacking > 0.0f ? (*b).rasterBacking : 1.0f;
     float qw = (float) (*b).rasterW;
     float qh = (float) (*b).rasterH;
-    if (w <= (*c).w * 1.25f && backing > 1.0f) {
+    if (w <= GraphicsComponent_getWidth(c) * 1.25f && backing > 1.0f) {
         qw /= backing;
         qh /= backing;
     }
@@ -382,8 +382,8 @@ void Button_handlePointer(Button *b, int kind, float localX, float localY) {
         return;
     Panel *p = &(*b).base;
     Component *c = &(*p).component;
-    float w = (*c).w > 0.0f ? (*c).w : 80.0f;
-    float h = (*c).h > 0.0f ? (*c).h : 30.0f;
+    float w = GraphicsComponent_getWidth(c) > 0.0f ? GraphicsComponent_getWidth(c) : 80.0f;
+    float h = GraphicsComponent_getHeight(c) > 0.0f ? GraphicsComponent_getHeight(c) : 30.0f;
     bool inside = (localX >= 0.0f && localX <= w && localY >= 0.0f && localY <= h);
     if (kind == PTR_ENTER || kind == PTR_HOVER) {
         if (inside) {
