@@ -28,6 +28,19 @@
 #include <stdio.h>
 #include <stdlib.h>
 
+// Metric demand wiring: every panel's component in the tree raises THIS window's
+// coalesced repaint demand when a metric is set (the Present-On-Demand Law). A
+// widget's setX/setColor/setText therefore repaints the whole window on demand —
+// never N paints for N requests. Idempotent, so the per-tick path may re-run it.
+static void bindRepaintTree(Panel *panel, void *window) {
+    if (!panel)
+        return;
+    GraphicsComponent_bindRepaint(&(*panel).component, window);
+    size_t n = Panel_childCount(panel);
+    for (size_t i = 0; i < n; i++)
+        bindRepaintTree(Panel_getChild(panel, i), window);
+}
+
 // Infancy demand gate: the first DARLING_INFANCY_PRESENTS confirmed seam
 // presents run the full resize sequence every tick with demand-gating off —
 // infancy is not steady state, so a phantom first-present success must not
@@ -65,7 +78,6 @@
 /**
  * ============================================================================
  * CLASS: Compositor
- * LEVEL: L2 — Behavior (retained-mode UI compositing behavior API)
  * ============================================================================
  * Retained-mode UI compositor connecting Darling UI nodes and Vulkan scene
  * viewports into the host window and presentation loop. Every panel is a
@@ -865,6 +877,10 @@ void Darling_preFrame(Window *window, int drawW, int drawH, void *userdata) {
         GraphicsComponent_setParentAbs(contentMeta, 0.0f, 0.0f, rootW, rootH);
         // Children are Vulkan rects:
         Window_attachPanes(window, contentPanel, winW, winH);
+        // Wire metric demand: every metric set in the tree raises this window's
+        // coalesced repaint ticket, so a widget set repaints the whole window.
+        bindRepaintTree(contentPanel, window);
+        bindRepaintTree(scenePanel, window);
         extern int Darling_attachLayers(Window *window, Panel *contentPanel, int width, int height);
         Darling_attachLayers(window, contentPanel, winW, winH);
 
