@@ -20,10 +20,10 @@ typedef struct Label {
     Panel base;
     ReactiveString *text;   // the observable text (word = a pointer to the bytes)
     Font *font;
-    char *fontFamily;
-    float fontSize;
-    uint32_t textColor;
-    float smoothness;
+    ReactiveString *fontFamily;
+    ReactiveFloat *fontSize;
+    ReactiveInt *textColor;
+    ReactiveFloat *smoothness;
     int32_t rasterTex;
     int rasterW;
     int rasterH;
@@ -35,22 +35,22 @@ typedef struct Label {
     bool ownsFontFamily;      // true if fontFamily was copied and owned by label
 
     // Typography & text styling
-    bool highlightable;       // enables text selection drag (no caret; labels aren't editable)
-    bool mnemonic;            // parse '&' key accelerator prefix
+    ReactiveBool *highlightable;  // enables text selection drag (no caret; labels aren't editable)
+    ReactiveBool *mnemonic;       // parse '&' key accelerator prefix
     char mnemonicChar;        // parsed accelerator character ('\0' if none)
     int mnemonicIndex;        // index in display text (-1 if none)
-    bool ligatures;           // enable standard typography ligatures (default true)
-    float spacingWidth;       // letter tracking/kerning delta in points (default 0.0)
-    float spacingHeight;      // line leading delta in points (default 0.0)
-    UnderlineStyle underline; // UNDERLINE_NONE, UNDERLINE_BASIC, etc.
-    uint32_t underlineColor;  // packed 0xAARRGGBB (0 = inherit textColor)
-    TextAlign textAlign;      // text alignment (TEXT_ALIGN_LEFT, TEXT_ALIGN_CENTER, etc.)
+    ReactiveBool *ligatures;      // enable standard typography ligatures (default true)
+    ReactiveFloat *spacingWidth;  // letter tracking/kerning delta in points (default 0.0)
+    ReactiveFloat *spacingHeight; // line leading delta in points (default 0.0)
+    ReactiveInt *underline;       // UNDERLINE_NONE, UNDERLINE_BASIC, etc.
+    ReactiveInt *underlineColor;  // packed 0xAARRGGBB (0 = inherit textColor)
+    ReactiveInt *textAlign;       // text alignment (TEXT_ALIGN_LEFT, TEXT_ALIGN_CENTER, etc.)
 
     // Highlight & cursor state
     Cursor *cursor;           // active mouse cursor style (I-beam when highlightable)
     TextSelect select;        // shared selection part (anchor/active edge + hover lifecycle)
-    float highlightRadius;    // corner radius in points for selection rounded rect (default 3.0f)
-    uint32_t highlightColor;  // packed 0xAARRGGBB selection background color (default 0x662563EB)
+    ReactiveFloat *highlightRadius;  // corner radius in points for selection rounded rect (default 3.0f)
+    ReactiveInt *highlightColor;     // packed 0xAARRGGBB selection background color (default 0x662563EB)
 } Label;
 
 Label *Label_0(void);

@@ -236,7 +236,7 @@ int32_t Label_charIndexAt(const Label *label, float localX) {
         qw = (float) (*label).rasterW / backing;
     }
     if (qw <= 0.0f)
-        qw = (float) len * ((*label).fontSize * 0.5f);
+        qw = (float) len * (ReactiveFloat_get((*label).fontSize) * 0.5f);
     if (localX <= 0.0f)
         return 0;
     if (localX >= qw)
@@ -290,15 +290,15 @@ void Label_handlePointer(Label *label, int kind, float localX, float localY, voi
 
     if (inside && (kind == PTR_ENTER || kind == PTR_MOVE || kind == PTR_HOVER)) {
         if (TextSelect_setHovered(&(*label).select, true)) {
-            if ((*label).highlightable && window)
+            if (ReactiveBool_get((*label).highlightable) && window)
                 Cursor_apply((*label).cursor, window);
             markDirty(label);
-        } else if ((*label).highlightable && window) {
+        } else if (ReactiveBool_get((*label).highlightable) && window) {
             Cursor_apply((*label).cursor, window);
         }
     }
 
-    if ((*label).highlightable) {
+    if (ReactiveBool_get((*label).highlightable)) {
         if (kind == PTR_DOWN) {
             // Outside-down clears any in-progress selection.
             if (!inside) {
@@ -349,7 +349,7 @@ void Label_handleKey(Label *label, const UIKeyEvent *ev) {
     uint32_t mods = UIKeyEvent_getMods(ev);
     if ((mods & (8u | 2u)) == 0)
         return;
-    if (!(*label).highlightable)
+    if (!ReactiveBool_get((*label).highlightable))
         return;
     int32_t code = UIKeyEvent_getKeyCode(ev);
     if (code != KEY_C && code != KEY_V)
@@ -371,19 +371,19 @@ static bool ensureRaster(Label *lbl) {
         return (*lbl).rasterTex >= 0;
     (*lbl).rasterDirty = false;
     clearGlyphTable(lbl);
-    if (!(*lbl).text || (*lbl).text[0] == '\0' || (*lbl).fontSize <= 0.0f) {
+    if (!(const char*) ReactiveString_get((*lbl).text) || (const char*) ReactiveString_get((*lbl).text)[0] == '\0' || ReactiveFloat_get((*lbl).fontSize) <= 0.0f) {
         (*lbl).rasterTex = -1;
         return false;
     }
     float backing = TextCore_backingScale();
     if (backing <= 0.0f)
         backing = 1.0f;
-    float pxH = (*lbl).fontSize * backing;
+    float pxH = ReactiveFloat_get((*lbl).fontSize) * backing;
     if (pxH <= 0.0f)
         return false;
     const char *family = (*lbl).fontFamily ? (*lbl).fontFamily : "Helvetica";
 
-    const char *srcText = (*lbl).text;
+    const char *srcText = (const char*) ReactiveString_get((*lbl).text);
     char cleanText[512];
     int mIndex = -1;
     char mChar = '\0';
@@ -392,10 +392,10 @@ static bool ensureRaster(Label *lbl) {
     // after the marker). toClean[i] is the clean coordinate of original byte
     // i; skipMark[i] flags the consumed marker byte itself, which hit-testing
     // folds onto the previous glyph (zero-width phantom, never addressable).
-    size_t srcLen = strlen((*lbl).text);
+    size_t srcLen = strlen((const char*) ReactiveString_get((*lbl).text));
     int32_t *toClean = nullptr;
     uint8_t *skipMark = nullptr;
-    if ((*lbl).mnemonic && (*lbl).text) {
+    if (ReactiveBool_get((*lbl).mnemonic) && (const char*) ReactiveString_get((*lbl).text)) {
         toClean = (int32_t*) Memory_alloc(TYPE_ARRAY, (srcLen + 1) * sizeof(int32_t));
         skipMark = (uint8_t*) Memory_alloc(TYPE_ARRAY, srcLen + 1);
         if (!toClean || !skipMark) {
@@ -411,27 +411,27 @@ static bool ensureRaster(Label *lbl) {
         }
     }
 
-    if ((*lbl).mnemonic && (*lbl).text) {
+    if (ReactiveBool_get((*lbl).mnemonic) && (const char*) ReactiveString_get((*lbl).text)) {
         size_t dst = 0;
         for (size_t i = 0; i < srcLen && dst + 1 < sizeof(cleanText); i++) {
             if (toClean)
                 toClean[i] = (int32_t) dst;
-            if ((*lbl).text[i] == '&') {
-                if (i + 1 < srcLen && (*lbl).text[i + 1] == '&') {
+            if ((const char*) ReactiveString_get((*lbl).text)[i] == '&') {
+                if (i + 1 < srcLen && (const char*) ReactiveString_get((*lbl).text)[i + 1] == '&') {
                     cleanText[dst++] = '&';
                     if (toClean)
                         toClean[i + 1] = (int32_t) dst - 1;
                     i++;
                 } else if (i + 1 < srcLen && mIndex < 0) {
-                    mChar = (*lbl).text[i + 1];
+                    mChar = (const char*) ReactiveString_get((*lbl).text)[i + 1];
                     mIndex = (int) dst;
                     if (skipMark)
                         skipMark[i] = 1;
                 } else {
-                    cleanText[dst++] = (*lbl).text[i];
+                    cleanText[dst++] = (const char*) ReactiveString_get((*lbl).text)[i];
                 }
             } else {
-                cleanText[dst++] = (*lbl).text[i];
+                cleanText[dst++] = (const char*) ReactiveString_get((*lbl).text)[i];
             }
         }
         if (toClean)
@@ -455,31 +455,31 @@ static bool ensureRaster(Label *lbl) {
     float cleanOff[512];
     int32_t offCount = -1;
     if (cleanLen + 1 <= 512)
-        offCount = TextCore_lineOffsets(srcText, family, pxH, (*lbl).ligatures,
-                                        (*lbl).spacingWidth, cleanOff, 512);
+        offCount = TextCore_lineOffsets(srcText, family, pxH, ReactiveBool_get((*lbl).ligatures),
+                                        ReactiveFloat_get((*lbl).spacingWidth), cleanOff, 512);
 
     Panel *rasterPanel = &(*lbl).base;
     Component *rasterBox = &(*rasterPanel).component;
     float boundsW = (*rasterBox).w;
     TextStyleDescriptor style = {
-        .ligatures = (*lbl).ligatures,
-        .spacingWidth = (*lbl).spacingWidth,
-        .spacingHeight = (*lbl).spacingHeight,
-        .underline = (*lbl).underline,
-        .underlineColor = (*lbl).underlineColor,
+        .ligatures = ReactiveBool_get((*lbl).ligatures),
+        .spacingWidth = ReactiveFloat_get((*lbl).spacingWidth),
+        .spacingHeight = ReactiveFloat_get((*lbl).spacingHeight),
+        .underline = ReactiveInt_get((*lbl).underline),
+        .underlineColor = ReactiveInt_get((*lbl).underlineColor),
         .mnemonicIndex = mIndex,
         .selectionStart = selStartClean,
         .selectionEnd = selEndClean,
-        .highlightRadius = (*lbl).highlightRadius,
-        .highlightColor = (*lbl).highlightColor,
-        .align = (*lbl).textAlign,
+        .highlightRadius = ReactiveFloat_get((*lbl).highlightRadius),
+        .highlightColor = ReactiveInt_get((*lbl).highlightColor),
+        .align = ReactiveInt_get((*lbl).textAlign),
         .boundsWidth = boundsW,
     };
 
     uint8_t *rgba = nullptr;
     int w = 0;
     int h = 0;
-    bool painted = TextCore_rasterStyled(srcText, family, pxH, (*lbl).textColor, &style, &rgba, &w, &h);
+    bool painted = TextCore_rasterStyled(srcText, family, pxH, ReactiveInt_get((*lbl).textColor), &style, &rgba, &w, &h);
     if (!painted) {
         if (toClean)
             Memory_free(toClean);
@@ -521,9 +521,9 @@ static bool ensureRaster(Label *lbl) {
         if (gx) {
             float totalAdvPts = cleanOff[cleanLen];
             float alignOffsetPts = 0.0f;
-            if ((*lbl).textAlign == TEXT_ALIGN_CENTER && boundsW > totalAdvPts) {
+            if (ReactiveInt_get((*lbl).textAlign) == TEXT_ALIGN_CENTER && boundsW > totalAdvPts) {
                 alignOffsetPts = (boundsW - totalAdvPts) * 0.5f;
-            } else if ((*lbl).textAlign == TEXT_ALIGN_RIGHT && boundsW > totalAdvPts) {
+            } else if (ReactiveInt_get((*lbl).textAlign) == TEXT_ALIGN_RIGHT && boundsW > totalAdvPts) {
                 alignOffsetPts = boundsW - totalAdvPts;
             }
             for (size_t i = 0; i <= srcLen; i++) {
@@ -560,24 +560,24 @@ static void drawSdfFallback(Panel *panel, void *cmdBuffer, float surfaceW, float
     if (op <= 0.0f)
         return;
     // Background is stage 0 (Panel default) — never repainted here.
-    if (!(*lbl).text || !(*lbl).font || (*lbl).fontSize <= 0)
+    if (!(const char*) ReactiveString_get((*lbl).text) || !(*lbl).font || ReactiveFloat_get((*lbl).fontSize) <= 0)
         return;
-    float cr = (((*lbl).textColor >> 16) & 0xFF) / 255.0f;
-    float cg = (((*lbl).textColor >> 8) & 0xFF) / 255.0f;
-    float cb = ((*lbl).textColor & 0xFF) / 255.0f;
-    float ca = (((*lbl).textColor >> 24) & 0xFF) / 255.0f * op;
+    float cr = ((ReactiveInt_get((*lbl).textColor) >> 16) & 0xFF) / 255.0f;
+    float cg = ((ReactiveInt_get((*lbl).textColor) >> 8) & 0xFF) / 255.0f;
+    float cb = (ReactiveInt_get((*lbl).textColor) & 0xFF) / 255.0f;
+    float ca = ((ReactiveInt_get((*lbl).textColor) >> 24) & 0xFF) / 255.0f * op;
     float ascent = 0;
     float descent = 0;
     float lineGap = 0;
     Font_getVMetrics((*lbl).font, &ascent, &descent, &lineGap);
-    float scale = Font_getScaleForPixelHeight((*lbl).font, (*lbl).fontSize);
+    float scale = Font_getScaleForPixelHeight((*lbl).font, ReactiveFloat_get((*lbl).fontSize));
     float lineHeight = (ascent - descent + lineGap) * scale;
     if (lineHeight <= 0.0f)
-        lineHeight = (*lbl).fontSize * 1.2f;
+        lineHeight = ReactiveFloat_get((*lbl).fontSize) * 1.2f;
 
     GlyphMetrics spaceGm = {0};
-    float spaceAdvance = (*lbl).fontSize * 0.3f;
-    if (Font_getGlyph((*lbl).font, (uint32_t) ' ', (*lbl).fontSize, &spaceGm) && spaceGm.advance > 0.0f)
+    float spaceAdvance = ReactiveFloat_get((*lbl).fontSize) * 0.3f;
+    if (Font_getGlyph((*lbl).font, (uint32_t) ' ', ReactiveFloat_get((*lbl).fontSize), &spaceGm) && spaceGm.advance > 0.0f)
         spaceAdvance = spaceGm.advance;
     float tabWidth = 4.0f * spaceAdvance;
 
@@ -585,24 +585,24 @@ static void drawSdfFallback(Panel *panel, void *cmdBuffer, float surfaceW, float
     float cy = y + (ascent * scale);
     int32_t page0Tex = Font_getTextureId((*lbl).font);
     uint32_t prevChar = 0;
-    int len = (int) strlen((*lbl).text);
+    int len = (int) strlen((const char*) ReactiveString_get((*lbl).text));
     for (int i = 0; i < len; ) {
         uint32_t codepoint = 0;
-        unsigned char c0 = (unsigned char) (*lbl).text[i];
+        unsigned char c0 = (unsigned char) (const char*) ReactiveString_get((*lbl).text)[i];
         int charLen = 1;
         if (c0 < 0x80) {
             codepoint = c0;
         } else if ((c0 & 0xE0) == 0xC0) {
             if (i + 1 < len)
-                codepoint = ((c0 & 0x1F) << 6) | ((*lbl).text[i + 1] & 0x3F);
+                codepoint = ((c0 & 0x1F) << 6) | ((const char*) ReactiveString_get((*lbl).text)[i + 1] & 0x3F);
             charLen = 2;
         } else if ((c0 & 0xF0) == 0xE0) {
             if (i + 2 < len)
-                codepoint = ((c0 & 0x0F) << 12) | (((*lbl).text[i + 1] & 0x3F) << 6) | ((*lbl).text[i + 2] & 0x3F);
+                codepoint = ((c0 & 0x0F) << 12) | (((const char*) ReactiveString_get((*lbl).text)[i + 1] & 0x3F) << 6) | ((const char*) ReactiveString_get((*lbl).text)[i + 2] & 0x3F);
             charLen = 3;
         } else if ((c0 & 0xF8) == 0xF0) {
             if (i + 3 < len)
-                codepoint = ((c0 & 0x07) << 18) | (((*lbl).text[i + 1] & 0x3F) << 12) | (((*lbl).text[i + 2] & 0x3F) << 6) | ((*lbl).text[i + 3] & 0x3F);
+                codepoint = ((c0 & 0x07) << 18) | (((const char*) ReactiveString_get((*lbl).text)[i + 1] & 0x3F) << 12) | (((const char*) ReactiveString_get((*lbl).text)[i + 2] & 0x3F) << 6) | ((const char*) ReactiveString_get((*lbl).text)[i + 3] & 0x3F);
             charLen = 4;
         }
         if (codepoint == '\r') {
@@ -629,9 +629,9 @@ static void drawSdfFallback(Panel *panel, void *cmdBuffer, float surfaceW, float
             continue;
         }
         GlyphMetrics gm = {0};
-        if (Font_getGlyph((*lbl).font, codepoint, (*lbl).fontSize, &gm)) {
+        if (Font_getGlyph((*lbl).font, codepoint, ReactiveFloat_get((*lbl).fontSize), &gm)) {
             if (prevChar != 0)
-                cx += Font_getKerning((*lbl).font, prevChar, codepoint, (*lbl).fontSize);
+                cx += Font_getKerning((*lbl).font, prevChar, codepoint, ReactiveFloat_get((*lbl).fontSize));
             prevChar = codepoint;
             if (gm.width > 0.0f && gm.height > 0.0f) {
                 float qx = cx + gm.xOffset;
@@ -647,7 +647,7 @@ static void drawSdfFallback(Panel *panel, void *cmdBuffer, float surfaceW, float
                     if (gm.color)
                         Vk_drawColorGlyph(cmdBuffer, surfaceW, surfaceH, qx, qy, gm.width, gm.height, ca, texId, gm.u0, gm.v0, gm.u1, gm.v1);
                     else
-                        Vk_drawSDFText(cmdBuffer, surfaceW, surfaceH, qx, qy, gm.width, gm.height, cr, cg, cb, ca, texId, 0.0f, (*lbl).smoothness, gm.u0, gm.v0, gm.u1, gm.v1);
+                        Vk_drawSDFText(cmdBuffer, surfaceW, surfaceH, qx, qy, gm.width, gm.height, cr, cg, cb, ca, texId, 0.0f, ReactiveFloat_get((*lbl).smoothness), gm.u0, gm.v0, gm.u1, gm.v1);
                 }
             }
             cx += gm.advance;
@@ -666,14 +666,14 @@ static void drawSelectionOverlay(Label *lbl, void *cmdBuffer, float surfaceW, fl
                                  float qx, float qy, float qh, float op) {
     if (!lbl)
         return;
-    if (!(*lbl).highlightable)
+    if (!ReactiveBool_get((*lbl).highlightable))
         return;
     int32_t s0 = -1, s1 = -1;
     if (!TextSelect_getSpan(&(*lbl).select, &s0, &s1))
         return;
     if (s1 <= s0)
         return;
-    const char *text = (*lbl).text;
+    const char *text = (const char*) ReactiveString_get((*lbl).text);
     if (!text)
         return;
     int32_t len = (int32_t) strlen(text);
@@ -683,7 +683,7 @@ static void drawSelectionOverlay(Label *lbl, void *cmdBuffer, float surfaceW, fl
     int32_t hi = s1 > len ? len : s1;
     if (hi <= lo)
         return;
-    uint32_t hl = (*lbl).highlightColor;
+    uint32_t hl = ReactiveInt_get((*lbl).highlightColor);
     float ba = ((hl >> 24) & 0xFF) / 255.0f * op;
     if (ba <= 0.0f)
         return;
@@ -698,7 +698,7 @@ static void drawSelectionOverlay(Label *lbl, void *cmdBuffer, float surfaceW, fl
         x0 = gx[lo] + pad;
         x1 = gx[hi] + pad;
     } else {
-        float qw = (float) len * ((*lbl).fontSize * 0.5f);
+        float qw = (float) len * (ReactiveFloat_get((*lbl).fontSize) * 0.5f);
         if ((*lbl).rasterW > 0) {
             float backing = (*lbl).rasterBacking > 0.0f ? (*lbl).rasterBacking : 1.0f;
             qw = (float) (*lbl).rasterW / backing;
@@ -725,7 +725,7 @@ static bool labelPaintText(Panel *panel, void *renderer, void *cmdBuffer,
     float op = GraphicsComponent_getOpacity(&(*panel).component);
     if (op <= 0.0f)
         return false;
-    if (!(*lbl).text || (*lbl).text[0] == '\0' || (*lbl).fontSize <= 0.0f)
+    if (!(const char*) ReactiveString_get((*lbl).text) || (const char*) ReactiveString_get((*lbl).text)[0] == '\0' || ReactiveFloat_get((*lbl).fontSize) <= 0.0f)
         return false;
     // Sharp path: one native raster quad, top-left anchored in panel.
     // macOS panels are bottom-up (AppKit): panel origin is bottom-left,
@@ -767,9 +767,9 @@ static bool labelPaintHighlight(Panel *panel, void *renderer, void *cmdBuffer,
     (void) h;
     if (!lbl || !cmdBuffer)
         return false;
-    if (!(*lbl).highlightable)
+    if (!ReactiveBool_get((*lbl).highlightable))
         return false;
-    if (!(*lbl).text || (*lbl).text[0] == '\0')
+    if (!(const char*) ReactiveString_get((*lbl).text) || (const char*) ReactiveString_get((*lbl).text)[0] == '\0')
         return false;
     if ((*lbl).rasterTex < 0 || (*lbl).rasterW <= 0 || (*lbl).rasterH <= 0)
         return false;
@@ -808,11 +808,11 @@ Label *Label_0(void) {
     (*lbl).text = ReactiveString_1(nullptr);
     (*lbl).ownsText = false;
     (*lbl).font = NULL;
-    (*lbl).fontFamily = nullptr;
+    (*lbl).fontFamily = ReactiveString_1(nullptr);
     (*lbl).ownsFontFamily = false;
-    (*lbl).fontSize = 12.0f;
-    (*lbl).textColor = 0xFFFFFFFF;
-    (*lbl).smoothness = 0.5f;
+    (*lbl).fontSize = ReactiveFloat_1(12.0f);
+    (*lbl).textColor = ReactiveInt_1(0xFFFFFFFF);
+    (*lbl).smoothness = ReactiveFloat_1(0.5f);
     (*lbl).rasterTex = -1;
     (*lbl).rasterW = 0;
     (*lbl).rasterH = 0;
@@ -820,28 +820,29 @@ Label *Label_0(void) {
     (*lbl).rasterDirty = true;
     (*lbl).glyphX = nullptr;
     (*lbl).glyphN = 0;
-    (*lbl).highlightable = false;
-    (*lbl).mnemonic = false;
+    (*lbl).highlightable = ReactiveBool_1(false);
+    (*lbl).mnemonic = ReactiveBool_1(false);
     (*lbl).mnemonicChar = '\0';
     (*lbl).mnemonicIndex = -1;
-    (*lbl).ligatures = true;
-    (*lbl).spacingWidth = 0.0f;
-    (*lbl).spacingHeight = 0.0f;
-    (*lbl).underline = UNDERLINE_NONE;
-    (*lbl).underlineColor = 0;
-    (*lbl).textAlign = TEXT_ALIGN_LEFT;
+    (*lbl).ligatures = ReactiveBool_1(true);
+    (*lbl).spacingWidth = ReactiveFloat_1(0.0f);
+    (*lbl).spacingHeight = ReactiveFloat_1(0.0f);
+    (*lbl).underline = ReactiveInt_1(UNDERLINE_NONE);
+    (*lbl).underlineColor = ReactiveInt_1(0);
+    (*lbl).textAlign = ReactiveInt_1(TEXT_ALIGN_LEFT);
     (*lbl).cursor = Cursor_getPredefined(CURSOR_DEFAULT);
     (*lbl).select = TextSelect_default();
-    (*lbl).highlightRadius = 3.0f;
-    (*lbl).highlightColor = 0x662563EBu;
+    (*lbl).highlightRadius = ReactiveFloat_1(3.0f);
+    (*lbl).highlightColor = ReactiveInt_1(0x662563EBu);
     {
         const char *defFamily = "Helvetica";
         size_t defLen = strlen(defFamily) + 1;
-        (*lbl).fontFamily = (char*) Memory_alloc(TYPE_ARRAY, defLen);
-        if ((*lbl).fontFamily) {
-            strcpy((*lbl).fontFamily, defFamily);
+        char *fam = (char*) Memory_alloc(TYPE_ARRAY, defLen);
+        if (fam) {
+            strcpy(fam, defFamily);
             (*lbl).ownsFontFamily = true;
         }
+        ReactiveString_set((*lbl).fontFamily, (const uint8_t*) fam);
     }
     Panel *lb = &(*lbl).base;
     Panel_setRenderHandler(lb, nullptr);
@@ -929,17 +930,18 @@ void Label_setFont(Label *label, Font *font) {
 void Label_setFontFamily(Label *label, const char *family) {
     if (!label)
         return;
-    if ((*label).fontFamily && (*label).ownsFontFamily)
-        Memory_free((*label).fontFamily);
-    (*label).fontFamily = nullptr;
+    char *old = (char*) ReactiveString_get((*label).fontFamily);
+    if (old && (*label).ownsFontFamily)
+        Memory_free(old);
     (*label).ownsFontFamily = false;
     if (family) {
         size_t len = strlen(family) + 1;
-        (*label).fontFamily = (char*) Memory_alloc(TYPE_ARRAY, len);
-        if ((*label).fontFamily) {
-            memcpy((*label).fontFamily, family, len);
+        char *copy = (char*) Memory_alloc(TYPE_ARRAY, len);
+        if (copy) {
+            memcpy(copy, family, len);
             (*label).ownsFontFamily = true;
         }
+        ReactiveString_set((*label).fontFamily, (const uint8_t*) copy);
     }
     markRasterDirty(label);
     markDirty(label);
@@ -954,10 +956,11 @@ void Label_setFontFamilyBorrowed(Label *label, const char *family) {
                 family, (void*) label);
         abort();
     }
-    if ((*label).fontFamily && (*label).ownsFontFamily)
-        Memory_free((*label).fontFamily);
-    (*label).fontFamily = (char*) family;
+    char *old = (char*) ReactiveString_get((*label).fontFamily);
+    if (old && (*label).ownsFontFamily)
+        Memory_free(old);
     (*label).ownsFontFamily = false;
+    ReactiveString_set((*label).fontFamily, (const uint8_t*) family);
     markRasterDirty(label);
     markDirty(label);
 }
@@ -965,7 +968,7 @@ void Label_setFontFamilyBorrowed(Label *label, const char *family) {
 void Label_setFontSize(Label *label, float size) {
     if (!label)
         return;
-    (*label).fontSize = size;
+    ReactiveFloat_set((*label).fontSize, size);
     markRasterDirty(label);
     markDirty(label);
 }
@@ -973,7 +976,7 @@ void Label_setFontSize(Label *label, float size) {
 void Label_setTextColor(Label *label, uint32_t color) {
     if (!label)
         return;
-    (*label).textColor = color;
+    ReactiveInt_set((*label).textColor, color);
     markRasterDirty(label);
     markDirty(label);
 }
@@ -985,7 +988,7 @@ void Label_setSmoothness(Label *label, float smoothness) {
         smoothness = 0.0f;
     if (smoothness > 1.0f)
         smoothness = 1.0f;
-    (*label).smoothness = smoothness;
+    ReactiveFloat_set((*label).smoothness, smoothness);
     markDirty(label);
 }
 
@@ -999,7 +1002,7 @@ void Label_setSize(Label *label, float w, float h) {
     if (!label)
         return;
     Panel_setSize(&(*label).base, w, h);
-    if ((*label).textAlign != TEXT_ALIGN_LEFT)
+    if (ReactiveInt_get((*label).textAlign) != TEXT_ALIGN_LEFT)
         markRasterDirty(label);
 }
 
@@ -1012,7 +1015,7 @@ void Label_setBackgroundColor(Label *label, uint32_t color) {
 void Label_setHighlightable(Label *label, bool flag) {
     if (!label)
         return;
-    (*label).highlightable = flag;
+    ReactiveBool_set((*label).highlightable, flag);
     if (flag) {
         (*label).cursor = Cursor_getPredefined(CURSOR_IBEAM);
     } else {
@@ -1026,7 +1029,7 @@ void Label_setHighlightable(Label *label, bool flag) {
 void Label_setMnemonic(Label *label, bool flag) {
     if (!label)
         return;
-    (*label).mnemonic = flag;
+    ReactiveBool_set((*label).mnemonic, flag);
     markRasterDirty(label);
     markDirty(label);
 }
@@ -1034,7 +1037,7 @@ void Label_setMnemonic(Label *label, bool flag) {
 void Label_setLigatures(Label *label, bool flag) {
     if (!label)
         return;
-    (*label).ligatures = flag;
+    ReactiveBool_set((*label).ligatures, flag);
     markRasterDirty(label);
     markDirty(label);
 }
@@ -1042,7 +1045,7 @@ void Label_setLigatures(Label *label, bool flag) {
 void Label_setSpacingWidth(Label *label, float width) {
     if (!label)
         return;
-    (*label).spacingWidth = width;
+    ReactiveFloat_set((*label).spacingWidth, width);
     markRasterDirty(label);
     markDirty(label);
 }
@@ -1050,7 +1053,7 @@ void Label_setSpacingWidth(Label *label, float width) {
 void Label_setSpacingHeight(Label *label, float height) {
     if (!label)
         return;
-    (*label).spacingHeight = height;
+    ReactiveFloat_set((*label).spacingHeight, height);
     markRasterDirty(label);
     markDirty(label);
 }
@@ -1058,8 +1061,8 @@ void Label_setSpacingHeight(Label *label, float height) {
 void Label_setSpacing(Label *label, float width, float height) {
     if (!label)
         return;
-    (*label).spacingWidth = width;
-    (*label).spacingHeight = height;
+    ReactiveFloat_set((*label).spacingWidth, width);
+    ReactiveFloat_set((*label).spacingHeight, height);
     markRasterDirty(label);
     markDirty(label);
 }
@@ -1067,7 +1070,7 @@ void Label_setSpacing(Label *label, float width, float height) {
 void Label_setUnderline(Label *label, UnderlineStyle style) {
     if (!label)
         return;
-    (*label).underline = style;
+    ReactiveInt_set((*label).underline, style);
     markRasterDirty(label);
     markDirty(label);
 }
@@ -1075,7 +1078,7 @@ void Label_setUnderline(Label *label, UnderlineStyle style) {
 void Label_setUnderlineColor(Label *label, uint32_t color) {
     if (!label)
         return;
-    (*label).underlineColor = color;
+    ReactiveInt_set((*label).underlineColor, color);
     markRasterDirty(label);
     markDirty(label);
 }
@@ -1110,7 +1113,7 @@ void Label_setHighlightRadius(Label *label, float radius) {
         return;
     if (radius < 0.0f)
         radius = 0.0f;
-    (*label).highlightRadius = radius;
+    ReactiveFloat_set((*label).highlightRadius, radius);
     markRasterDirty(label);
     markDirty(label);
 }
@@ -1118,7 +1121,7 @@ void Label_setHighlightRadius(Label *label, float radius) {
 void Label_setHighlightColor(Label *label, uint32_t color) {
     if (!label)
         return;
-    (*label).highlightColor = color;
+    ReactiveInt_set((*label).highlightColor, color);
     markRasterDirty(label);
     markDirty(label);
 }
@@ -1131,9 +1134,9 @@ void Label_setHighlightColorRGBA(Label *label, uint8_t r, uint8_t g, uint8_t b, 
 }
 
 void Label_setTextAlign(Label *label, TextAlign align) {
-    if (!label || (*label).textAlign == align)
+    if (!label || ReactiveInt_get((*label).textAlign) == align)
         return;
-    (*label).textAlign = align;
+    ReactiveInt_set((*label).textAlign, align);
     markRasterDirty(label);
     markDirty(label);
 }
@@ -1151,10 +1154,12 @@ void Label_free(Label *label) {
     char *bytes = (char*) ReactiveString_get((*label).text);
     if (bytes && (*label).ownsText)
         Memory_free(bytes);
-    if ((*label).fontFamily && (*label).ownsFontFamily)
-        Memory_free((*label).fontFamily);
+    char *fam = (char*) ReactiveString_get((*label).fontFamily);
+    if (fam && (*label).ownsFontFamily)
+        Memory_free(fam);
     Cursor_free((*label).cursor);
     ReactiveString_free((*label).text);
+    ReactiveString_free((*label).fontFamily);
     (*label).text = nullptr;
     (*label).fontFamily = nullptr;
     (*label).ownsText = false;
@@ -1181,19 +1186,19 @@ Font *Label_getFont(const Label *label) {
 }
 
 const char *Label_getFontFamily(const Label *label) {
-    return label ? (*label).fontFamily : nullptr;
+    return label ? (const char*) ReactiveString_get((*label).fontFamily) : nullptr;
 }
 
 float Label_getFontSize(const Label *label) {
-    return label ? (*label).fontSize : 0.0f;
+    return label ? ReactiveFloat_get((*label).fontSize) : 0.0f;
 }
 
 uint32_t Label_getTextColor(const Label *label) {
-    return label ? (*label).textColor : 0;
+    return label ? ReactiveInt_get((*label).textColor) : 0;
 }
 
 float Label_getSmoothness(const Label *label) {
-    return label ? (*label).smoothness : 0.0f;
+    return label ? ReactiveFloat_get((*label).smoothness) : 0.0f;
 }
 
 int32_t Label_getRasterTexture(const Label *label) {
@@ -1222,11 +1227,11 @@ int32_t Label_getGlyphOffsetCount(const Label *label) {
 }
 
 bool Label_isHighlightable(const Label *label) {
-    return label ? (*label).highlightable : false;
+    return label ? ReactiveBool_get((*label).highlightable) : false;
 }
 
 bool Label_isMnemonic(const Label *label) {
-    return label ? (*label).mnemonic : false;
+    return label ? ReactiveBool_get((*label).mnemonic) : false;
 }
 
 char Label_getMnemonicChar(const Label *label) {
@@ -1238,32 +1243,32 @@ int Label_getMnemonicIndex(const Label *label) {
 }
 
 bool Label_hasLigatures(const Label *label) {
-    return label ? (*label).ligatures : true;
+    return label ? ReactiveBool_get((*label).ligatures) : true;
 }
 
 float Label_getSpacingWidth(const Label *label) {
-    return label ? (*label).spacingWidth : 0.0f;
+    return label ? ReactiveFloat_get((*label).spacingWidth) : 0.0f;
 }
 
 float Label_getSpacingHeight(const Label *label) {
-    return label ? (*label).spacingHeight : 0.0f;
+    return label ? ReactiveFloat_get((*label).spacingHeight) : 0.0f;
 }
 
 void Label_getSpacing(const Label *label, float *outWidth, float *outHeight) {
-    if (outWidth) (*outWidth) = label ? (*label).spacingWidth : 0.0f;
-    if (outHeight) (*outHeight) = label ? (*label).spacingHeight : 0.0f;
+    if (outWidth) (*outWidth) = label ? ReactiveFloat_get((*label).spacingWidth) : 0.0f;
+    if (outHeight) (*outHeight) = label ? ReactiveFloat_get((*label).spacingHeight) : 0.0f;
 }
 
 UnderlineStyle Label_getUnderline(const Label *label) {
-    return label ? (*label).underline : UNDERLINE_NONE;
+    return label ? ReactiveInt_get((*label).underline) : UNDERLINE_NONE;
 }
 
 uint32_t Label_getUnderlineColor(const Label *label) {
-    return label ? (*label).underlineColor : 0;
+    return label ? ReactiveInt_get((*label).underlineColor) : 0;
 }
 
 void Label_getUnderlineColorRGBA(const Label *label, uint8_t *outR, uint8_t *outG, uint8_t *outB, uint8_t *outA) {
-    uint32_t c = label ? (*label).underlineColor : 0;
+    uint32_t c = label ? ReactiveInt_get((*label).underlineColor) : 0;
     if (outA) (*outA) = (uint8_t) ((c >> 24) & 0xFF);
     if (outR) (*outR) = (uint8_t) ((c >> 16) & 0xFF);
     if (outG) (*outG) = (uint8_t) ((c >> 8) & 0xFF);
@@ -1283,15 +1288,15 @@ void Label_getSelection(const Label *label, int32_t *outStart, int32_t *outEnd) 
 }
 
 float Label_getHighlightRadius(const Label *label) {
-    return label ? (*label).highlightRadius : 0.0f;
+    return label ? ReactiveFloat_get((*label).highlightRadius) : 0.0f;
 }
 
 uint32_t Label_getHighlightColor(const Label *label) {
-    return label ? (*label).highlightColor : 0;
+    return label ? ReactiveInt_get((*label).highlightColor) : 0;
 }
 
 void Label_getHighlightColorRGBA(const Label *label, uint8_t *outR, uint8_t *outG, uint8_t *outB, uint8_t *outA) {
-    uint32_t c = label ? (*label).highlightColor : 0;
+    uint32_t c = label ? ReactiveInt_get((*label).highlightColor) : 0;
     if (outA) (*outA) = (uint8_t) ((c >> 24) & 0xFF);
     if (outR) (*outR) = (uint8_t) ((c >> 16) & 0xFF);
     if (outG) (*outG) = (uint8_t) ((c >> 8) & 0xFF);
@@ -1303,7 +1308,7 @@ bool Label_isHovered(const Label *label) {
 }
 
 TextAlign Label_getTextAlign(const Label *label) {
-    return label ? (*label).textAlign : TEXT_ALIGN_LEFT;
+    return label ? ReactiveInt_get((*label).textAlign) : TEXT_ALIGN_LEFT;
 }
 
 char *Label_getSelectedText(const Label *label) {
