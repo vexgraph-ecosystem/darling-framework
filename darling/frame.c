@@ -9,6 +9,7 @@
 #include "annotation/getter.h"
 
 #include "lang/graphics.h"
+#include "reactive/reactive_primitive.h"
 #include "vulkan/vk_device.h"
 #include "vulkan/vk_graphics.h"
 #include "window/window.h"
@@ -18,6 +19,8 @@
 // hierarchy and fills the frame's Surface/Device/window; frameFree tears down.
 bool Frame_platformShow(Frame *frame, int width, int height, const char *title);
 void Frame_platformFree(Frame *frame);
+void Frame_platformPresentBegin(Frame *frame);
+void Frame_platformPresentEnd(Frame *frame);
 
 ;;DEFINITION
 /**
@@ -48,6 +51,7 @@ void Frame_platformFree(Frame *frame);
  *   Board *content;         // owned top board (nullable)
  *   Board *scene;           // owned bottom board (nullable)
  *   GraphicsLoop *loop;     // borrowed demand loop
+ *   Repaint *paint;         // owned, coalesced per-frame painting event
  *   void *window;           // borrowed platform window (null while offscreen)
  *   int width, height;      // window size in logical points
  *   char title[256];        // window title
@@ -72,11 +76,12 @@ struct Frame {
     Board *content;         // owned top board (nullable)
     Board *scene;           // owned bottom board (nullable)
     GraphicsLoop *loop;     // borrowed demand loop
+    Repaint *paint;         // owned, borrowed by the registered client
     void *window;           // borrowed platform window (null while offscreen)
-    int width;              // window size in logical points
-    int height;
+    ReactiveInt *width;      // window size in logical points (reactive)
+    ReactiveInt *height;
     char title[256];        // window title
-    float scale;            // native px per logical point (the display backing scale)
+    ReactiveFloat *scale;   // native px per logical point (the display backing scale)
     GraphicsFrameFn draw;   // the UI draw callback (inside the present hook)
     void *drawCtx;
     GraphicsFrameFn probe;  // the demand probe (each loop step)
@@ -107,6 +112,7 @@ static void frameRefreshClient(Frame *frame) {
     (*client).frameFn = frameProbeFn;
     (*client).presentFn = framePresentFn;
     (*client).userdata = frame;
+    (*client).paint = (*frame).paint;
 }
 
 // Bind this frame's device to the process Graphics row and ensure its target
@@ -131,21 +137,26 @@ Frame *Frame_0(void) {
     Frame *frame = (Frame*) calloc(1, sizeof(Frame));
     if (frame == nullptr)
         return nullptr;
+    (*frame).paint = Repaint_0();
+    if ((*frame).paint == nullptr) {
+        free(frame);
+        return nullptr;
+    }
     (*frame).vfx = VisualEffect_0();
     (*frame).device = Device_new(&(DeviceDesc){ .backend = LANG_BACKEND_VULKAN });
     (*frame).loop = GraphicsLoop_default();
-    (*frame).width = 800;
-    (*frame).height = 600;
-    (*frame).scale = 1.0f;
+    (*frame).width = ReactiveInt_1(800);
+    (*frame).height = ReactiveInt_1(600);
+    (*frame).scale = ReactiveFloat_1(1.0f);
     const char *title = "darling frame";
     memcpy((*frame).title, title, strlen(title) + 1u);
     if ((*frame).device != nullptr)
-        Device_resize((*frame).device, (uint32_t) (*frame).width, (uint32_t) (*frame).height);
+        Device_resize((*frame).device, (uint32_t) ReactiveInt_get((*frame).width), (uint32_t) ReactiveInt_get((*frame).height));
     (*frame).valid = (*frame).device != nullptr;
     frameEnsureTarget(frame);
     GraphicsClient client = { .window = frame, .content = nullptr, .scene = nullptr,
                               .frameFn = nullptr, .presentFn = framePresentFn,
-                              .userdata = frame };
+                              .userdata = frame, .paint = (*frame).paint };
     if ((*frame).loop != nullptr)
         GraphicsLoop_addClient((*frame).loop, &client);
     return frame;
@@ -168,6 +179,8 @@ void Frame_free(Frame *frame) {
         return;
     if ((*frame).loop != nullptr)
         GraphicsLoop_removeClient((*frame).loop, frame);
+    // Callers must have stopped all producers before this point.
+    Repaint_free((*frame).paint);
     // The device and surface borrow the Context the platform layer created, so
     // they die BEFORE the platform teardown destroys it (the Teardown Order Law).
     if ((*frame).content != nullptr)
@@ -180,6 +193,9 @@ void Frame_free(Frame *frame) {
         Surface_destroy((*frame).surface);
     Frame_platformFree(frame);
     VisualEffect_free((*frame).vfx);
+    ReactiveInt_free((*frame).width);
+    ReactiveInt_free((*frame).height);
+    ReactiveFloat_free((*frame).scale);
     free(frame);
 }
 
@@ -193,8 +209,8 @@ bool Frame_isValid(const Frame *frame) {
 void Frame_setSize(Frame *frame, int width, int height) {
     if (frame == nullptr || width <= 0 || height <= 0)
         return;
-    (*frame).width = width;
-    (*frame).height = height;
+    ReactiveInt_set((*frame).width, width);
+    ReactiveInt_set((*frame).height, height);
     if ((*frame).window != nullptr)
         Window_setSize((Window*) (*frame).window, width, height);   // R1 resizes; the platform resync follows
     else if ((*frame).device != nullptr) {
@@ -216,29 +232,31 @@ void Frame_setTitle(Frame *frame, const char *title) {
 
 ;;GETTER
 int Frame_getWidth(const Frame *frame) {
-    return frame ? (*frame).width : 0;
+    return frame ? ReactiveInt_get((*frame).width) : 0;
 }
 
 ;;GETTER
 int Frame_getHeight(const Frame *frame) {
-    return frame ? (*frame).height : 0;
+    return frame ? ReactiveInt_get((*frame).height) : 0;
 }
 
 void Frame_setScale(Frame *frame, float scale) {
-    if (frame != nullptr && scale > 0.0f)
-        (*frame).scale = scale;
+    if (frame != nullptr && scale > 0.0f) {
+        ReactiveFloat_set((*frame).scale, scale);
+        Frame_markDirty(frame);
+    }
 }
 
 ;;GETTER
 float Frame_getScale(const Frame *frame) {
-    return (frame != nullptr && (*frame).scale > 0.0f) ? (*frame).scale : 1.0f;
+    return (frame != nullptr && ReactiveFloat_get((*frame).scale) > 0.0f) ? ReactiveFloat_get((*frame).scale) : 1.0f;
 }
 
 bool Frame_show(Frame *frame) {
     if (frame == nullptr || (*frame).window == nullptr)
         return false;   // a frame shows a borrowed R1 window
     Window_show((Window*) (*frame).window);
-    bool shown = Frame_platformShow(frame, (*frame).width, (*frame).height, (*frame).title);
+    bool shown = Frame_platformShow(frame, ReactiveInt_get((*frame).width), ReactiveInt_get((*frame).height), (*frame).title);
     if (shown)
         Frame_markDirty(frame);
     return shown;
@@ -284,7 +302,7 @@ void Frame_setFrameFn(Frame *frame, GraphicsFrameFn probe, void *userdata) {
 
 // THE PRESENT HOOK (PUBLIC)
 
-bool Frame_present(Frame *frame) {
+static bool framePresentBody(Frame *frame) {
     if (frame == nullptr || (*frame).device == nullptr)
         return false;
     frameEnsureTarget(frame);
@@ -311,7 +329,7 @@ bool Frame_present(Frame *frame) {
     bool presented = Graphics_present();
     if (getenv("FRAME_TRACE") != nullptr) {
         static unsigned frames = 0u;
-        if (frames++ < 5u)
+        if (frames++ < 5u || getenv("VEX_REPAINT_TRACE") != nullptr)
             fprintf(stderr, "frame_present: %dx%d boards(c=%p s=%p) presented=%d\n",
                     w, h, (void*) (*frame).content, (void*) (*frame).scene, (int) presented);
     }
@@ -319,9 +337,27 @@ bool Frame_present(Frame *frame) {
     return presented || (*frame).surface == nullptr;
 }
 
+bool Frame_present(Frame *frame) {
+    if (frame == nullptr || (*frame).device == nullptr)
+        return false;
+    // A transactional CAMetalLayer does not make a drawable visible until its
+    // enclosing Core Animation transaction commits. Include the entire UI
+    // render and Vulkan present, and always balance it even on a failed frame.
+    Frame_platformPresentBegin(frame);
+    bool presented = framePresentBody(frame);
+    Frame_platformPresentEnd(frame);
+    return presented;
+}
+
+void Frame_requestRepaint(Frame *frame) {
+    if (frame == nullptr)
+        return;
+    Repaint_request((*frame).paint);
+    GraphicsLoop_notify((*frame).loop);
+}
+
 void Frame_markDirty(Frame *frame) {
-    if (frame != nullptr && (*frame).loop != nullptr)
-        GraphicsLoop_markDirty((*frame).loop, frame);
+    Frame_requestRepaint(frame);
 }
 
 // DIALECT-INTERNAL PLATFORM SETTERS (frame_cocoa.m / frame_stub.c use these)
