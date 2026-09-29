@@ -35,7 +35,6 @@
 /**
  * ============================================================================
  * CLASS: Label (inherits Panel -> Container)
- * LEVEL: L2 — Behavior (UI text view behavior API)
  * ============================================================================
  * Lightweight retained-mode UI text view for sharp, single-styled typography.
  * Implements a dual-path rendering strategy:
@@ -197,9 +196,9 @@ static void markDirty(Label *lbl) {
 }
 
 int32_t Label_charIndexAt(const Label *label, float localX) {
-    if (!label || !(*label).text)
+    if (!label || !(const char*) ReactiveString_get((*label).text))
         return 0;
-    size_t len = strlen((*label).text);
+    size_t len = strlen((const char*) ReactiveString_get((*label).text));
     if (len == 0)
         return 0;
     // Stated positions (per-glyph table): the hit-test shares the exact
@@ -806,7 +805,7 @@ Label *Label_0(void) {
     }
     (*lbl).base = *p;
     Memory_free(p);
-    (*lbl).text = NULL;
+    (*lbl).text = ReactiveString_1(nullptr);
     (*lbl).ownsText = false;
     (*lbl).font = NULL;
     (*lbl).fontFamily = nullptr;
@@ -880,17 +879,19 @@ Label *Label_2(Panel *parent, const char *text) {
 void Label_setText(Label *label, const char *text) {
     if (!label)
         return;
-    if ((*label).text && (*label).ownsText)
-        Memory_free((*label).text);
+    char *old = (char*) ReactiveString_get((*label).text);
+    if (old && (*label).ownsText)
+        Memory_free(old);
     if (text) {
         size_t len = strlen(text) + 1;
-        (*label).text = (char*) Memory_alloc(TYPE_ARRAY, len);
-        if ((*label).text)
-            memcpy((*label).text, text, len);
+        char *copy = (char*) Memory_alloc(TYPE_ARRAY, len);
+        if (copy)
+            memcpy(copy, text, len);
         (*label).ownsText = true;
+        ReactiveString_set((*label).text, (const uint8_t*) copy);
     } else {
-        (*label).text = NULL;
         (*label).ownsText = false;
+        ReactiveString_set((*label).text, nullptr);
     }
     markRasterDirty(label);
     markDirty(label);
@@ -908,10 +909,11 @@ void Label_setTextBorrowed(Label *label, const char *text) {
                 text, (void*) label);
         abort();
     }
-    if ((*label).text && (*label).ownsText)
-        Memory_free((*label).text);
-    (*label).text = (char*) text;
+    char *old = (char*) ReactiveString_get((*label).text);
+    if (old && (*label).ownsText)
+        Memory_free(old);
     (*label).ownsText = false;
+    ReactiveString_set((*label).text, (const uint8_t*) text);
     markRasterDirty(label);
     markDirty(label);
 }
@@ -1146,11 +1148,13 @@ void Label_setHovered(Label *label, bool hovered) {
 void Label_free(Label *label) {
     if (!label)
         return;
-    if ((*label).text && (*label).ownsText)
-        Memory_free((*label).text);
+    char *bytes = (char*) ReactiveString_get((*label).text);
+    if (bytes && (*label).ownsText)
+        Memory_free(bytes);
     if ((*label).fontFamily && (*label).ownsFontFamily)
         Memory_free((*label).fontFamily);
     Cursor_free((*label).cursor);
+    ReactiveString_free((*label).text);
     (*label).text = nullptr;
     (*label).fontFamily = nullptr;
     (*label).ownsText = false;
@@ -1169,7 +1173,7 @@ void Label_free(Label *label) {
 // ============================================================================
 
 const char *Label_getText(const Label *label) {
-    return label ? (*label).text : nullptr;
+    return label ? (const char*) ReactiveString_get((*label).text) : nullptr;
 }
 
 Font *Label_getFont(const Label *label) {
@@ -1303,12 +1307,12 @@ TextAlign Label_getTextAlign(const Label *label) {
 }
 
 char *Label_getSelectedText(const Label *label) {
-    if (!label || !(*label).text)
+    if (!label || !(const char*) ReactiveString_get((*label).text))
         return nullptr;
     int32_t s0 = -1, s1 = -1;
     if (!TextSelect_getSpan(&(*label).select, &s0, &s1))
         return nullptr;
-    int32_t len = (int32_t) strlen((*label).text);
+    int32_t len = (int32_t) strlen((const char*) ReactiveString_get((*label).text));
     if (s0 < 0)
         s0 = 0;
     if (s1 > len)
@@ -1319,7 +1323,7 @@ char *Label_getSelectedText(const Label *label) {
     char *res = (char*) Memory_alloc(TYPE_ARRAY, (size_t) (subLen + 1));
     if (!res)
         return nullptr;
-    memcpy(res, (*label).text + s0, (size_t) subLen);
+    memcpy(res, (const char*) ReactiveString_get((*label).text) + s0, (size_t) subLen);
     res[subLen] = '\0';
     return res;
 }
@@ -1327,7 +1331,7 @@ char *Label_getSelectedText(const Label *label) {
 void Label_setSelectedText(Label *label, const char *newText) {
     if (!label || !newText)
         return;
-    const char *orig = (*label).text ? (*label).text : "";
+    const char *orig = (const char*) ReactiveString_get((*label).text) ? (const char*) ReactiveString_get((*label).text) : "";
     int32_t origLen = (int32_t) strlen(orig);
     int32_t s0 = -1, s1 = -1;
     (void) TextSelect_getSpan(&(*label).select, &s0, &s1);

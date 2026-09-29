@@ -8,6 +8,7 @@
 #include "darling/cursor/cursor.h"
 #include <stdint.h>
 #include "c23/constructor.h"
+#include "reactive/reactive_primitive.h"
 
 #include "event/pointer.h"
 #include "event/keyevent.h"
@@ -17,7 +18,7 @@
 // RichLabel keeps the SDF atlas path for mask/fill effects.
 typedef struct Label {
     Panel base;
-    char *text;
+    ReactiveString *text;   // the observable text (word = a pointer to the bytes)
     Font *font;
     char *fontFamily;
     float fontSize;
