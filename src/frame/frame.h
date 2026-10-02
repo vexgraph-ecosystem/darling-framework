@@ -39,8 +39,9 @@ void Frame_destroy(Frame *frame);
 Window *Frame_window(const Frame *frame);
 Surface *Frame_surface(const Frame *frame);   // the owned present seam
 void Frame_setTitle(Frame *frame, const char *title);
+// Paint color only: alpha never changes OS window transparency.
 void Frame_setBackground(Frame *frame, Color color);
-void Frame_setBackgroundColor(Frame *frame, Color color);   // alias (background may be transparent)
+void Frame_setBackgroundColor(Frame *frame, Color color);   // alias
 Color Frame_background(const Frame *frame);
 void Frame_setTransparent(Frame *frame, bool transparent);  // OS window see-through
 void Frame_setBlur(Frame *frame, float radius);             // frosted backdrop blur (0 = none)

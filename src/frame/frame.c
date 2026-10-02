@@ -159,9 +159,8 @@ Frame *Frame_3(const char *title, int widthPx, int heightPx) {
     Surface_onPresent((*f).surface, frame_on_present, f);
     // Prefer the zero-copy GPU seam; it falls back silently when unavailable.
     if (!frame_gpu_open(f, wpx, hpx)) frame_gpu_close(f);
-    // OPAQUE by default. A transparent background colour is what makes a window
-    // see-through (Frame_setBackgroundColor handles the OS side); you can also
-    // force it with Frame_setTransparent.
+    // OPAQUE by default. Background alpha controls paint only; OS window
+    // transparency is independent and requires Frame_setTransparent(true).
     (*f).background = COLOR_RGBA(18, 20, 28, 255);
     (*f).root = Element();   // the window's content element (transparent)
     Element_setBackground((*f).root, COLOR_CLEAR);
@@ -209,8 +208,7 @@ void Frame_setTitle(Frame *frame, const char *title) {
 void  Frame_setBackground(Frame *frame, Color color) {
     if (!frame) return;
     (*frame).background = color;
-    // the colour's ALPHA decides the window: transparent bg => see-through window
-    if ((*frame).window) Window_setTransparentBackground((*frame).window, Color_alpha(color) < 255u);
+    // Paint alpha must not change the explicit OS window transparency policy.
 }
 void  Frame_setBackgroundColor(Frame *frame, Color color) { Frame_setBackground(frame, color); }
 Color Frame_background(const Frame *frame) { return frame ? (*frame).background : COLOR_CLEAR; }
