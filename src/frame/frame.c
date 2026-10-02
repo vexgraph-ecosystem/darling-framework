@@ -277,16 +277,18 @@ void Frame_setOwner(Frame *f, Frame *owner) {
 // ── children (panels) ───────────────────────────────────────────────────────
 Element *Frame_element(const Frame *frame) { return frame ? (*frame).root : NULL; }
 
-Panel *Frame_addPanel(Frame *frame, const ElementDesc *desc) {
-    if (!frame || !(*frame).root) return NULL;
-    Panel *p = Panel(desc);
-    if (!p) return NULL;
+Panel *Frame_add(Frame *frame, Panel *panel) {
+    if (!frame || !(*frame).root || !panel) return NULL;
     Panel **grown = realloc((*frame).panels, (size_t)((*frame).count + 1) * sizeof *grown);
-    if (!grown) { Panel_destroy(p); return NULL; }
+    if (!grown) { Panel_destroy(panel); return NULL; }
     (*frame).panels = grown;
-    (*frame).panels[(*frame).count++] = p;
-    Element_add((*frame).root, Panel_graphics(p));
-    return p;
+    (*frame).panels[(*frame).count++] = panel;
+    Element_add((*frame).root, Panel_graphics(panel));
+    return panel;
+}
+
+Panel *Frame_addPanel(Frame *frame, const ElementDesc *desc) {
+    return Frame_add(frame, Panel(desc));
 }
 
 int Frame_count(const Frame *frame) { return frame ? (*frame).count : 0; }

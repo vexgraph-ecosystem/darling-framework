@@ -60,7 +60,8 @@ bool Frame_macOS_getLiquidGlass(const Frame *frame, FrameLiquidGlassDesc *out);
 // Children. The Frame's content is ONE Element (Frame_element); Frame_addPanel
 // returns a Panel WRAPPER (the interactable) whose GraphicsPanel is a child.
 Element *Frame_element(const Frame *frame);
-Panel   *Frame_addPanel(Frame *frame, const ElementDesc *desc);
+Panel   *Frame_add(Frame *frame, Panel *panel);        // takes ownership
+Panel   *Frame_addPanel(Frame *frame, const ElementDesc *desc);   // builds a Panel
 int      Frame_count(const Frame *frame);
 Panel   *Frame_panel(const Frame *frame, int index);
 void     Frame_removePanels(Frame *frame);
