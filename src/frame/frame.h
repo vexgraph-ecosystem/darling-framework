@@ -7,6 +7,7 @@
 #include "panel/panel.h"         // darling: Panel (wrapper over a GraphicsPanel)
 #include "ui/element.h"          // graphvex R3: Element (the GraphicsPanel)
 #include "image.h"               // graphvex R3: Image (CAPTURE returns one)
+#include "vulkan/surface.h"      // graphvex R3: the present seam (Surface)
 #include "window/window.h"       // hotcwap R1: the OS window
 
 // darling R4 — frame.h
@@ -18,9 +19,11 @@
 //   Frame *f = Frame("darling", 760, 520);
 //   Element *p = Frame_addPanel(f, &(ElementDesc){ .anchor = PART_CENTER, ... });
 //
-// Presentation today is software: the frame is raster-rendered by graphvex and
-// handed to Window_presentRGBA. The GPU (Metal) seam replaces this one call
-// later without changing a single call site here.
+// Presentation goes through ONE graphvex Surface: the Surface's retained
+// present Image is the capture target, and Frame_render hands it to the window
+// via the Surface's host blit (Window_presentRGBA today; an IOSurface/Metal
+// blit later, no call site changes here). Frame_setSize revalidates the
+// Surface, so a resize resizes the render target and repaints in one step.
 
 typedef struct Frame Frame;
 
@@ -34,6 +37,7 @@ Frame *Frame_3(const char *title, int widthPx, int heightPx);
 void Frame_destroy(Frame *frame);
 
 Window *Frame_window(const Frame *frame);
+Surface *Frame_surface(const Frame *frame);   // the owned present seam
 void Frame_setTitle(Frame *frame, const char *title);
 void Frame_setBackground(Frame *frame, Color color);
 void Frame_setBackgroundColor(Frame *frame, Color color);   // alias (background may be transparent)
@@ -99,8 +103,8 @@ void Frame_run(Frame *frame);           // show the window and loop until it clo
 
 // ── screenshots ─────────────────────────────────────────────────────────────
 // Grab what a frame actually drew. Frame_capture re-renders and returns the
-// frame's RGBA8 Image (0xRRGGBBAA) — the graphvex CAPTURE(&image) macro is the
-// backend-level equivalent. Frame_savePNG writes it to disk for tests/agents.
+// Surface's present Image (0xRRGGBBAA) — the graphvex CAPTURE(&image) macro is
+// the backend-level equivalent. Frame_savePNG writes it to disk for tests/agents.
 Frame *Frame_active(void);
 Image *Frame_capture(Frame *frame);
 bool   Frame_savePNG(Frame *frame, const char *path);

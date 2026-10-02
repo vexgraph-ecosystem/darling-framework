@@ -4,6 +4,7 @@
 #include <string.h>
 
 #include "image.h"                   // graphvex R3
+#include "vulkan/surface.h"          // graphvex R3: the present seam
 #include "vulkan/vulkan_backend.h"   // graphvex R3: the GPU backend
 
 // darling R4 — frame.c
@@ -19,7 +20,7 @@ struct Frame {
     Element *root;       // the content element (the Frame's GraphicsPanel)
     Panel **panels;      // the Panel wrappers (interface), aligned with root's children
     int count, cap;
-    Image *shot;         // reused capture buffer
+    Surface *surface;    // the present seam: capture target + host blit
     DisplayList *dl;     // reused paint list
     int lastW, lastH;    // the single size authority
 
@@ -86,6 +87,19 @@ static void frame_on_resize(void *userdata) {
     Frame_setSize(f, Window_width((*f).window), Window_height((*f).window));
 }
 
+// The host blit: hand the Surface's present Image to the borrowed R1 window.
+// graphvex owns no platform code, so the Frame — which owns the window — is the
+// layer that publishes it. Window_presentRGBA today; an IOSurface/Metal blit
+// slots in here later without touching a single Frame call site.
+static bool frame_on_present(Surface *surface, void *userdata) {
+    Frame *f = (Frame *)userdata;
+    Image *img = Surface_presentImage(surface);
+    if (!f || !img || !(*f).window) return false;
+    Window_presentRGBA((*f).window, Image_pixels(img), Image_stride(img),
+                       (int)Image_width(img), (int)Image_height(img));
+    return true;
+}
+
 Frame *Frame_0(void) { return Frame_3("darling", 800, 600); }
 Frame *Frame_1(const char *title) { return Frame_3(title, 800, 600); }
 
@@ -93,12 +107,17 @@ Frame *Frame_3(const char *title, int widthPx, int heightPx) {
     Graphics_register(VulkanBackend_row());
     Graphics_use(BACKEND_VULKAN);
 
+    int wpx = widthPx > 0 ? widthPx : 800;
+    int hpx = heightPx > 0 ? heightPx : 600;
     Frame *f = calloc(1, sizeof *f);
     if (!f) return NULL;
-    (*f).window = Window_create(title ? title : "darling",
-                              widthPx > 0 ? widthPx : 800,
-                              heightPx > 0 ? heightPx : 600);
+    (*f).window = Window_create(title ? title : "darling", wpx, hpx);
     if (!(*f).window) { free(f); return NULL; }
+    // The present seam: its retained Image is the capture target, and its host
+    // blit publishes to the window. The borrowed native is the content view.
+    (*f).surface = Surface_2(Window_contentView((*f).window), (uint32_t)wpx, (uint32_t)hpx);
+    if (!(*f).surface) { Window_destroy((*f).window); free(f); return NULL; }
+    Surface_onPresent((*f).surface, frame_on_present, f);
     // OPAQUE by default. A transparent background colour is what makes a window
     // see-through (Frame_setBackgroundColor handles the OS side); you can also
     // force it with Frame_setTransparent.
@@ -106,7 +125,6 @@ Frame *Frame_3(const char *title, int widthPx, int heightPx) {
     (*f).root = Element();   // the window's content element (transparent)
     Element_setBackground((*f).root, COLOR_CLEAR);
     Element_setSize((*f).root, (float)Window_width((*f).window), (float)Window_height((*f).window));
-    (*f).shot = Image_0();
     (*f).dl = DisplayList_0();
     Window_setResizeRenderHook((*f).window, frame_on_resize, f);
     live_add(f);
@@ -130,7 +148,7 @@ void Frame_destroy(Frame *frame) {
     free((*frame).children);
     free((*frame).closeFns);
     free((*frame).closeUd);
-    Image_destroy((*frame).shot);
+    Surface_destroy((*frame).surface);
     DisplayList_free((*frame).dl);
     if ((*frame).window) Window_destroy((*frame).window);
     free(frame);
@@ -141,6 +159,7 @@ void Frame_close(Frame *f) { Frame_destroy(f); }
 
 // ── basics ──────────────────────────────────────────────────────────────────
 Window *Frame_window(const Frame *frame) { return frame ? (*frame).window : NULL; }
+Surface *Frame_surface(const Frame *frame) { return frame ? (*frame).surface : NULL; }
 void Frame_setTitle(Frame *frame, const char *title) {
     if (frame && (*frame).window) Window_setTitle((*frame).window, title);
 }
@@ -269,25 +288,27 @@ void Frame_setSize(Frame *frame, int widthPx, int heightPx) {
     (*frame).lastH = heightPx;
     if ((*frame).root) Element_setSize((*frame).root, (float)widthPx, (float)heightPx);
     Graphics_resize((uint32_t)widthPx, (uint32_t)heightPx);
+    // revalidate the present seam: the capture target must match the new size
+    Surface_resize((*frame).surface, (uint32_t)widthPx, (uint32_t)heightPx);
     Frame_render(frame);
 }
 
 void Frame_render(Frame *frame) {
-    if (!frame || !(*frame).window || (*frame).closed) return;
+    if (!frame || !(*frame).window || !(*frame).surface || (*frame).closed) return;
     if ((*frame).lastW <= 0 || (*frame).lastH <= 0) {
         Frame_setSize(frame, Window_width((*frame).window), Window_height((*frame).window));
         return;
     }
-    int wpx = (*frame).lastW, hpx = (*frame).lastH;
     if (!Graphics_begin()) return;
     Graphics_clear((*frame).background);
     DisplayList_clear((*frame).dl);
     Frame_paint(frame, (*frame).dl);
     Graphics_submit((*frame).dl);
     Graphics_end();
-    if (Graphics_capture((*frame).shot))
-        Window_presentRGBA((*frame).window, Image_pixels((*frame).shot), Image_stride((*frame).shot),
-                           wpx, hpx);
+    // render into the Surface's retained present Image, then publish it through
+    // the host blit (Window_presentRGBA today; IOSurface/Metal later)
+    if (Graphics_capture(Surface_presentImage((*frame).surface)))
+        Surface_present((*frame).surface);
 }
 
 void Frame_invalidate(Frame *frame) { if (frame) (*frame).dirty = true; }
@@ -335,7 +356,7 @@ Frame *Frame_active(void) { return s_active; }
 Image *Frame_capture(Frame *frame) {
     if (!frame) return NULL;
     Frame_render(frame);
-    return (*frame).shot;
+    return Surface_presentImage((*frame).surface);
 }
 
 bool Frame_savePNG(Frame *frame, const char *path) {
