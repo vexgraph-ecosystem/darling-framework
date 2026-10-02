@@ -20,7 +20,12 @@ struct Frame {
     Element *root;       // the content element (the Frame's GraphicsPanel)
     Panel **panels;      // the Panel wrappers (interface), aligned with root's children
     int count, cap;
-    Surface *surface;    // the present seam: capture target + host blit
+    Surface *surface;    // the present seam: capture target + host blit (fallback)
+    void *surfaces[2];   // borrowed IOSurfaces (Apple zero-copy seam, double buffer)
+    int targets[2];      // graphvex surface slots for those IOSurfaces
+    int front;           // which surface the layer currently shows
+    bool gpu;            // the zero-copy present path is live
+    Image *shot;         // capture readback buffer (GPU path only, lazy)
     DisplayList *dl;     // reused paint list
     int lastW, lastH;    // the single size authority
 
@@ -87,10 +92,8 @@ static void frame_on_resize(void *userdata) {
     Frame_setSize(f, Window_width((*f).window), Window_height((*f).window));
 }
 
-// The host blit: hand the Surface's present Image to the borrowed R1 window.
-// graphvex owns no platform code, so the Frame — which owns the window — is the
-// layer that publishes it. Window_presentRGBA today; an IOSurface/Metal blit
-// slots in here later without touching a single Frame call site.
+// The host blit (fallback path): hand the Surface's present Image to the R1
+// window as an RGBA buffer. Used off-Apple or when the GPU seam is unavailable.
 static bool frame_on_present(Surface *surface, void *userdata) {
     Frame *f = (Frame *)userdata;
     Image *img = Surface_presentImage(surface);
@@ -98,6 +101,41 @@ static bool frame_on_present(Surface *surface, void *userdata) {
     Window_presentRGBA((*f).window, Image_pixels(img), Image_stride(img),
                        (int)Image_width(img), (int)Image_height(img));
     return true;
+}
+
+// The zero-copy seam: two host IOSurfaces imported as GPU targets. The back one
+// is rendered into, published to the layer, then swapped. Fails (returns false)
+// off-Apple, when VK_EXT_metal_objects is absent, or on OOM — the Frame then
+// falls back to the RGBA path.
+static bool frame_gpu_open(Frame *f, int wpx, int hpx) {
+    for (int i = 0; i < 2; i++)
+        (*f).surfaces[i] = Window_createPresentSurface((*f).window, wpx, hpx);
+    if (!(*f).surfaces[0] || !(*f).surfaces[1]) return false;
+    for (int i = 0; i < 2; i++) {
+        (*f).targets[i] = VulkanBackend_addSurface((*f).surfaces[i], (uint32_t)wpx, (uint32_t)hpx);
+        if ((*f).targets[i] < 0) return false;
+    }
+    (*f).front = 0;
+    (*f).gpu = true;
+    return true;
+}
+
+// Tear the GPU seam down (idempotent; safe to call after a partial open).
+static void frame_gpu_close(Frame *f) {
+    for (int i = 0; i < 2; i++) {
+        if ((*f).targets[i] >= 0) VulkanBackend_removeSurface((*f).targets[i]);
+        (*f).targets[i] = -1;
+        if ((*f).surfaces[i]) Window_destroyPresentSurface((*f).window, (*f).surfaces[i]);
+        (*f).surfaces[i] = NULL;
+    }
+    (*f).gpu = false;
+}
+
+// Resize = an IOSurface cannot grow, so rebuild both at the new extent.
+static void frame_gpu_reopen(Frame *f, int wpx, int hpx) {
+    frame_gpu_close(f);
+    if (!frame_gpu_open(f, wpx, hpx))
+        frame_gpu_close(f);   // leave gpu false; the RGBA fallback carries on
 }
 
 Frame *Frame_0(void) { return Frame_3("darling", 800, 600); }
@@ -111,6 +149,7 @@ Frame *Frame_3(const char *title, int widthPx, int heightPx) {
     int hpx = heightPx > 0 ? heightPx : 600;
     Frame *f = calloc(1, sizeof *f);
     if (!f) return NULL;
+    (*f).targets[0] = (*f).targets[1] = -1;
     (*f).window = Window_create(title ? title : "darling", wpx, hpx);
     if (!(*f).window) { free(f); return NULL; }
     // The present seam: its retained Image is the capture target, and its host
@@ -118,6 +157,8 @@ Frame *Frame_3(const char *title, int widthPx, int heightPx) {
     (*f).surface = Surface_2(Window_contentView((*f).window), (uint32_t)wpx, (uint32_t)hpx);
     if (!(*f).surface) { Window_destroy((*f).window); free(f); return NULL; }
     Surface_onPresent((*f).surface, frame_on_present, f);
+    // Prefer the zero-copy GPU seam; it falls back silently when unavailable.
+    if (!frame_gpu_open(f, wpx, hpx)) frame_gpu_close(f);
     // OPAQUE by default. A transparent background colour is what makes a window
     // see-through (Frame_setBackgroundColor handles the OS side); you can also
     // force it with Frame_setTransparent.
@@ -148,6 +189,8 @@ void Frame_destroy(Frame *frame) {
     free((*frame).children);
     free((*frame).closeFns);
     free((*frame).closeUd);
+    frame_gpu_close(frame);
+    if ((*frame).shot) Image_destroy((*frame).shot);
     Surface_destroy((*frame).surface);
     DisplayList_free((*frame).dl);
     if ((*frame).window) Window_destroy((*frame).window);
@@ -288,25 +331,43 @@ void Frame_setSize(Frame *frame, int widthPx, int heightPx) {
     (*frame).lastH = heightPx;
     if ((*frame).root) Element_setSize((*frame).root, (float)widthPx, (float)heightPx);
     Graphics_resize((uint32_t)widthPx, (uint32_t)heightPx);
-    // revalidate the present seam: the capture target must match the new size
+    // revalidate the present seam: an IOSurface cannot grow, so rebuild the GPU
+    // double buffer; the fallback capture Image is resized in place.
+    if ((*frame).gpu) frame_gpu_reopen(frame, widthPx, heightPx);
     Surface_resize((*frame).surface, (uint32_t)widthPx, (uint32_t)heightPx);
     Frame_render(frame);
 }
 
 void Frame_render(Frame *frame) {
-    if (!frame || !(*frame).window || !(*frame).surface || (*frame).closed) return;
+    if (!frame || !(*frame).window || (*frame).closed) return;
     if ((*frame).lastW <= 0 || (*frame).lastH <= 0) {
         Frame_setSize(frame, Window_width((*frame).window), Window_height((*frame).window));
         return;
     }
+    if ((*frame).gpu) {
+        // zero-copy: render into the back IOSurface, publish it, swap front/back
+        int back = 1 - (*frame).front;
+        VulkanBackend_useSurface((*frame).targets[back]);
+        if (!Graphics_begin()) return;
+        Graphics_clear((*frame).background);
+        DisplayList_clear((*frame).dl);
+        Frame_paint(frame, (*frame).dl);
+        Graphics_submit((*frame).dl);
+        Graphics_end();
+        if (Graphics_present()) {
+            Window_presentSurface((*frame).window, (*frame).surfaces[back]);
+            (*frame).front = back;
+        }
+        return;
+    }
+    if (!(*frame).surface) return;
     if (!Graphics_begin()) return;
     Graphics_clear((*frame).background);
     DisplayList_clear((*frame).dl);
     Frame_paint(frame, (*frame).dl);
     Graphics_submit((*frame).dl);
     Graphics_end();
-    // render into the Surface's retained present Image, then publish it through
-    // the host blit (Window_presentRGBA today; IOSurface/Metal later)
+    // fallback: render into the Surface's retained Image, publish via the blit
     if (Graphics_capture(Surface_presentImage((*frame).surface)))
         Surface_present((*frame).surface);
 }
@@ -356,7 +417,16 @@ Frame *Frame_active(void) { return s_active; }
 Image *Frame_capture(Frame *frame) {
     if (!frame) return NULL;
     Frame_render(frame);
-    return Surface_presentImage((*frame).surface);
+    if (!(*frame).gpu) return Surface_presentImage((*frame).surface);
+    // GPU seam: read the FRONT IOSurface back into a CPU Image (on demand only)
+    if ((*frame).lastW <= 0 || (*frame).lastH <= 0) return NULL;
+    if (!(*frame).shot) (*frame).shot = Image_0();
+    if (!(*frame).shot) return NULL;
+    if (!Image_ensureShadow((*frame).shot, (uint32_t)(*frame).lastW, (uint32_t)(*frame).lastH))
+        return NULL;
+    Window_readPresentSurface((*frame).window, (*frame).surfaces[(*frame).front],
+                              Image_pixels((*frame).shot), Image_stride((*frame).shot));
+    return (*frame).shot;
 }
 
 bool Frame_savePNG(Frame *frame, const char *path) {
