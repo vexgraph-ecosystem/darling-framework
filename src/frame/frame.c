@@ -81,7 +81,7 @@
  * Liquid Glass (macOS): Frame_macOS_hasLiquidGlass / setLiquidGlass / getLiquidGlass
  * Children (read): Frame_element, Frame_count, Frame_panel
  * Layout:
- *   - Frame_root, Frame_setSize
+ *   - Frame_root
  * Windows / ownership:
  *   - Frame_show, Frame_hide, Frame_isClosed, Frame_setOwner, Frame_owner
  * Lifecycle:
@@ -91,11 +91,12 @@
  * Screenshots:
  *   - Frame_active, Frame_capture, Frame_savePNG
  * Ownership / revalidate seam (frame/frame_internal.h, called by properties/):
- *   - Frame_ownPanel, Frame_clearPanels, Frame_prepareRevalidate
+ *   - Frame_ownPanel, Frame_clearPanels, Frame_prepareRevalidate,
+ *     Frame_resizeTargets
  *
  * Operations that live OUTSIDE this widget (properties/):
  *   - Frame_add(...), Frame_addPanel(...), Frame_removePanels(...),
- *     Frame_revalidate(...)
+ *     Frame_revalidate(...), Frame_setSize(...)
  * ============================================================================
  */
 
@@ -437,9 +438,9 @@ void Frame_paint(const Frame *frame, DisplayList *dl) {
 }
 
 // ── the one resize surface ──────────────────────────────────────────────────
-void Frame_setSize(Frame *frame, int widthPx, int heightPx) {
-    if (!frame || widthPx <= 0 || heightPx <= 0) return;
-    if (widthPx == (*frame).lastW && heightPx == (*frame).lastH) return;
+bool Frame_resizeTargets(Frame *frame, int widthPx, int heightPx) {
+    if (!frame || (*frame).closed || widthPx <= 0 || heightPx <= 0) return false;
+    if (widthPx == (*frame).lastW && heightPx == (*frame).lastH) return false;
     (*frame).lastW = widthPx;
     (*frame).lastH = heightPx;
     if ((*frame).root) Element_setSize((*frame).root, (float)widthPx, (float)heightPx);
@@ -448,7 +449,7 @@ void Frame_setSize(Frame *frame, int widthPx, int heightPx) {
     // double buffer; the fallback capture Image is resized in place.
     if ((*frame).gpu) frame_gpu_reopen(frame, widthPx, heightPx);
     Surface_resize((*frame).surface, (uint32_t)widthPx, (uint32_t)heightPx);
-    Frame_render(frame);
+    return true;
 }
 
 // The cascade preamble that properties/revalidate.c calls. A frame is only

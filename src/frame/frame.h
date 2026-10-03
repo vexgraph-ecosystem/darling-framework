@@ -12,6 +12,7 @@
 #include "properties/add.h"        // Frame_add(...), Frame_addPanel(...)
 #include "properties/remove.h"     // Frame_removePanels(...)
 #include "properties/revalidate.h" // Frame_revalidate(...)
+#include "properties/set_size.h"   // Frame_setSize(...)
 
 // darling R4 — frame.h
 //
@@ -78,7 +79,7 @@ Rect Frame_root(const Frame *frame);
 // THE one resize surface. The window's resize event calls ONLY this; it resizes
 // everything (the render target, the layout root) and repaints. Call it with the
 // window's native pixel size.
-void Frame_setSize(Frame *frame, int widthPx, int heightPx);
+// Frame_setSize(...) is declared in properties/set_size.h.
 
 // ── Windows ─────────────────────────────────────────────────────────────────
 // A Frame is a real window. Frames form an OWNERSHIP TREE: closing an owner
