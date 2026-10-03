@@ -7,6 +7,7 @@
 
 #include "input/mouse.h"   // vexspoke R2: window-scoped events + Mouse_x/y
 #include "c23/event_invoke.h"   // Element_dispatchEvent + the Event carrier
+#include "properties/set_cursor.h"
 
 #include "annotation/definition.h"
 #include "annotation/overview.h"
@@ -56,6 +57,7 @@
  *   find_binding / cursor_for / cursor_open : registry lookups
  *   bound_at(root,x,y) : nearest bound element under the cursor
  *   track_dispatch / track_down|up|move|mod|dragf|scroll|zoom : OS bridge
+ *   track_cursor : apply the hit node's inherited hover preference
  *   cleanup_on_close   : drop registrations when the owning Frame closes
  *
  * FUNCTION REGISTRY (exported by input/pointer.h):
@@ -220,6 +222,13 @@ static void track_dispatch(Cursor *c, int kind, float x, float y,
     Element_dispatchEvent((*c).root, &event);
 }
 
+static void track_cursor(Cursor *c, float x, float y) {
+    Window *window = Frame_window((*c).frame);
+    if (!window) return;
+    WindowCursorType type = (WindowCursorType) Element_cursorAt((*c).root, x, y);
+    if (Window_getCursorType(window) != type) Window_setCursorType(window, type);
+}
+
 static void track_down(void *self, int mouseEvent, uint64_t nanos) {
     (void)nanos;
     Cursor *c = self;
@@ -238,6 +247,7 @@ static void track_move(void *self, double x, double y) {
     Cursor *c = self;
     track_dispatch(c, EV_MOUSE_MOVE, (float)x, (float)y, 0, 0, 1.0f, 0);
     Pointer_move((*c).root, (float)x, (float)y);
+    track_cursor(c, (float)x, (float)y);
 }
 static void track_none0(void *self, int ev, uint64_t t) { (void)self; (void)ev; (void)t; }
 static void track_mod(void *self, double dx, double dy) {
@@ -248,6 +258,7 @@ static void track_mod(void *self, double dx, double dy) {
 static void track_dragf(void *self, int ev, double x, double y) {
     Cursor *c = self;
     track_dispatch(c, EV_MOUSE_DRAG, (float)x, (float)y, 0, 0, 1.0f, Mouse_button(ev));
+    track_cursor(c, (float)x, (float)y);
 }
 static void track_scroll(void *self, double dx, double dy) {
     Cursor *c = self;

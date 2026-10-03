@@ -7,6 +7,7 @@
 #include "image.h"                   // graphvex R3
 #include "vulkan/surface.h"          // graphvex R3: the present seam
 #include "vulkan/vulkan_backend.h"   // graphvex R3: the GPU backend
+#include "input/pointer.h"           // automatic per-window hover bridge
 
 #include "annotation/definition.h"
 #include "annotation/overview.h"
@@ -20,8 +21,10 @@
  * Frames form an ownership tree — closing an owner closes its children.
  *
  * frame.c is PURE WINDOW + LAYOUT + PAINT. It knows nothing about the mouse;
- * input lives in darling/input (the close hook is the only seam). Revalidation
- * follows Frame -> Surface -> content Board -> Element tree/paint: the Board
+ * input lives in darling/input and uses the close hook for teardown.
+ * Construction attaches that bridge once; cursor preferences work without
+ * requiring applications to install mouse handlers themselves.
+ * Revalidation follows Frame -> Surface -> content Board -> Element tree/paint: the Board
  * owns the content generation/callback, and GPU pixels stay on the borrowed
  * double-buffered IOSurfaces, not a redundant CPU render target.
  *
@@ -276,6 +279,7 @@ Frame *Frame_3(const char *title, int widthPx, int heightPx) {
     Window_setResizeRenderHook((*f).window, frame_on_resize, f);
     live_add(f);
     s_active = f;
+    Pointer_track(f);
     return f;
 }
 

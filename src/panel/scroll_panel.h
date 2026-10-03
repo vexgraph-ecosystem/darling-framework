@@ -2,6 +2,7 @@
 #define DARLING_SCROLL_PANEL_H
 
 #include <stdbool.h>
+#include "properties/set_cursor.h"
 
 #include "ui/element.h"
 #include "c23/event_invoke.h"   // DECLARE_EVENTS(ScrollPanel)

@@ -2,6 +2,7 @@
 #define DARLING_PANEL_H
 
 #include <stdbool.h>
+#include "properties/set_cursor.h"
 
 #include "graphics/graphics.h"   // Color
 #include "ui/element.h"          // ElementDesc, Element, PART_*

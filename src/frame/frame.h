@@ -2,6 +2,7 @@
 #define DARLING_FRAME_H
 
 #include <stdbool.h>
+#include "properties/set_cursor.h"
 
 #include "graphics/graphics.h"   // graphvex R3: Rect, Color, DisplayList
 #include "panel/panel.h"         // darling: Panel (wrapper over a GraphicsPanel)
