@@ -9,6 +9,9 @@
 #include "image.h"               // graphvex R3: Image (CAPTURE returns one)
 #include "vulkan/surface.h"      // graphvex R3: the present seam (Surface)
 #include "window/window.h"       // hotcwap R1: the OS window
+#include "properties/add.h"        // Frame_add(...), Frame_addPanel(...)
+#include "properties/remove.h"     // Frame_removePanels(...)
+#include "properties/revalidate.h" // Frame_revalidate(...)
 
 // darling R4 — frame.h
 //
@@ -38,6 +41,7 @@ void Frame_destroy(Frame *frame);
 
 Window *Frame_window(const Frame *frame);
 Surface *Frame_surface(const Frame *frame);   // the owned present seam
+Board *Frame_contentBoard(const Frame *frame); // borrowed content callback/generation board
 void Frame_setTitle(Frame *frame, const char *title);
 // Paint color only: alpha never changes OS window transparency.
 void Frame_setBackground(Frame *frame, Color color);
@@ -60,12 +64,11 @@ bool Frame_macOS_getLiquidGlass(const Frame *frame, FrameLiquidGlassDesc *out);
 
 // Children. The Frame's content is ONE Element (Frame_element); Frame_addPanel
 // returns a Panel WRAPPER (the interactable) whose GraphicsPanel is a child.
+// Attachment lives in properties/: Frame_add(frame, panel[, index]),
+// Frame_addPanel(frame, desc), and Frame_removePanels(frame).
 Element *Frame_element(const Frame *frame);
-Panel   *Frame_add(Frame *frame, Panel *panel);        // takes ownership
-Panel   *Frame_addPanel(Frame *frame, const ElementDesc *desc);   // builds a Panel
 int      Frame_count(const Frame *frame);
 Panel   *Frame_panel(const Frame *frame, int index);
-void     Frame_removePanels(Frame *frame);
 
 // The layout root in native px — what children anchor against. It IS the window:
 // panels reflow on resize, keeping their own size, and anything past the window
@@ -98,7 +101,10 @@ void Frame_onClose(Frame *frame, FrameCloseFn fn, void *userdata);
 void Frame_runAll(Frame *frame);
 
 void Frame_paint(const Frame *frame, DisplayList *dl);
-void Frame_render(Frame *frame);        // render + present one frame
+// Surface revalidates its Boards; the content Board revalidates/paints the tree,
+// publishes its generation, then Surface presents (GPU zero-copy or RGBA).
+// Frame_revalidate lives in properties/revalidate.h (overloaded by arity).
+void Frame_render(Frame *frame);        // compatibility entry to Frame_revalidate
 void Frame_invalidate(Frame *frame);    // mark for repaint; the runner paints it
 void Frame_invalidateElement(Element *root);   // invalidate the frame owning root
 void Frame_run(Frame *frame);           // show the window and loop until it closes

@@ -1,5 +1,6 @@
 #include "properties/remove.h"
 
+#include "frame/frame_internal.h"   // Frame_clearPanels
 #include "panel/panel_internal.h"
 #include "ui/element.h"
 
@@ -31,9 +32,10 @@
  * FUNCTION REGISTRY (exported by properties/remove.h):
  * ----------------------------------------------------------------------------
  * Core Functions:
- *   - Panel_remove_1(child)   // unlink, return the still-alive child
- * Public macro:
- *   - Panel_remove(...)  -> OVERLOAD_DISPATCH (arity 1 today)
+ *   - Panel_remove_1(child)          // unlink, return the still-alive child
+ *   - Frame_removePanels_1(frame)    // unlink + destroy every owned panel
+ * Public macros:
+ *   - Panel_remove(...), Frame_removePanels(...)  -> OVERLOAD_DISPATCH
  * ============================================================================
  */
 
@@ -44,4 +46,8 @@ Panel *Panel_remove_1(Panel *child) {
     Panel *parent = Panel_parent(child);
     if (parent) Panel_disownChild(parent, child);
     return child;
+}
+
+void Frame_removePanels_1(Frame *frame) {
+    Frame_clearPanels(frame);
 }

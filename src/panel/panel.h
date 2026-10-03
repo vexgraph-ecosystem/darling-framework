@@ -9,6 +9,9 @@
 #include "properties/add.h"            // Panel_add(...)
 #include "properties/remove.h"         // Panel_remove(...)
 #include "properties/set_location.h"   // Panel_setLocation(...)
+#include "properties/set_size.h"       // Panel_setSize(...)
+#include "properties/set_minimum_size.h"   // Panel_setMinimumSize(...)
+#include "properties/set_maximum_size.h"   // Panel_setMaximumSize(...)
 #include "properties/set_corner_radius.h"  // Panel_setCornerRadius(...)
 
 // darling R4 — panel.h
@@ -47,7 +50,7 @@ Element *Panel_childElement(const Panel *panel, int index);
 Panel *Panel_parent(const Panel *panel);
 
 // ── geometry (forwards to the Element) ──────────────────────────────────────
-void Panel_setSize(Panel *panel, float width, float height);
+// Panel_setSize lives in properties/set_size.h (overloaded by arity).
 void Panel_setOffset(Panel *panel, float x, float y);
 void Panel_setAnchor(Panel *panel, int anchor);     // PART_* on the parent
 void Panel_setPivot(Panel *panel, int pivot);       // PART_* on the panel

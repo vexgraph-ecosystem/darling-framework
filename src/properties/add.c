@@ -1,5 +1,6 @@
 #include "properties/add.h"
 
+#include "frame/frame_internal.h"   // Frame_ownPanel
 #include "panel/panel_internal.h"
 #include "ui/element.h"
 
@@ -38,8 +39,11 @@
  * Core Functions:
  *   - Panel_add_2(parent, child)          // append
  *   - Panel_add_3(parent, child, index)   // insert at index
- * Public macro:
- *   - Panel_add(...)  -> OVERLOAD_DISPATCH picks _2 / _3 by arity
+ *   - Frame_add_2(frame, panel)           // append to the frame's content
+ *   - Frame_add_3(frame, panel, index)    // insert at index
+ *   - Frame_addPanel(frame, desc)         // build a Panel, then attach
+ * Public macros:
+ *   - Panel_add(...), Frame_add(...)  -> OVERLOAD_DISPATCH picks _2 / _3
  * ============================================================================
  */
 
@@ -56,4 +60,22 @@ Panel *Panel_add_3(Panel *parent, Panel *child, int index) {
     else           Element_addAt(pg, cg, index);
     Panel_ownChild(parent, child);
     return child;
+}
+
+// A Frame owns its panels directly (the frame's content Element is the root).
+Panel *Frame_add_2(Frame *frame, Panel *panel) {
+    return Frame_add_3(frame, panel, -1);
+}
+
+Panel *Frame_add_3(Frame *frame, Panel *panel, int index) {
+    if (!frame || !panel) return NULL;
+    if (!Frame_ownPanel(frame, panel, index)) { Panel_destroy(panel); return NULL; }
+    return panel;
+}
+
+Panel *Frame_addPanel(Frame *frame, const ElementDesc *desc) {
+    if (!frame) return NULL;
+    Panel *panel = Panel_1(desc);
+    if (!panel) return NULL;
+    return Frame_add_2(frame, panel);
 }

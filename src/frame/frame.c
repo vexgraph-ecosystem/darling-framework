@@ -1,4 +1,5 @@
 #include "frame/frame.h"
+#include "frame/frame_internal.h"   // the seam properties/ calls back into
 
 #include <stdlib.h>
 #include <string.h>
@@ -7,12 +8,96 @@
 #include "vulkan/surface.h"          // graphvex R3: the present seam
 #include "vulkan/vulkan_backend.h"   // graphvex R3: the GPU backend
 
-// darling R4 — frame.c
-// The JFrame: a hotcwap window + owned child Panels, GPU-rendered. Frames form
-// an ownership tree — closing an owner closes its children.
-//
-// frame.c is PURE WINDOW + LAYOUT + PAINT. It knows nothing about the mouse;
-// input lives in darling/input (see the close hook below, the only seam).
+#include "annotation/definition.h"
+#include "annotation/overview.h"
+
+;;DEFINITION
+/**
+ * ============================================================================
+ * DEFINITION: Frame (frame/frame.c)
+ * ============================================================================
+ * The JFrame: a hotcwap window plus a tree of owned child Panels, GPU-rendered.
+ * Frames form an ownership tree — closing an owner closes its children.
+ *
+ * frame.c is PURE WINDOW + LAYOUT + PAINT. It knows nothing about the mouse;
+ * input lives in darling/input (the close hook is the only seam). Revalidation
+ * follows Frame -> Surface -> content Board -> Element tree/paint: the Board
+ * owns the content generation/callback, and GPU pixels stay on the borrowed
+ * double-buffered IOSurfaces, not a redundant CPU render target.
+ *
+ * Attach/detach and the revalidate entry live in properties/ (add, remove,
+ * revalidate); this file exposes the small ownership seam they call
+ * (frame_internal.h) and stays a widget: construction, teardown, window chrome,
+ * the present path, and the runner.
+ * ============================================================================
+ */
+
+;;OVERVIEW
+/**
+ * ============================================================================
+ * CLASS: Frame (frame/frame.c)
+ * ============================================================================
+ * An OS window, its content Element, and owned child Panels.
+ *
+ * STRUCT FIELDS:
+ * ----------------------------------------------------------------------------
+ *   Window   *window;        // owned R1 window
+ *   Color     background;    // paint clear color (not OS transparency)
+ *   Element  *root;          // the content Element (owned)
+ *   Panel   **panels;        // owned Panel wrappers, aligned with root children
+ *   int       count, cap;    // panels array
+ *   Surface  *surface;       // owned present seam
+ *   Board    *contentBoard;  // content revalidate step + generation (owned)
+ *   bool      paintReady;    // content produced a frame; present may publish
+ *   void     *surfaces[2];   // borrowed IOSurfaces (Apple zero-copy, double buf)
+ *   int       targets[2];    // graphvex surface slots for those IOSurfaces
+ *   int       front;         // which surface the layer shows
+ *   bool      gpu;           // zero-copy path is live
+ *   Image    *shot;          // capture readback buffer (GPU path, lazy)
+ *   DisplayList *dl;         // reused paint list
+ *   int       lastW, lastH;  // the single size authority
+ *   struct Frame *owner;     // owning frame (nullable)
+ *   struct Frame **children; // owned child frames
+ *   int       childCount, childCap;
+ *   bool      closed, dirty;
+ *   FrameCloseFn *closeFns; void **closeUd; int closeCount, closeCap;
+ *
+ * PRIVATE HELPERS:
+ * ----------------------------------------------------------------------------
+ *   live_add / live_remove / child_add / child_remove / fire_close_hooks
+ *   frame_on_resize / frame_gpu_open / frame_gpu_close / frame_gpu_reopen
+ *   frame_on_present (host blit + GPU publish) / frame_on_revalidate
+ *   frame_renderContent (paint the tree; set paintReady)
+ *
+ * FUNCTION REGISTRY (exported by frame/frame.h):
+ * ----------------------------------------------------------------------------
+ * Constructors:
+ *   - Frame_0 / Frame_1 / Frame_3, and the Frame(...) arity chooser;
+ *     Frame_destroy, Frame_close
+ * Window basics:
+ *   - Frame_window, Frame_surface, Frame_contentBoard, Frame_setTitle,
+ *     Frame_setBackground(+Color), Frame_background, Frame_setTransparent,
+ *     Frame_setBlur
+ * Liquid Glass (macOS): Frame_macOS_hasLiquidGlass / setLiquidGlass / getLiquidGlass
+ * Children (read): Frame_element, Frame_count, Frame_panel
+ * Layout:
+ *   - Frame_root, Frame_setSize
+ * Windows / ownership:
+ *   - Frame_show, Frame_hide, Frame_isClosed, Frame_setOwner, Frame_owner
+ * Lifecycle:
+ *   - Frame_onClose, Frame_runAll, Frame_run
+ * Paint / present:
+ *   - Frame_paint, Frame_render, Frame_invalidate, Frame_invalidateElement
+ * Screenshots:
+ *   - Frame_active, Frame_capture, Frame_savePNG
+ * Ownership / revalidate seam (frame/frame_internal.h, called by properties/):
+ *   - Frame_ownPanel, Frame_clearPanels, Frame_prepareRevalidate
+ *
+ * Operations that live OUTSIDE this widget (properties/):
+ *   - Frame_add(...), Frame_addPanel(...), Frame_removePanels(...),
+ *     Frame_revalidate(...)
+ * ============================================================================
+ */
 
 struct Frame {
     Window *window;
@@ -21,6 +106,8 @@ struct Frame {
     Panel **panels;      // the Panel wrappers (interface), aligned with root's children
     int count, cap;
     Surface *surface;    // the present seam: capture target + host blit (fallback)
+    Board *contentBoard; // content revalidator + generation; pixels stay on the present seam
+    bool paintReady;     // only publish after the content callback produced a frame
     void *surfaces[2];   // borrowed IOSurfaces (Apple zero-copy seam, double buffer)
     int targets[2];      // graphvex surface slots for those IOSurfaces
     int front;           // which surface the layer currently shows
@@ -88,18 +175,33 @@ static void fire_close_hooks(Frame *f) {
 
 // ── construction ────────────────────────────────────────────────────────────
 static void frame_on_resize(void *userdata) {
-    Frame *f = (Frame *)userdata;
+    Frame *f = (Frame*) userdata;
     Frame_setSize(f, Window_width((*f).window), Window_height((*f).window));
 }
 
 // The host blit (fallback path): hand the Surface's present Image to the R1
 // window as an RGBA buffer. Used off-Apple or when the GPU seam is unavailable.
+static void frame_renderContent(Frame *frame);
+
+static void frame_on_revalidate(Board *board, void *userdata) {
+    (void) board;
+    Frame *frame = userdata;
+    Element_revalidate((*frame).root);
+    frame_renderContent(frame);
+}
+
 static bool frame_on_present(Surface *surface, void *userdata) {
-    Frame *f = (Frame *)userdata;
+    Frame *f = userdata;
+    if (!f || !(*f).window || !(*f).paintReady) return false;
+    (*f).paintReady = false;
+    if ((*f).gpu) {
+        Window_presentSurface((*f).window, (*f).surfaces[(*f).front]);
+        return true;
+    }
     Image *img = Surface_presentImage(surface);
-    if (!f || !img || !(*f).window) return false;
+    if (!img) return false;
     Window_presentRGBA((*f).window, Image_pixels(img), Image_stride(img),
-                       (int)Image_width(img), (int)Image_height(img));
+                       (int) Image_width(img), (int) Image_height(img));
     return true;
 }
 
@@ -166,6 +268,10 @@ Frame *Frame_3(const char *title, int widthPx, int heightPx) {
     Element_setBackground((*f).root, COLOR_CLEAR);
     Element_setSize((*f).root, (float)Window_width((*f).window), (float)Window_height((*f).window));
     (*f).dl = DisplayList_0();
+    (*f).contentBoard = Board_0();
+    if (!(*f).dl || !(*f).contentBoard) { Frame_destroy(f); return NULL; }
+    Board_addRevalidator((*f).contentBoard, frame_on_revalidate, f);
+    Surface_addBoard((*f).surface, (*f).contentBoard);
     Window_setResizeRenderHook((*f).window, frame_on_resize, f);
     live_add(f);
     s_active = f;
@@ -190,6 +296,8 @@ void Frame_destroy(Frame *frame) {
     free((*frame).closeUd);
     frame_gpu_close(frame);
     if ((*frame).shot) Image_destroy((*frame).shot);
+    Surface_removeBoard((*frame).surface, (*frame).contentBoard);
+    Board_destroy((*frame).contentBoard);
     Surface_destroy((*frame).surface);
     DisplayList_free((*frame).dl);
     if ((*frame).window) Window_destroy((*frame).window);
@@ -202,6 +310,7 @@ void Frame_close(Frame *f) { Frame_destroy(f); }
 // ── basics ──────────────────────────────────────────────────────────────────
 Window *Frame_window(const Frame *frame) { return frame ? (*frame).window : NULL; }
 Surface *Frame_surface(const Frame *frame) { return frame ? (*frame).surface : NULL; }
+Board *Frame_contentBoard(const Frame *frame) { return frame ? (*frame).contentBoard : NULL; }
 void Frame_setTitle(Frame *frame, const char *title) {
     if (frame && (*frame).window) Window_setTitle((*frame).window, title);
 }
@@ -275,28 +384,25 @@ void Frame_setOwner(Frame *f, Frame *owner) {
 // ── children (panels) ───────────────────────────────────────────────────────
 Element *Frame_element(const Frame *frame) { return frame ? (*frame).root : NULL; }
 
-Panel *Frame_add(Frame *frame, Panel *panel) {
-    if (!frame || !(*frame).root || !panel) return NULL;
+// The ownership seam properties/add.c and properties/remove.c call. Frames own
+// their panels directly (there is no Frame-as-Panel), so this is the only place
+// the private panels array is touched.
+bool Frame_ownPanel(Frame *frame, Panel *panel, int index) {
+    if (!frame || !(*frame).root || !panel) return false;
+    int at = index < 0 ? (*frame).count : index;
+    if (at > (*frame).count) at = (*frame).count;
     Panel **grown = realloc((*frame).panels, (size_t)((*frame).count + 1) * sizeof *grown);
-    if (!grown) { Panel_destroy(panel); return NULL; }
+    if (!grown) return false;
     (*frame).panels = grown;
-    (*frame).panels[(*frame).count++] = panel;
-    Element_add((*frame).root, Panel_graphics(panel));
-    return panel;
+    memmove(&(*frame).panels[at + 1], &(*frame).panels[at],
+            (size_t)((*frame).count - at) * sizeof *(*frame).panels);
+    (*frame).panels[at] = panel;
+    (*frame).count++;
+    Element_addAt((*frame).root, Panel_graphics(panel), at);
+    return true;
 }
 
-Panel *Frame_addPanel(Frame *frame, const ElementDesc *desc) {
-    return Frame_add(frame, Panel(desc));
-}
-
-int Frame_count(const Frame *frame) { return frame ? (*frame).count : 0; }
-
-Panel *Frame_panel(const Frame *frame, int index) {
-    if (!frame || index < 0 || index >= (*frame).count) return NULL;
-    return (*frame).panels[index];
-}
-
-void Frame_removePanels(Frame *frame) {
+void Frame_clearPanels(Frame *frame) {
     if (!frame) return;
     for (int i = 0; i < (*frame).count; i++) {
         Element *g = Panel_graphics((*frame).panels[i]);
@@ -304,6 +410,13 @@ void Frame_removePanels(Frame *frame) {
         Panel_destroy((*frame).panels[i]);
     }
     (*frame).count = 0;
+}
+
+int Frame_count(const Frame *frame) { return frame ? (*frame).count : 0; }
+
+Panel *Frame_panel(const Frame *frame, int index) {
+    if (!frame || index < 0 || index >= (*frame).count) return NULL;
+    return (*frame).panels[index];
 }
 
 Rect Frame_root(const Frame *frame) {
@@ -338,12 +451,25 @@ void Frame_setSize(Frame *frame, int widthPx, int heightPx) {
     Frame_render(frame);
 }
 
-void Frame_render(Frame *frame) {
-    if (!frame || !(*frame).window || (*frame).closed) return;
+// The cascade preamble that properties/revalidate.c calls. A frame is only
+// ready to revalidate once it has a size; the first sizing comes from the
+// window and itself repaints, so report "not ready" and let the caller stop —
+// there must be no recursive Board_revalidate.
+bool Frame_prepareRevalidate(Frame *frame) {
+    if (!frame || !(*frame).window || (*frame).closed) return false;
     if ((*frame).lastW <= 0 || (*frame).lastH <= 0) {
         Frame_setSize(frame, Window_width((*frame).window), Window_height((*frame).window));
-        return;
+        return false;
     }
+    return true;
+}
+
+// Compatibility entry: the cascade itself lives in properties/revalidate.c.
+void Frame_render(Frame *frame) { Frame_revalidate(frame); }
+
+static void frame_renderContent(Frame *frame) {
+    if (!frame || !(*frame).window || (*frame).closed) return;
+    (*frame).paintReady = false;
     if ((*frame).gpu) {
         // zero-copy: render into the back IOSurface, publish it, swap front/back
         int back = 1 - (*frame).front;
@@ -355,8 +481,8 @@ void Frame_render(Frame *frame) {
         Graphics_submit((*frame).dl);
         Graphics_end();
         if (Graphics_present()) {
-            Window_presentSurface((*frame).window, (*frame).surfaces[back]);
             (*frame).front = back;
+            (*frame).paintReady = true;
         }
         return;
     }
@@ -368,8 +494,7 @@ void Frame_render(Frame *frame) {
     Graphics_submit((*frame).dl);
     Graphics_end();
     // fallback: render into the Surface's retained Image, publish via the blit
-    if (Graphics_capture(Surface_presentImage((*frame).surface)))
-        Surface_present((*frame).surface);
+    (*frame).paintReady = Graphics_capture(Surface_presentImage((*frame).surface));
 }
 
 void Frame_invalidate(Frame *frame) { if (frame) (*frame).dirty = true; }

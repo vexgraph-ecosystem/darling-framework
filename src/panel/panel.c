@@ -59,7 +59,7 @@
  * Ownership seam (panel/panel_internal.h — called by properties/):
  *   - Panel_ownChild, Panel_disownChild
  * Geometry / visual setters:
- *   - Panel_setSize, setOffset, setAnchor, setPivot, setTag,
+ *   - Panel_setOffset, setAnchor, setPivot, setTag,
  *     setRadius, setBackground, setBorder, setShadow, setShadowColor,
  *     setVisible
  * Queries:
@@ -69,7 +69,7 @@
  *
  * Operations that live OUTSIDE this widget (properties/):
  *   - Panel_add(...), Panel_remove(...), Panel_setLocation(...),
- *     Panel_setCornerRadius(...)
+ *     Panel_setSize(...), Panel_setCornerRadius(...)
  * ============================================================================
  */
 
@@ -154,9 +154,7 @@ Element *Panel_childElement(const Panel *panel, int index) {
 }
 
 // ── geometry ────────────────────────────────────────────────────────────────
-void Panel_setSize(Panel *panel, float width, float height) {
-    if (panel) Element_setSize((*panel).graphics, width, height);
-}
+// Panel_setSize is in properties/set_size.c (grouped by property).
 void Panel_setOffset(Panel *panel, float x, float y) {
     if (panel) Element_setOffset((*panel).graphics, x, y);
 }
