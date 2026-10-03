@@ -2,10 +2,64 @@
 
 #include <stdlib.h>
 
-// darling R4 — panel/scroll_panel.c
-// The viewport is one clipped Element; the content is one owned child offset by
-// (-offsetX, -offsetY). The offset is the single source of truth, end-clamped
-// per axis, and reflected into the tree by ScrollPanel_revalidate.
+#include "annotation/definition.h"
+#include "annotation/overview.h"
+
+;;DEFINITION
+/**
+ * ============================================================================
+ * DEFINITION: ScrollPanel (panel/scroll_panel.c)
+ * ============================================================================
+ * A viewport over oversized content: one clipped Element (the viewport) holding
+ * one owned child Element (the content) offset by (-offsetX, -offsetY). The
+ * offset is the single source of truth and is end-clamped per axis on every
+ * write, so a shrinking content or viewport can never maroon the view.
+ *
+ * The viewport Element clips its children (Property.clip), so the content is
+ * cut at the viewport edge for free. Revalidation is explicit: every setter
+ * funnels through setOffset, which re-clamps and reflects the offset into the
+ * tree as the content's placement, then revalidates the owning root. Scrolling
+ * from a wheel is just a scroll handler wired to ScrollPanel_scrollBy; the
+ * panel itself never touches the OS.
+ * ============================================================================
+ */
+
+;;OVERVIEW
+/**
+ * ============================================================================
+ * CLASS: ScrollPanel (panel/scroll_panel.c)
+ * ============================================================================
+ * Clipped viewport + owned content child, with an end-clamped scroll offset.
+ *
+ * STRUCT FIELDS:
+ * ----------------------------------------------------------------------------
+ *   Element *viewport;  // owned, clipped Element (the scroll window)
+ *   Element *content;   // owned; a TOP_LEFT child of the viewport
+ *   float viewW, viewH; // viewport extent (native px)
+ *   float contentW, contentH; // content extent (native px)
+ *   float offsetX, offsetY;   // scroll offset; [0, max(0, content-viewport)]
+ *
+ * PRIVATE HELPERS:
+ * ----------------------------------------------------------------------------
+ *   (none — every path funnels through ScrollPanel_setOffset)
+ *
+ * FUNCTION REGISTRY (exported by panel/scroll_panel.h):
+ * ----------------------------------------------------------------------------
+ * Constructors:
+ *   - ScrollPanel_0 / ScrollPanel_1 / ScrollPanel_2, and ScrollPanel(...)
+ * Core:
+ *   - ScrollPanel_destroy, ScrollPanel_graphics, ScrollPanel_content,
+ *     ScrollPanel_setContent, ScrollPanel_revalidate
+ * Extents:
+ *   - ScrollPanel_setViewportSize, setContentSize, viewportWidth/Height,
+ *     contentWidth/Height
+ * Offset:
+ *   - ScrollPanel_setOffset, getOffset, scrollBy, maxX, maxY,
+ *     canScrollX, canScrollY
+ * Events:
+ *   - ScrollPanel_add<Kind>Event (IMPLEMENT_EVENTS; see event_invoke.h)
+ * ============================================================================
+ */
 
 struct ScrollPanel {
     Element *viewport;      // owned, clipped

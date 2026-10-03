@@ -1,7 +1,47 @@
 #include "event/hit.h"
 
-// darling R4 — event/hit.c
-// The coordinate resolver. Pure math, no scene ownership, no allocation.
+#include "annotation/definition.h"
+#include "annotation/overview.h"
+
+;;DEFINITION
+/**
+ * ============================================================================
+ * DEFINITION: Hit (event/hit.c)
+ * ============================================================================
+ * The coordinate resolver: pure math over a flat array of HitNodes. It answers
+ * "which node is under this window point, and where is that point in the node's
+ * own space and its parent's space?" No scene ownership, no allocation, no
+ * callbacks — the caller owns the nodes and reads the Hit back.
+ *
+ * A node wins when it contains the point, its whole visible chain is visible,
+ * and the point survives every clipping ancestor. Ties break by depth, then by
+ * z; the walk is guarded against a malformed parent cycle, so a corrupt link
+ * degrades to "no hit" rather than hanging.
+ * ============================================================================
+ */
+
+;;OVERVIEW
+/**
+ * ============================================================================
+ * MODULE: Hit (event/hit.c)
+ * ============================================================================
+ * Coordinate resolution over a caller-owned HitNode array. No owned state.
+ *
+ * STRUCT FIELDS: none — no owned state (HitNode/Hit live in event/hit.h).
+ *
+ * PRIVATE HELPERS:
+ * ----------------------------------------------------------------------------
+ *   node_origin(n, count, i, &ox, &oy)         : accumulated ancestor origin
+ *   node_depth(n, count, i)                    : ancestor count (tie-break)
+ *   node_visible_chain(n, count, i)            : self + ancestors all visible
+ *   node_clip_chain(n, count, i, px, py)       : point inside every clip ancestor
+ *
+ * FUNCTION REGISTRY (exported by event/hit.h):
+ * ----------------------------------------------------------------------------
+ * Core Functions:
+ *   - Hit_resolve(nodes, count, winX, winY, out)
+ * ============================================================================
+ */
 
 static void node_origin(const HitNode *n, int count, int i, float *ox, float *oy) {
     float x = 0.0f, y = 0.0f;

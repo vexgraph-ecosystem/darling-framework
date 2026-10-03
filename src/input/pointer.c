@@ -8,10 +8,67 @@
 #include "input/mouse.h"   // vexspoke R2: window-scoped events + Mouse_x/y
 #include "c23/event_invoke.h"   // Element_dispatchEvent + the Event carrier
 
-// darling R4 — input/pointer.c
-// The pointer over the element tree; handlers bind to Panels (the wrappers).
-// A Cursor holds the per-root press state. The real mouse is optional
-// (Pointer_track) and feeds the SAME actions.
+#include "annotation/definition.h"
+#include "annotation/overview.h"
+
+;;DEFINITION
+/**
+ * ============================================================================
+ * DEFINITION: Pointer (input/pointer.c)
+ * ============================================================================
+ * The pointer bridge between the OS and the element tree. Handlers bind to
+ * Panels (the wrappers are the interactables); a Cursor holds the per-root
+ * press state so a press/release pair resolves against the same tree.
+ *
+ * Two paths feed the SAME tree: the synthetic actions (Pointer_press/release/
+ * click/hold/drag) and the optional real-mouse bridge (Pointer_track). The OS
+ * bridge installs a vexspoke MouseHandler on the Frame's window; every event is
+ * BOTH the legacy click binding and a per-element event dispatched through
+ * c23/event_invoke (down/up/move/drag/scroll/zoom). Registrations are owned by
+ * this file and dropped on Frame close via the close hook, so frame.c never
+ * learns about input.
+ * ============================================================================
+ */
+
+;;OVERVIEW
+/**
+ * ============================================================================
+ * MODULE: Pointer (input/pointer.c)
+ * ============================================================================
+ * Pointer actions + optional OS mouse bridge. File-static registries, no owned
+ * class instance.
+ *
+ * FILE-STATIC STATE:
+ * ----------------------------------------------------------------------------
+ *   Cursor  **s_cursors;   // one per root Element (press state + tracked bridge)
+ *   int       s_curCount, s_curCap;
+ *   Binding  *s_bindings;  // Panel click bindings keyed by the panel's Element
+ *   int       s_bindCount, s_bindCap;
+ *
+ * PRIVATE TYPES:
+ * ----------------------------------------------------------------------------
+ *   Binding : { Element *graphics; Panel *panel; PointerFn fn; void *userdata; }
+ *   Cursor  : { Element *root; Element *pressed; Frame *frame;
+ *               MouseHandler handler; bool tracked; }
+ *
+ * PRIVATE HELPERS:
+ * ----------------------------------------------------------------------------
+ *   find_binding / cursor_for / cursor_open : registry lookups
+ *   bound_at(root,x,y) : nearest bound element under the cursor
+ *   track_dispatch / track_down|up|move|mod|dragf|scroll|zoom : OS bridge
+ *   cleanup_on_close   : drop registrations when the owning Frame closes
+ *
+ * FUNCTION REGISTRY (exported by input/pointer.h):
+ * ----------------------------------------------------------------------------
+ * Actions:
+ *   - Pointer_hover, Pointer_press, Pointer_release, Pointer_move,
+ *     Pointer_click, Pointer_hold, Pointer_drag
+ * Handlers:
+ *   - Pointer_onClick, Pointer_addButton
+ * OS bridge:
+ *   - Pointer_track
+ * ============================================================================
+ */
 
 typedef struct {
     Element *graphics;   // the panel's GraphicsPanel (the hit target)

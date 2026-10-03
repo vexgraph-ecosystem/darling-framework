@@ -6,6 +6,10 @@
 #include "graphics/graphics.h"   // Color
 #include "ui/element.h"          // ElementDesc, Element, PART_*
 #include "c23/event_invoke.h"    // DECLARE_EVENTS(Panel)
+#include "properties/add.h"            // Panel_add(...)
+#include "properties/remove.h"         // Panel_remove(...)
+#include "properties/set_location.h"   // Panel_setLocation(...)
+#include "properties/set_corner_radius.h"  // Panel_setCornerRadius(...)
 
 // darling R4 — panel.h
 //
@@ -37,9 +41,10 @@ void   Panel_destroy(Panel *panel);            // frees the attached Element
 Element *Panel_graphics(const Panel *panel);   // the attached Element (borrowed)
 
 // ── tree (Panels nest; the child is owned by its parent) ────────────────────
-Panel *Panel_add(Panel *parent, Panel *child);
+// Attachment lives in properties/add.h; Panel_add(...) is overloaded by arity.
 int    Panel_childCount(const Panel *panel);
 Element *Panel_childElement(const Panel *panel, int index);
+Panel *Panel_parent(const Panel *panel);
 
 // ── geometry (forwards to the Element) ──────────────────────────────────────
 void Panel_setSize(Panel *panel, float width, float height);
