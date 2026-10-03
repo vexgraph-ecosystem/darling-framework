@@ -1,0 +1,956 @@
+{
+  "schema": 1,
+  "intent": "repos/.ecosystem/darling.md",
+  "readiness": "draft scaffolds only; no runtime or visual readiness",
+  "entries": [
+    {
+      "path": "layout/container",
+      "name": "Container",
+      "kind": "class",
+      "status": "draft",
+      "scope": "Layout policy adapter over the existing graphvex Element; anchors, pivots, padding and sizing policies must not introduce a second geometry authority."
+    },
+    {
+      "path": "canvas/canvas",
+      "name": "Canvas",
+      "kind": "class",
+      "status": "draft",
+      "scope": "Coordinate a root content tree and borrowed Surface/Boards; fan dirty branches and keep multiwindow presentation independent."
+    },
+    {
+      "path": "scene/scene",
+      "name": "Scene",
+      "kind": "class",
+      "status": "draft",
+      "scope": "Common retained scene interface that borrows graphvex Board/Image targets and participates in the Frame revalidation cascade."
+    },
+    {
+      "path": "scene/scene_2d",
+      "name": "Scene2D",
+      "kind": "class",
+      "status": "draft",
+      "scope": "Retained 2D scene composition with transforms, ordering and pixel/percentage sizing; GPU execution remains in graphvex."
+    },
+    {
+      "path": "scene/scene_3d",
+      "name": "Scene3D",
+      "kind": "class",
+      "status": "draft",
+      "scope": "Retained 3D scene composition with camera, lighting and sizing policies; mesh rendering and resource retirement remain in graphvex."
+    },
+    {
+      "path": "compositor/compositor",
+      "name": "Compositor",
+      "kind": "class",
+      "status": "draft",
+      "scope": "Order borrowed scene/content/overlay Boards into the single Frame presentation seam, with no second OS window or duplicate rendering loop."
+    },
+    {
+      "path": "panel/flex_panel",
+      "name": "FlexPanel",
+      "kind": "class",
+      "status": "draft",
+      "scope": "Panel composition with row/column flow, wrapping, gap, justification, alignment and hug/fill/fixed sizing policies."
+    },
+    {
+      "path": "panel/split_panel",
+      "name": "SplitPanel",
+      "kind": "class",
+      "status": "draft",
+      "scope": "Panel composition with pane ratios, divider interaction and min/max pane constraints; child ownership follows Panel."
+    },
+    {
+      "path": "panel/tab_panel",
+      "name": "TabPanel",
+      "kind": "class",
+      "status": "draft",
+      "scope": "Panel composition with tab strip, active content, close/reorder policies and focus transfer."
+    },
+    {
+      "path": "panel/dock_panel",
+      "name": "DockPanel",
+      "kind": "class",
+      "status": "draft",
+      "scope": "Panel composition with named dock regions and splitters, borrowing Frame geometry rather than owning native windows."
+    },
+    {
+      "path": "panel/card_panel",
+      "name": "CardPanel",
+      "kind": "class",
+      "status": "draft",
+      "scope": "Compound Panel with header, title, description, body and footer roles; elevation and spacing are properties."
+    },
+    {
+      "path": "list/list_panel",
+      "name": "ListPanel",
+      "kind": "class",
+      "status": "draft",
+      "scope": "Panel composition with indexed horizontal/vertical stacking, gaps, cross-axis alignment and content sizing."
+    },
+    {
+      "path": "panel/grid_panel",
+      "name": "GridPanel",
+      "kind": "class",
+      "status": "draft",
+      "scope": "Panel composition with rows, columns, independent gaps, cell placement and future spanning policies."
+    },
+    {
+      "path": "panel/section_panel",
+      "name": "SectionPanel",
+      "kind": "class",
+      "status": "draft",
+      "scope": "Compound titled header/body Panel with collapsible content and future animated height."
+    },
+    {
+      "path": "panel/layered_panel",
+      "name": "LayeredPanel",
+      "kind": "class",
+      "status": "draft",
+      "scope": "Overlapping child Panels with explicit ordering and topmost visible hit routing."
+    },
+    {
+      "path": "panel/accordion",
+      "name": "Accordion",
+      "kind": "class",
+      "status": "draft",
+      "scope": "Disclosure-group Panel composition with single/multiple expansion policies and eventual animated layout."
+    },
+    {
+      "path": "panel/tree_panel",
+      "name": "TreePanel",
+      "kind": "class",
+      "status": "draft",
+      "scope": "Hierarchical disclosure rows for file/scene trees, selection and large-tree virtualization policies."
+    },
+    {
+      "path": "panel/table_panel",
+      "name": "TablePanel",
+      "kind": "class",
+      "status": "draft",
+      "scope": "Multi-column data-grid Panel with sorting, headers, resize and paginated or virtualized rows."
+    },
+    {
+      "path": "panel/markdown_panel",
+      "name": "MarkdownPanel",
+      "kind": "class",
+      "status": "draft",
+      "scope": "Markdown block/inline parsing into retained text children, with selection, links and future code/table composition."
+    },
+    {
+      "path": "panel/rich_text_panel",
+      "name": "RichTextPanel",
+      "kind": "class",
+      "status": "draft",
+      "scope": "Retained rich-text document Panel with styled runs, wrapping and document-wide selection."
+    },
+    {
+      "path": "panel/material_panel",
+      "name": "MaterialPanel",
+      "kind": "class",
+      "status": "draft",
+      "scope": "Panel facade for borrowed graphvex material-rendered content; no material shader or GPU ownership belongs here."
+    },
+    {
+      "path": "panel/video_panel",
+      "name": "VideoPanel",
+      "kind": "class",
+      "status": "draft",
+      "scope": "Panel facade for decoded media frames; decoder/process supervision and image upload remain with their lower-level owners."
+    },
+    {
+      "path": "panel/svg_panel",
+      "name": "SvgPanel",
+      "kind": "class",
+      "status": "draft",
+      "scope": "Retained SVG display Panel with path/layout interpretation and borrowed driver rendering resources."
+    },
+    {
+      "path": "panel/web_panel",
+      "name": "WebPanel",
+      "kind": "class",
+      "status": "draft",
+      "scope": "Capability-gated native-web-content Panel facade; platform handles are borrowed through a host bridge, not an embedded browser runtime."
+    },
+    {
+      "path": "label/label",
+      "name": "Label",
+      "kind": "class",
+      "status": "draft",
+      "scope": "Text widget with owned/borrowed text contracts, font requests, glyph-position hit testing, selection and clipboard intent."
+    },
+    {
+      "path": "label/rich_label",
+      "name": "RichLabel",
+      "kind": "class",
+      "status": "draft",
+      "scope": "Text widget with multiple styled runs, shared selection coordinates and plain-text copy across markup."
+    },
+    {
+      "path": "label/kbd",
+      "name": "Kbd",
+      "kind": "class",
+      "status": "draft",
+      "scope": "Keycap text badge with monospaced typography, key-symbol presentation and theme spacing."
+    },
+    {
+      "path": "text/typography",
+      "name": "Typography",
+      "kind": "class",
+      "status": "draft",
+      "scope": "UI type-role policy mapping caption/body/title/display/mono roles to borrowed font resources and theme tokens."
+    },
+    {
+      "path": "text/text_core",
+      "name": "TextCore",
+      "kind": "class",
+      "status": "draft",
+      "scope": "UI-side styled-run, text-layout and selection model; native glyph shaping/rasterization is a borrowed driver capability."
+    },
+    {
+      "path": "code/code_field",
+      "name": "CodeField",
+      "kind": "class",
+      "status": "draft",
+      "scope": "Editable code-text widget with language tokens, line-number gutter, caret/selection and future folding/multicaret policies."
+    },
+    {
+      "path": "button/button",
+      "name": "Button",
+      "kind": "class",
+      "status": "draft",
+      "scope": "Pressable compound Panel with label/icon/accessory slots, variants, enabled/loading state and keyboard activation intent."
+    },
+    {
+      "path": "button/switch",
+      "name": "Switch",
+      "kind": "class",
+      "status": "draft",
+      "scope": "Boolean-choice Panel with track/thumb composition, change notifications and eventual animated state transitions."
+    },
+    {
+      "path": "button/checkbox",
+      "name": "Checkbox",
+      "kind": "class",
+      "status": "draft",
+      "scope": "Checked/indeterminate Panel with label hit region, value notifications and keyboard activation intent."
+    },
+    {
+      "path": "radio/radio_group",
+      "name": "RadioGroup",
+      "kind": "class",
+      "status": "draft",
+      "scope": "Exclusive option-list Panel with selection, disabled-option policy and eventual arrow-key traversal."
+    },
+    {
+      "path": "input/input",
+      "name": "Input",
+      "kind": "class",
+      "status": "draft",
+      "scope": "Single-line text-entry widget with buffer ownership, caret, selection, placeholder, clipboard and submit/change intent."
+    },
+    {
+      "path": "input/textarea",
+      "name": "Textarea",
+      "kind": "class",
+      "status": "draft",
+      "scope": "Multiline text-entry widget with document mutations, wrapping, line navigation and viewport/caret synchronization."
+    },
+    {
+      "path": "input/slider",
+      "name": "Slider",
+      "kind": "class",
+      "status": "draft",
+      "scope": "Range-selection Panel with normalization, step snapping, orientation, track/thumb composition and keyboard nudging."
+    },
+    {
+      "path": "input/knob",
+      "name": "Knob",
+      "kind": "class",
+      "status": "draft",
+      "scope": "Rotary range-control Panel with angle math, detents, fine adjustment and value readout."
+    },
+    {
+      "path": "input/scroll_bar",
+      "name": "ScrollBar",
+      "kind": "class",
+      "status": "draft",
+      "scope": "Track/thumb Panel composition driven by viewport/content ratios, seek/drag intent and horizontal/vertical orientation."
+    },
+    {
+      "path": "input/input_otp",
+      "name": "InputOTP",
+      "kind": "class",
+      "status": "draft",
+      "scope": "Passcode-entry Panel with digit slots, focus advance, paste splitting and bounded code storage."
+    },
+    {
+      "path": "input/search_field",
+      "name": "SearchField",
+      "kind": "class",
+      "status": "draft",
+      "scope": "Compound text input with search icon, clear action and optional shortcut badge."
+    },
+    {
+      "path": "combo/select",
+      "name": "Select",
+      "kind": "class",
+      "status": "draft",
+      "scope": "Compound selection widget with trigger/value/content/item roles, keyboard selection and overlay popup/filter policy."
+    },
+    {
+      "path": "picker/date_picker",
+      "name": "DatePicker",
+      "kind": "class",
+      "status": "draft",
+      "scope": "Date-selection widget with calendar model, month navigation and future popup/month-grid composition."
+    },
+    {
+      "path": "picker/color_picker",
+      "name": "ColorPicker",
+      "kind": "class",
+      "status": "draft",
+      "scope": "Color-selection widget with HSV/hex editing, hue/saturation/value controls and borrowed sample intent."
+    },
+    {
+      "path": "picker/color_swatch",
+      "name": "ColorSwatch",
+      "kind": "class",
+      "status": "draft",
+      "scope": "Selectable color-chip Panel with selection/change notifications and shared Color representation."
+    },
+    {
+      "path": "dialog/dialog",
+      "name": "Dialog",
+      "kind": "class",
+      "status": "draft",
+      "scope": "Modal UI wrapper over an owned/borrowed Frame contract; modal focus/close policies must use the R1 host window seam."
+    },
+    {
+      "path": "dialog/option_dialog",
+      "name": "OptionDialog",
+      "kind": "class",
+      "status": "draft",
+      "scope": "Dialog composition for action choices and explicit result/cancellation ownership."
+    },
+    {
+      "path": "dialog/input_dialog",
+      "name": "InputDialog",
+      "kind": "class",
+      "status": "draft",
+      "scope": "Dialog composition for a text prompt, bounded input, submit/cancel results and focus return."
+    },
+    {
+      "path": "dialog/file_dialog",
+      "name": "FileDialog",
+      "kind": "class",
+      "status": "draft",
+      "scope": "Dialog composition for path/filter/entry selection; file access is borrowed from vexspoke, never a new filesystem backend."
+    },
+    {
+      "path": "dialog/color_dialog",
+      "name": "ColorDialog",
+      "kind": "class",
+      "status": "draft",
+      "scope": "Dialog composition for a ColorPicker and live color-change/result notifications."
+    },
+    {
+      "path": "dialog/alert_dialog",
+      "name": "AlertDialog",
+      "kind": "class",
+      "status": "draft",
+      "scope": "Dialog composition for title, body and confirmation actions, preserving modal close/cancel policy."
+    },
+    {
+      "path": "overlay/overlay_root",
+      "name": "OverlayRoot",
+      "kind": "class",
+      "status": "draft",
+      "scope": "Explicit top-level overlay tree that escapes content clips while retaining modal input isolation and one Frame presentation seam."
+    },
+    {
+      "path": "overlay/tooltip",
+      "name": "Tooltip",
+      "kind": "class",
+      "status": "draft",
+      "scope": "Hover-hint overlay with placement/arrow intent and bounded lifetime; timers are borrowed from the owner loop."
+    },
+    {
+      "path": "overlay/popover",
+      "name": "Popover",
+      "kind": "class",
+      "status": "draft",
+      "scope": "Click-anchored overlay card with light-dismiss, focus return and clipping escape policy."
+    },
+    {
+      "path": "overlay/menu",
+      "name": "Menu",
+      "kind": "class",
+      "status": "draft",
+      "scope": "Hierarchical action-menu overlay with shortcuts, item selection and keyboard traversal policy."
+    },
+    {
+      "path": "overlay/context_menu",
+      "name": "ContextMenu",
+      "kind": "class",
+      "status": "draft",
+      "scope": "Context-triggered Menu composition with point anchoring, action routing and dismissal/focus return."
+    },
+    {
+      "path": "overlay/toast",
+      "name": "Toast",
+      "kind": "class",
+      "status": "draft",
+      "scope": "Nonmodal notification Panel with message/action composition and owner-driven dismissal."
+    },
+    {
+      "path": "overlay/toast_stack",
+      "name": "ToastStack",
+      "kind": "class",
+      "status": "draft",
+      "scope": "Retained queue/layout coordinator for Toast children, deadlines and removal without owning a timer thread."
+    },
+    {
+      "path": "overlay/command_palette",
+      "name": "CommandPalette",
+      "kind": "class",
+      "status": "draft",
+      "scope": "Quick-action overlay with query/filter results, command selection and focus restoration."
+    },
+    {
+      "path": "theme/theme",
+      "name": "Theme",
+      "kind": "class",
+      "status": "draft",
+      "scope": "UI design tokens for color ramps, spacing, typography and elevation; styles reuse graphvex Color/Property rather than redefining them."
+    },
+    {
+      "path": "feedback/focus_ring",
+      "name": "FocusRing",
+      "kind": "class",
+      "status": "draft",
+      "scope": "Keyboard-focus indicator Panel tied to focus-visible policy, theme color and explicit offset."
+    },
+    {
+      "path": "feedback/progress_bar",
+      "name": "ProgressBar",
+      "kind": "class",
+      "status": "draft",
+      "scope": "Determinate/indeterminate progress Panel with normalized value, fill and owner-driven animation."
+    },
+    {
+      "path": "feedback/spinner",
+      "name": "Spinner",
+      "kind": "class",
+      "status": "draft",
+      "scope": "Loading-indicator Panel with owner-driven phase and rendering intent; no independent animation thread."
+    },
+    {
+      "path": "feedback/skeleton",
+      "name": "Skeleton",
+      "kind": "class",
+      "status": "draft",
+      "scope": "Loading-placeholder Panel with shape tokens and eventual owner-driven shimmer."
+    },
+    {
+      "path": "kit/avatar",
+      "name": "Avatar",
+      "kind": "class",
+      "status": "draft",
+      "scope": "Photo/initials Panel composition with optional presence badge and image fallback policy."
+    },
+    {
+      "path": "kit/badge",
+      "name": "Badge",
+      "kind": "class",
+      "status": "draft",
+      "scope": "Status-badge Panel with semantic tone, size and text/icon slots."
+    },
+    {
+      "path": "kit/pill",
+      "name": "Pill",
+      "kind": "class",
+      "status": "draft",
+      "scope": "Compact pill-shaped status/tag Panel, sharing Badge/theme conventions without duplicating layout machinery."
+    },
+    {
+      "path": "kit/chip",
+      "name": "Chip",
+      "kind": "class",
+      "status": "draft",
+      "scope": "Interactive tag Panel with dismiss action, optional avatar and selection/enabled policy."
+    },
+    {
+      "path": "kit/breadcrumb",
+      "name": "Breadcrumb",
+      "kind": "class",
+      "status": "draft",
+      "scope": "Hierarchical navigation-path Panel with separators, current item and action intent."
+    },
+    {
+      "path": "kit/pagination",
+      "name": "Pagination",
+      "kind": "class",
+      "status": "draft",
+      "scope": "Page-navigation Panel with page count/current page, boundaries and previous/next actions."
+    },
+    {
+      "path": "kit/stat_card",
+      "name": "StatCard",
+      "kind": "class",
+      "status": "draft",
+      "scope": "KPI CardPanel composition with value, trend and borrowed Plot/sparkline content."
+    },
+    {
+      "path": "drawable/picture",
+      "name": "Picture",
+      "kind": "class",
+      "status": "draft",
+      "scope": "Image-display widget with borrowed Image backing, UV crop and contain/cover/stretch policy."
+    },
+    {
+      "path": "drawable/object_3d",
+      "name": "Object3D",
+      "kind": "class",
+      "status": "draft",
+      "scope": "UI scene-node wrapper for borrowed mesh/material resources and transform hierarchy; GPU mesh ownership remains in graphvex."
+    },
+    {
+      "path": "drawable/viewer_3d",
+      "name": "Viewer3D",
+      "kind": "class",
+      "status": "draft",
+      "scope": "Scene3D viewer composition with orbit camera, lighting controls and Object3D content."
+    },
+    {
+      "path": "shape/icon_image",
+      "name": "IconImage",
+      "kind": "class",
+      "status": "draft",
+      "scope": "Vector/SDF icon-display widget requesting borrowed icon atlas resources and theme-driven sizing/color."
+    },
+    {
+      "path": "graph/plot",
+      "name": "Plot",
+      "kind": "class",
+      "status": "draft",
+      "scope": "Retained data-chart widget with borrowed data spans, line/bar/scatter modes, axes and data hit/tooltip intent."
+    },
+    {
+      "path": "graph/node_editor",
+      "name": "NodeEditor",
+      "kind": "class",
+      "status": "draft",
+      "scope": "Retained graph-canvas widget with node/pin/socket models, connection curves and edit/selection intent."
+    },
+    {
+      "path": "anim/anim",
+      "name": "Anim",
+      "kind": "class",
+      "status": "draft",
+      "scope": "Owner-driven property-animation player with easing/spring policies; no independent tick thread or duplicated scheduler."
+    },
+    {
+      "path": "cursor/cursor",
+      "name": "Cursor",
+      "kind": "class",
+      "status": "draft",
+      "scope": "UI cursor-selection facade; native cursor handles and application remain with the R1 host."
+    },
+    {
+      "path": "history/history",
+      "name": "History",
+      "kind": "class",
+      "status": "draft",
+      "scope": "UI command-history model with undo/redo and explicit borrowed command/payload lifetime contracts."
+    },
+    {
+      "path": "export/html_exporter",
+      "name": "HtmlExporter",
+      "kind": "class",
+      "status": "draft",
+      "scope": "UI-tree-to-HTML serialization policy; source tree is borrowed and output ownership/escaping must be defined before implementation."
+    },
+    {
+      "path": "game/hud_bar",
+      "name": "HudBar",
+      "kind": "class",
+      "status": "draft",
+      "scope": "HUD value-bar Panel with primary fill, delayed ghost drain and damage-feedback intent."
+    },
+    {
+      "path": "game/cooldown_button",
+      "name": "CooldownButton",
+      "kind": "class",
+      "status": "draft",
+      "scope": "Button composition with owner-driven cooldown phase, radial progress and hotkey/ready indicators."
+    },
+    {
+      "path": "game/damage_numbers",
+      "name": "DamageNumbers",
+      "kind": "class",
+      "status": "draft",
+      "scope": "Pooled floating-text Panel coordinator with bounded combat-text lifetime and owner-driven motion."
+    },
+    {
+      "path": "game/inventory_grid",
+      "name": "InventoryGrid",
+      "kind": "class",
+      "status": "draft",
+      "scope": "GridPanel composition for item slots, stack counts, tier styles, locks and drag/drop intent."
+    },
+    {
+      "path": "game/dialog_box",
+      "name": "DialogBox",
+      "kind": "class",
+      "status": "draft",
+      "scope": "NPC-dialogue Panel composition with portrait, text reveal and action choices."
+    },
+    {
+      "path": "game/minimap",
+      "name": "Minimap",
+      "kind": "class",
+      "status": "draft",
+      "scope": "Scene/Panel composition for map/radar content, player direction, pings and fog-mask intent."
+    },
+    {
+      "path": "game/gamepad_nav",
+      "name": "GamepadNav",
+      "kind": "class",
+      "status": "draft",
+      "scope": "Spatial focus-navigation policy for D-pad directions, bumper tabs and device glyph requests."
+    },
+    {
+      "path": "spatial/spatial_canvas",
+      "name": "SpatialCanvas",
+      "kind": "class",
+      "status": "draft",
+      "scope": "Retained pan/zoom content-canvas policy with guides, minimap and borrowed driver transforms; no separate render loop."
+    },
+    {
+      "path": "spatial/transform_box",
+      "name": "TransformBox",
+      "kind": "class",
+      "status": "draft",
+      "scope": "Interactive bounding-handle Panel with translation/scale/rotation intent, aspect locking and geometry constraints."
+    },
+    {
+      "path": "spatial/property_inspector",
+      "name": "PropertyInspector",
+      "kind": "class",
+      "status": "draft",
+      "scope": "Retained property-editing Panel composition with explicit bindings for geometry, paint and text; edits use shared properties operations."
+    },
+    {
+      "path": "bridge/window_bridge",
+      "name": "Window bridge",
+      "kind": "module",
+      "status": "draft",
+      "scope": "UI root attachment/resize/input glue over hotcwap Window; never a second Window class or native backend."
+    },
+    {
+      "path": "bridge/font_bridge",
+      "name": "Font bake bridge",
+      "kind": "module",
+      "status": "draft",
+      "scope": "UI font request/cache binding over borrowed graphvex font resources; no new font baker."
+    },
+    {
+      "path": "bridge/text_bridge",
+      "name": "Text ObjC bridge",
+      "kind": "module",
+      "status": "draft",
+      "scope": "Platform-capability routing for text shaping/rasterization supplied by the driver/host, with no native implementation in this draft."
+    },
+    {
+      "path": "bridge/panel_bridge",
+      "name": "Panel Cocoa bridge",
+      "kind": "module",
+      "status": "draft",
+      "scope": "UI Panel/Board attachment and lifecycle glue over the existing single Frame presentation seam."
+    },
+    {
+      "path": "bridge/clipboard",
+      "name": "Clipboard bridge",
+      "kind": "module",
+      "status": "draft",
+      "scope": "Translate UI selection/copy/paste intent into existing vexspoke io/clipboard.h; do not redeclare or duplicate Clipboard_* native functions."
+    },
+    {
+      "path": "color/color",
+      "name": "Color helpers",
+      "kind": "module",
+      "status": "draft",
+      "scope": "UI color-format conversion policy using the existing graphvex Color scalar; do not introduce an incompatible second Color typedef."
+    },
+    {
+      "path": "emoji/emoji",
+      "name": "Emoji text support",
+      "kind": "module",
+      "status": "draft",
+      "scope": "Text fallback/emoji presentation policy for Label and rich-text content; shaping and native font capabilities remain borrowed."
+    },
+    {
+      "path": "event/bridge",
+      "name": "Event bridge",
+      "kind": "module",
+      "status": "draft",
+      "scope": "Translate host event payloads into existing c23/event_invoke dispatch, preserving window-scoped coordinates and ownership."
+    },
+    {
+      "path": "event/key",
+      "name": "Key events",
+      "kind": "module",
+      "status": "draft",
+      "scope": "Focused-target keyboard delivery policy over shared event carriers; no Key struct duplication or blanket widget opt-ins."
+    },
+    {
+      "path": "event/document",
+      "name": "Document events",
+      "kind": "module",
+      "status": "draft",
+      "scope": "Text mutation notification policy for insertion/removal/replacement over existing document event carriers."
+    },
+    {
+      "path": "event/focus",
+      "name": "Focus events",
+      "kind": "module",
+      "status": "draft",
+      "scope": "Focus acquisition/release, traversal, focus-visible and modal trapping policy over the retained tree."
+    },
+    {
+      "path": "event/gesture",
+      "name": "Gesture events",
+      "kind": "module",
+      "status": "draft",
+      "scope": "Gesture-recognition policy over borrowed scroll/pinch/pan payloads and owner-driven timing."
+    },
+    {
+      "path": "event/action",
+      "name": "Action events",
+      "kind": "module",
+      "status": "draft",
+      "scope": "Abstract UI command dispatch and activation policy using borrowed handler/context lifetimes."
+    },
+    {
+      "path": "event/value",
+      "name": "Value events",
+      "kind": "module",
+      "status": "draft",
+      "scope": "Value-change notification policy for controls, with explicit delivery/reentrancy contracts to be defined."
+    },
+    {
+      "path": "event/tree",
+      "name": "Tree events",
+      "kind": "module",
+      "status": "draft",
+      "scope": "Hierarchy mutation notification policy for attach/detach/dirty changes without duplicating the live tree operations."
+    },
+    {
+      "path": "c23/darling-type",
+      "name": "Darling type registry",
+      "kind": "module",
+      "status": "draft",
+      "scope": "Future single Darling class registry; allocate no identities for unimplemented drafts and never duplicate lower-level registry IDs."
+    },
+    {
+      "path": "properties/set_anchor",
+      "name": "set_anchor",
+      "kind": "module",
+      "status": "draft",
+      "scope": "Parent anchor property routing over existing Element/Panel placement; migrate existing setters here rather than define parallel behavior."
+    },
+    {
+      "path": "properties/set_pivot",
+      "name": "set_pivot",
+      "kind": "module",
+      "status": "draft",
+      "scope": "Self-pivot property routing over existing Element/Panel placement; migrate existing setters here rather than define parallel behavior."
+    },
+    {
+      "path": "properties/set_padding",
+      "name": "set_padding",
+      "kind": "module",
+      "status": "draft",
+      "scope": "Future inner-spacing operation; layout contribution and interaction with child sizing must be specified before implementation."
+    },
+    {
+      "path": "properties/set_margin",
+      "name": "set_margin",
+      "kind": "module",
+      "status": "draft",
+      "scope": "Future additive external-spacing operation; semantics must remain separate from anchor/location and be defined before implementation."
+    },
+    {
+      "path": "properties/set_border",
+      "name": "set_border",
+      "kind": "module",
+      "status": "draft",
+      "scope": "Border width/color property routing; eventually migrate current widget setters and preserve CPU/GPU paint contracts."
+    },
+    {
+      "path": "properties/set_shadow",
+      "name": "set_shadow",
+      "kind": "module",
+      "status": "draft",
+      "scope": "Shadow offset/blur/color property routing; eventually migrate existing setters and retain layout-versus-paint bounds."
+    },
+    {
+      "path": "properties/set_blur",
+      "name": "set_blur",
+      "kind": "module",
+      "status": "draft",
+      "scope": "Own-edge/backdrop effect property routing with explicitly separate contracts and capability gates."
+    },
+    {
+      "path": "properties/set_visible",
+      "name": "set_visible",
+      "kind": "module",
+      "status": "draft",
+      "scope": "Visibility property routing and eventual revalidation/input consequences; migrate existing setters rather than add competing implementations."
+    },
+    {
+      "path": "properties/set_text",
+      "name": "set_text",
+      "kind": "module",
+      "status": "draft",
+      "scope": "Future text-content ownership/mutation operation for text widgets; no setters declared until their types/lifetimes exist."
+    },
+    {
+      "path": "properties/set_font",
+      "name": "set_font",
+      "kind": "module",
+      "status": "draft",
+      "scope": "Future typography/font request operation that borrows lower-level font resources."
+    },
+    {
+      "path": "properties/set_value",
+      "name": "set_value",
+      "kind": "module",
+      "status": "draft",
+      "scope": "Future typed control-value operation with range/clamp/notification contracts."
+    },
+    {
+      "path": "properties/set_enabled",
+      "name": "set_enabled",
+      "kind": "module",
+      "status": "draft",
+      "scope": "Future control enabled-state operation with input and appearance policy."
+    },
+    {
+      "path": "properties/set_focus",
+      "name": "set_focus",
+      "kind": "module",
+      "status": "draft",
+      "scope": "Future focus-state operation over the event/focus coordinator and retained tree."
+    },
+    {
+      "path": "properties/set_scroll_offset",
+      "name": "set_scroll_offset",
+      "kind": "module",
+      "status": "draft",
+      "scope": "Future shared scroll-offset operation preserving ScrollPanel clamp/revalidation semantics."
+    },
+    {
+      "path": "properties/set_theme",
+      "name": "set_theme",
+      "kind": "module",
+      "status": "draft",
+      "scope": "Future theme-token binding operation for widgets and compound parts."
+    },
+    {
+      "path": "properties/set_alignment",
+      "name": "set_alignment",
+      "kind": "module",
+      "status": "draft",
+      "scope": "Future content/cross-axis alignment operation; do not conflate it with anchor/pivot."
+    },
+    {
+      "path": "properties/set_gap",
+      "name": "set_gap",
+      "kind": "module",
+      "status": "draft",
+      "scope": "Future flow/grid child-gap operation with layout revalidation policy."
+    },
+    {
+      "path": "properties/set_sizing_mode",
+      "name": "set_sizing_mode",
+      "kind": "module",
+      "status": "draft",
+      "scope": "Future fixed/hug/fill layout policy operation with explicit measurement semantics."
+    },
+    {
+      "path": "properties/set_background_color",
+      "name": "set_background_color",
+      "kind": "module",
+      "status": "draft",
+      "scope": "Background paint routing; eventually migrate current setters while preserving explicit window-transparency independence."
+    }
+  ],
+  "aliases": {
+    "ListContainer": "ListPanel",
+    "GridContainer": "GridPanel",
+    "SectionContainer": "SectionPanel",
+    "LayeredContainer": "LayeredPanel",
+    "SplitContainer": "SplitPanel",
+    "ScrollContainer": "ScrollPanel",
+    "DataTable": "TablePanel",
+    "Theme System": "Theme"
+  },
+  "existing": [
+    {
+      "name": "Frame",
+      "path": "frame/frame",
+      "scope": "Window/lifecycle/accessors; shared operations route through properties/."
+    },
+    {
+      "name": "Panel",
+      "path": "panel/panel",
+      "scope": "Live wrapper over graphvex Element with existing ownership and paint API."
+    },
+    {
+      "name": "ScrollPanel",
+      "path": "panel/scroll_panel",
+      "scope": "Live viewport over content, with clamped offsets and clipping."
+    },
+    {
+      "name": "Pointer events",
+      "path": "input/pointer",
+      "scope": "Existing real-input bridge; no replacement dispatcher scaffold."
+    },
+    {
+      "name": "Event dispatch",
+      "path": "c23/event_invoke",
+      "scope": "Existing handler registration/bubbling and typed event carriers."
+    },
+    {
+      "name": "c23/add",
+      "path": "properties/add",
+      "scope": "Current canonical Frame/Panel attachment operations; no duplicate c23/add implementation."
+    },
+    {
+      "name": "remove/revalidate/size/location/radius",
+      "path": "properties/",
+      "scope": "Existing shared operation files, left untouched."
+    },
+    {
+      "name": "Font bake / raster / Surface",
+      "path": "graphvex R3",
+      "scope": "Driver-owned capabilities, not recreated as R4 implementations."
+    },
+    {
+      "name": "IO mmap / IO bake / native Clipboard",
+      "path": "vexspoke R2",
+      "scope": "Leaf I/O/native clipboard capabilities, not duplicated."
+    },
+    {
+      "name": "Native Window",
+      "path": "hotcwap R1",
+      "scope": "Host-owned native window; Frame/bridge only borrow it."
+    },
+    {
+      "name": "Color representation",
+      "path": "graphvex/graphics/graphics.h",
+      "scope": "Reuse Color; color/color is a helper-policy placeholder, not another class."
+    }
+  ]
+}
