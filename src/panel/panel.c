@@ -124,3 +124,8 @@ int Panel_anchor(const Panel *panel) { return panel ? Element_anchor((*panel).gr
 int Panel_pivot(const Panel *panel) { return panel ? Element_pivot((*panel).graphics) : 0; }
 const char *Panel_tag(const Panel *panel) { return panel ? Element_tag((*panel).graphics) : NULL; }
 bool Panel_isVisible(const Panel *panel) { return panel ? Element_isVisible((*panel).graphics) : false; }
+
+// ── events ──────────────────────────────────────────────────────────────────
+// The `##` IS the class: these become Panel_addMouseEvent, Panel_addScrollEvent,
+// Panel_addZoomEvent, Panel_addKeyEvent, Panel_addTouchEvent, Panel_addDocumentEvent.
+IMPLEMENT_EVENTS(Panel)

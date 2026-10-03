@@ -116,3 +116,9 @@ void ScrollPanel_revalidate(ScrollPanel *sp) {
     Element_markDirty((*sp).viewport);
     Element_revalidate(Element_root((*sp).viewport));
 }
+
+// ── events ──────────────────────────────────────────────────────────────────
+// The `##` IS the class: these become ScrollPanel_addMouseEvent,
+// ScrollPanel_addScrollEvent, ScrollPanel_addZoomEvent, ScrollPanel_addKeyEvent,
+// ScrollPanel_addTouchEvent, ScrollPanel_addDocumentEvent.
+IMPLEMENT_EVENTS(ScrollPanel)

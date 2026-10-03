@@ -4,6 +4,7 @@
 #include <stdbool.h>
 
 #include "ui/element.h"
+#include "c23/event_invoke.h"   // DECLARE_EVENTS(ScrollPanel)
 
 // darling R4 — panel/scroll_panel.h
 //
@@ -54,5 +55,10 @@ bool ScrollPanel_canScrollX(const ScrollPanel *scroll);
 // Reflect the offset into the tree (the viewport + content). Called by every
 // setter; call it after editing the content size or the viewport directly.
 void ScrollPanel_revalidate(ScrollPanel *scroll);
+
+// ── events (per-kind adders, generated from the class name) ─────────────────
+// ScrollPanel_addScrollEvent, ScrollPanel_addMouseEvent, … register on the
+// viewport Element and return the panel.
+DECLARE_EVENTS(ScrollPanel);
 
 #endif // DARLING_SCROLL_PANEL_H

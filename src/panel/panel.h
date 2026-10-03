@@ -5,6 +5,7 @@
 
 #include "graphics/graphics.h"   // Color
 #include "ui/element.h"          // ElementDesc, Element, PART_*
+#include "c23/event_invoke.h"    // DECLARE_EVENTS(Panel)
 
 // darling R4 — panel.h
 //
@@ -63,5 +64,11 @@ int   Panel_anchor(const Panel *panel);
 int   Panel_pivot(const Panel *panel);
 const char *Panel_tag(const Panel *panel);
 bool  Panel_isVisible(const Panel *panel);
+
+// ── events (per-kind adders, generated from the class name) ─────────────────
+// Panel_addMouseEvent, Panel_addScrollEvent, Panel_addZoomEvent, Panel_addKeyEvent,
+// Panel_addTouchEvent, Panel_addDocumentEvent — each takes its handler struct,
+// registers on the panel's Element, and returns the panel.
+DECLARE_EVENTS(Panel);
 
 #endif // DARLING_PANEL_H

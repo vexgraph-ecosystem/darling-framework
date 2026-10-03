@@ -6,6 +6,7 @@
 #include <time.h>
 
 #include "input/mouse.h"   // vexspoke R2: window-scoped events + Mouse_x/y
+#include "c23/event_invoke.h"   // Element_dispatchEvent + the Event carrier
 
 // darling R4 — input/pointer.c
 // The pointer over the element tree; handlers bind to Panels (the wrappers).
@@ -151,25 +152,56 @@ Panel *Pointer_addButton(Frame *frame, const ElementDesc *desc, PointerFn fn, vo
     return p;
 }
 
-// ── optional OS bridge (feeds the actions above) ────────────────────────────
+// ── optional OS bridge (feeds the actions above AND the event dispatcher) ───
+// Every OS event is BOTH the legacy pointer action (click bindings) and a
+// per-element event (Element_add<Kind>Event handlers), dispatched against the
+// cursor's root and bubbled.
+static void track_dispatch(Cursor *c, int kind, float x, float y,
+                           float dx, float dy, float magnitude, int key) {
+    Event event = { .kind = kind, .x = x, .y = y, .dx = dx, .dy = dy,
+                    .magnitude = magnitude, .key = key };
+    Element_dispatchEvent((*c).root, &event);
+}
+
 static void track_down(void *self, int mouseEvent, uint64_t nanos) {
-    (void)mouseEvent; (void)nanos;
+    (void)nanos;
     Cursor *c = self;
-    Pointer_press((*c).root, (float)Mouse_x(), (float)Mouse_y());
+    float x = (float)Mouse_x(), y = (float)Mouse_y();
+    track_dispatch(c, EV_MOUSE_DOWN, x, y, 0, 0, 1.0f, Mouse_button(mouseEvent));
+    Pointer_press((*c).root, x, y);
 }
 static void track_up(void *self, int mouseEvent, uint64_t nanos) {
-    (void)mouseEvent; (void)nanos;
+    (void)nanos;
     Cursor *c = self;
-    Pointer_release((*c).root, (float)Mouse_x(), (float)Mouse_y());
+    float x = (float)Mouse_x(), y = (float)Mouse_y();
+    track_dispatch(c, EV_MOUSE_UP, x, y, 0, 0, 1.0f, Mouse_button(mouseEvent));
+    Pointer_release((*c).root, x, y);
 }
 static void track_move(void *self, double x, double y) {
     Cursor *c = self;
+    track_dispatch(c, EV_MOUSE_MOVE, (float)x, (float)y, 0, 0, 1.0f, 0);
     Pointer_move((*c).root, (float)x, (float)y);
 }
 static void track_none0(void *self, int ev, uint64_t t) { (void)self; (void)ev; (void)t; }
-static void track_mod(void *self, double a, double b) { (void)self; (void)a; (void)b; }
-static void track_dragf(void *self, int ev, double x, double y) { (void)self; (void)ev; (void)x; (void)y; }
-static void track_zoom(void *self, double m) { (void)self; (void)m; }
+static void track_mod(void *self, double dx, double dy) {
+    Cursor *c = self;
+    track_dispatch(c, EV_MOUSE_MOVE, (float)Mouse_x(), (float)Mouse_y(),
+                   (float)dx, (float)dy, 1.0f, 0);
+}
+static void track_dragf(void *self, int ev, double x, double y) {
+    Cursor *c = self;
+    track_dispatch(c, EV_MOUSE_DRAG, (float)x, (float)y, 0, 0, 1.0f, Mouse_button(ev));
+}
+static void track_scroll(void *self, double dx, double dy) {
+    Cursor *c = self;
+    track_dispatch(c, EV_SCROLL, (float)Mouse_x(), (float)Mouse_y(),
+                   (float)dx, (float)dy, 1.0f, 0);
+}
+static void track_zoom(void *self, double magnification) {
+    Cursor *c = self;
+    track_dispatch(c, EV_ZOOM, (float)Mouse_x(), (float)Mouse_y(),
+                   0, 0, (float)magnification, 0);
+}
 
 static void cleanup_on_close(Frame *frame, void *userdata) {
     (void)userdata;
@@ -205,7 +237,7 @@ void Pointer_track(Frame *frame) {
     (*c).handler.onMouseMove = track_move;
     (*c).handler.onMouseMoveDelta = track_mod;
     (*c).handler.onMouseDrag = track_dragf;
-    (*c).handler.onMouseScroll = track_mod;
+    (*c).handler.onMouseScroll = track_scroll;
     (*c).handler.onMouseZoom = track_zoom;
     (*c).handler.onMouseRepeat = track_none0;
     Window_addMouseAdapter(Frame_window(frame), &(*c).handler);
