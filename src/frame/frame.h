@@ -14,6 +14,7 @@
 #include "properties/remove.h"     // Frame_removePanels(...)
 #include "properties/revalidate.h" // Frame_revalidate(...)
 #include "properties/set_size.h"   // Frame_setSize(...)
+#include "kernel/application.h"
 
 // darling R4 — frame.h
 //
@@ -98,9 +99,25 @@ Frame *Frame_owner(const Frame *frame);
 typedef void (*FrameCloseFn)(Frame *frame, void *userdata);
 void Frame_onClose(Frame *frame, FrameCloseFn fn, void *userdata);
 
-// Paint every live frame if anything changed, else park. Runs until the ROOT
-// frame (the owner-less one, or the one passed) closes — which closes the rest.
+// Compatibility Application starter: attach unattached live Frames, run until
+// ALL windows close, then detach. Caller retains/destroys the Frame handles.
+// Inside an active Application, return to Application_start instead of nesting.
 void Frame_runAll(Frame *frame);
+// Attach borrowed Frame/window to an Application; destroy unregisters it.
+// Frames constructed from Application_invoke/poll auto-attach to that app.
+bool Frame_attachApplication(Frame *frame, Application *application);
+Application *Frame_application(const Frame *frame);
+void Frame_destroyApplicationFrames(Application *application);
+
+// Presentation ceilings: -1 uncapped, positive FPS. Focus overrides: 0 inherits.
+// Default base 60, focused inherits, unfocused 1. 120 is an explicit opt-in.
+void Frame_setFPSCap(Frame *frame, int fps);
+void Frame_setFPSCapWhenFocusGain(Frame *frame, int fps);
+void Frame_setFPSCapWhenFocusLost(Frame *frame, int fps);
+int Frame_getFPSCap(const Frame *frame);
+int Frame_getFPSCapWhenFocusGain(const Frame *frame);
+int Frame_getFPSCapWhenFocusLost(const Frame *frame);
+int Frame_getEffectiveFPSCap(const Frame *frame);
 
 void Frame_paint(const Frame *frame, DisplayList *dl);
 // Surface revalidates its Boards; the content Board revalidates/paints the tree,

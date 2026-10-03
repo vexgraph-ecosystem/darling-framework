@@ -11,6 +11,12 @@
 
 #include "annotation/definition.h"
 #include "annotation/overview.h"
+#include "annotation/intention.h"
+
+;;INTENTION("Application owns the keep-alive lifetime. Frame focus selects a "
+            "Surface presentation ceiling, never a scene update rate. Default "
+            "60 is conservative across WindowServer displays; opt into 120 or "
+            "higher when supported, or -1 to leave pacing to the compositor.")
 
 ;;DEFINITION
 /**
@@ -130,12 +136,15 @@ struct Frame {
     FrameCloseFn *closeFns;
     void **closeUd;
     int closeCount, closeCap;
+    Application *application; // borrowed; detach before either owner is freed
+    int fpsCap, fpsFocusGain, fpsFocusLost;
 };
 
 // ── the live-frame set (the runner + ownership) ─────────────────────────────
 static Frame **s_live = NULL;
 static int s_liveCount = 0, s_liveCap = 0;
 static Frame *s_active = NULL;   // most recently created (CAPTURE)
+static void frame_pollApplication(Application *application, void *userdata);
 
 static void live_add(Frame *f) {
     if (s_liveCount == s_liveCap) {
@@ -256,6 +265,7 @@ Frame *Frame_3(const char *title, int widthPx, int heightPx) {
     Frame *f = calloc(1, sizeof *f);
     if (!f) return NULL;
     (*f).targets[0] = (*f).targets[1] = -1;
+    (*f).fpsCap = 60; (*f).fpsFocusLost = 1;
     (*f).window = Window_create(title ? title : "darling", wpx, hpx);
     if (!(*f).window) { free(f); return NULL; }
     // The present seam: its retained Image is the capture target, and its host
@@ -280,6 +290,9 @@ Frame *Frame_3(const char *title, int widthPx, int heightPx) {
     live_add(f);
     s_active = f;
     Pointer_track(f);
+    Application *application = Application_current();
+    if (application && !Frame_attachApplication(f, application)) { Frame_destroy(f); return NULL; }
+    Surface_setFPSCap((*f).surface, Frame_getEffectiveFPSCap(f));
     return f;
 }
 
@@ -288,6 +301,11 @@ Frame *Frame_3(const char *title, int widthPx, int heightPx) {
 void Frame_destroy(Frame *frame) {
     if (!frame) return;
     (*frame).closed = true;
+    if ((*frame).application) {
+        Application_removePollEvent((*frame).application, frame_pollApplication, frame);
+        Application_removeWindow((*frame).application, (*frame).window);
+        (*frame).application = NULL;
+    }
     while ((*frame).childCount > 0) Frame_close((*frame).children[(*frame).childCount - 1]);
     if ((*frame).owner) child_remove((*frame).owner, frame);
     live_remove(frame);
@@ -374,7 +392,7 @@ void Frame_hide(Frame *f) {
     if (f && (*f).window) Window_hide((*f).window);
 }
 
-bool Frame_isClosed(const Frame *f) { return !f || (*f).closed; }
+bool Frame_isClosed(const Frame *f) { return !f || (*f).closed || Window_shouldClose((*f).window); }
 Frame *Frame_owner(const Frame *f) { return f ? (*f).owner : NULL; }
 
 void Frame_setOwner(Frame *f, Frame *owner) {
@@ -472,6 +490,57 @@ bool Frame_prepareRevalidate(Frame *frame) {
 // Compatibility entry: the cascade itself lives in properties/revalidate.c.
 void Frame_render(Frame *frame) { Frame_revalidate(frame); }
 
+int Frame_getFPSCap(const Frame *f) { return f ? (*f).fpsCap : 0; }
+int Frame_getFPSCapWhenFocusGain(const Frame *f) { return f ? (*f).fpsFocusGain : 0; }
+int Frame_getFPSCapWhenFocusLost(const Frame *f) { return f ? (*f).fpsFocusLost : 0; }
+int Frame_getEffectiveFPSCap(const Frame *f) {
+    if (!f) return 0;
+    int override = Window_isFocused((*f).window) ? (*f).fpsFocusGain : (*f).fpsFocusLost;
+    return override ? override : (*f).fpsCap;
+}
+void Frame_setFPSCap(Frame *f, int fps) {
+    if (f && (fps == -1 || fps > 0)) { (*f).fpsCap = fps; Surface_setFPSCap((*f).surface, Frame_getEffectiveFPSCap(f)); }
+}
+void Frame_setFPSCapWhenFocusGain(Frame *f, int fps) {
+    if (f && fps >= -1) { (*f).fpsFocusGain = fps; Surface_setFPSCap((*f).surface, Frame_getEffectiveFPSCap(f)); }
+}
+void Frame_setFPSCapWhenFocusLost(Frame *f, int fps) {
+    if (f && fps >= -1) { (*f).fpsFocusLost = fps; Surface_setFPSCap((*f).surface, Frame_getEffectiveFPSCap(f)); }
+}
+
+static void frame_pollApplication(Application *application, void *userdata) {
+    (void)application;
+    Frame *f = userdata;
+    if (Window_shouldClose((*f).window)) {
+        for (int i = 0; i < (*f).childCount; i++)
+            Window_close((*(*f).children[i]).window);
+        return;
+    }
+    Surface_setFPSCap((*f).surface, Frame_getEffectiveFPSCap(f));
+    if ((*f).dirty) { Frame_render(f); (*f).dirty = false; }
+    Surface_poll((*f).surface);
+}
+
+bool Frame_attachApplication(Frame *f, Application *application) {
+    if (!f || !application || ((*f).application && (*f).application != application)) return false;
+    if ((*f).application == application) return true;
+    if (!Application_addWindow(application, (*f).window)) return false;
+    if (!Application_addPollEvent(application, frame_pollApplication, f)) {
+        Application_removeWindow(application, (*f).window); return false;
+    }
+    (*f).application = application;
+    Surface_setFPSCap((*f).surface, Frame_getEffectiveFPSCap(f));
+    if (Application_isRunning(application)) Frame_show(f);
+    return true;
+}
+Application *Frame_application(const Frame *f) { return f ? (*f).application : NULL; }
+void Frame_destroyApplicationFrames(Application *application) {
+    for (int i = 0; i < s_liveCount; ) {
+        if ((*s_live[i]).application == application) Frame_destroy(s_live[i]);
+        else i++;
+    }
+}
+
 static void frame_renderContent(Frame *frame) {
     if (!frame || !(*frame).window || (*frame).closed) return;
     (*frame).paintReady = false;
@@ -514,29 +583,27 @@ void Frame_invalidateElement(Element *root) {
 // ── the runner ──────────────────────────────────────────────────────────────
 void Frame_runAll(Frame *root) {
     if (!root) return;
-    Frame_show(root);
-    bool rootClosed = false;
-    while (!rootClosed && s_liveCount > 0) {
-        Window_pollEvents();   // hotcwap also dispatches input here
-        for (int i = 0; i < s_liveCount; ) {
-            Frame *f = s_live[i];
-            if (Window_shouldClose((*f).window)) {
-                if (f == root) { rootClosed = true; i++; continue; }  // caller owns root
-                Frame_close(f);   // a child: close it now (freed)
-                continue;
-            }
-            if ((*f).dirty) { Frame_render(f); (*f).dirty = false; }
-            i++;
+    // Compatibility starter; no second R4 keep-alive/render loop. Applications
+    // already running must return to their lifecycle instead of nesting runs.
+    if ((*root).application) return;
+    Application *app = Application("darling");
+    if (!app) return;
+    bool attached = true;
+    for (int i = 0; i < s_liveCount; i++)
+        if (!(*s_live[i]).application && !Frame_attachApplication(s_live[i], app)) {
+            attached = false; break;
         }
-        if (rootClosed) break;
-        Window_waitEvents(NULL, 0);
+    if (attached) Application_start(app);
+    // The caller retains Frames, just as it retains root. Detach the temporary
+    // Application before freeing its borrowed callback/window registries.
+    for (int i = 0; i < s_liveCount; i++) {
+        Frame *f = s_live[i];
+        if ((*f).application != app) continue;
+        Application_removePollEvent(app, frame_pollApplication, f);
+        Application_removeWindow(app, (*f).window);
+        (*f).application = NULL;
     }
-    // tear down everything root OWNS; the ROOT is the caller's to destroy
-    while ((*root).childCount > 0) Frame_close((*root).children[(*root).childCount - 1]);
-    for (int i = 0; i < s_liveCount; ) {
-        if (s_live[i] == root) { i++; continue; }
-        Frame_close(s_live[i]);
-    }
+    Application_free(app);
 }
 
 void Frame_run(Frame *frame) { Frame_runAll(frame); }
@@ -546,7 +613,8 @@ Frame *Frame_active(void) { return s_active; }
 
 Image *Frame_capture(Frame *frame) {
     if (!frame) return NULL;
-    Frame_render(frame);
+    if (!Frame_prepareRevalidate(frame)) return NULL;
+    Surface_revalidateNow((*frame).surface);
     if (!(*frame).gpu) return Surface_presentImage((*frame).surface);
     // GPU seam: read the FRONT IOSurface back into a CPU Image (on demand only)
     if ((*frame).lastW <= 0 || (*frame).lastH <= 0) return NULL;
