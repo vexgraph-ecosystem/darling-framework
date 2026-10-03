@@ -3,6 +3,11 @@
 This maps `repos/.ecosystem/darling.md` into the current remastered framework.
 Its older green/yellow percentages are historical intent, not proof that these new files work.
 
+Read [STATUS.md](STATUS.md) first for current implementation readiness. In
+particular, text/Label has no runtime implementation and ScrollPanel is only a
+partial viewport core, not a finished scrolling control. Compilation checks for
+the drafts below do not promote them to implemented components.
+
 Added 91 opaque class pairs and 35 procedural operation/bridge pairs.
 Every new pair is explicitly **draft / incomplete**: zero storage and zero callable API.
 Existing files are untouched. No IDs, event opt-ins, constructors returning fake success,
@@ -145,12 +150,12 @@ OS backends, independent schedulers or duplicate Color/Window implementations we
 | :--- | :--- | :--- |
 | Frame | `frame/frame` | Window/lifecycle/accessors; shared operations route through properties/. |
 | Panel | `panel/panel` | Live wrapper over graphvex Element with existing ownership and paint API. |
-| ScrollPanel | `panel/scroll_panel` | Live viewport over content, with clamped offsets and clipping. |
+| ScrollPanel | `panel/scroll_panel` | Partial live viewport: clamped offsets/clipping and explicit scroll handlers; default wheel behavior, ScrollBar and typed Panel/Frame attachment remain unfinished. |
 | Pointer events | `input/pointer` | Existing real-input bridge; no replacement dispatcher scaffold. |
 | Event dispatch | `c23/event_invoke` | Existing handler registration/bubbling and typed event carriers. |
 | c23/add | `properties/add` | Current canonical Frame/Panel attachment operations; no duplicate c23/add implementation. |
 | remove/revalidate/size/location/radius | `properties/` | Existing shared operation files, left untouched. |
-| Font bake / raster / Surface | `graphvex R3` | Driver-owned capabilities, not recreated as R4 implementations. |
+| Font bake / raster / Surface | `graphvex R3` | Ownership boundary, not a readiness claim: raster/Surface exist, but live font/text rendering is absent/placeholder. |
 | IO mmap / IO bake / native Clipboard | `vexspoke R2` | Leaf I/O/native clipboard capabilities, not duplicated. |
 | Native Window | `hotcwap R1` | Host-owned native window; Frame/bridge only borrow it. |
 | Color representation | `graphvex/graphics/graphics.h` | Reuse Color; color/color is a helper-policy placeholder, not another class. |

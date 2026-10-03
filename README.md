@@ -1,4 +1,21 @@
-# darling-editor, by Vex.
+# darling-framework
+
+The remastered C23 retained UI framework over graphvex (R3) and hotcwap (R1).
+The live substrate includes Frame, Panel, shared properties/events/cursors and
+a **partial ScrollPanel viewport core**. Most higher-level components are drafts.
+
+**Start with [STATUS.md](STATUS.md)** for the current implementation checklist,
+known text/scrolling gaps and next steps. [SCAFFOLDS.md](SCAFFOLDS.md) inventories
+draft intent; compiling those files does not mean their widgets work.
+
+Text/Label is **not implemented** in this generation. ScrollPanel has clamped
+offsets and clipping, but default wheel handling, scrollbar widgets and typed
+attachment ergonomics are unfinished. The user owns all visual approval.
+
+<details>
+<summary>Historical darling-editor vision — not current framework capabilities</summary>
+
+## darling-editor, by Vex.
 
 The Figma + Miro Inspired Spatial Canvas & Interface Builder.
 
@@ -19,3 +36,5 @@ The Figma + Miro Inspired Spatial Canvas & Interface Builder.
    - Comprehensive icon catalog (Lucide, Tabler, Material Icons, Feather).
    - Crisp, infinite-resolution vector rendering baked into Signed Distance Fields (SDFs) using GPU Jump Flooding Algorithms (`sdf_jfa`).
 5. **Real-Time Multiplayer Sync**: Pairs with `../sesh` for live multi-user cursors, collaborative note taking, and remote canvas sharing.
+
+</details>
