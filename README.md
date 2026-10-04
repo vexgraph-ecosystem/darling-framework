@@ -28,6 +28,13 @@ Text/Label is **not implemented** in this generation. ScrollPanel has clamped
 offsets and clipping, but default wheel handling, scrollbar widgets and typed
 attachment ergonomics are unfinished. The user owns all visual approval.
 
+## Build
+
+```sh
+./tools/b build          # inside the worktree: builds this repo with its graph
+b/b build c .            # standalone: the bundled build system, C adapter
+```
+
 <details>
 <summary>Historical darling-editor vision — not current framework capabilities</summary>
 
