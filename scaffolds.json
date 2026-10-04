@@ -501,13 +501,6 @@
       "scope": "KPI CardPanel composition with value, trend and borrowed Plot/sparkline content."
     },
     {
-      "path": "drawable/picture",
-      "name": "Picture",
-      "kind": "class",
-      "status": "draft",
-      "scope": "Image-display widget with borrowed Image backing, UV crop and contain/cover/stretch policy."
-    },
-    {
       "path": "drawable/object_3d",
       "name": "Object3D",
       "kind": "class",
@@ -897,6 +890,11 @@
     "Theme System": "Theme"
   },
   "existing": [
+    {
+      "name": "Picture",
+      "path": "drawable/picture",
+      "scope": "Borrowed RGBA8 CPU-shadow image, native initial size and stretch rendering; explicit wrapper lifetime; no crop/fit modes yet."
+    },
     {
       "name": "Frame",
       "path": "frame/frame",

@@ -2,36 +2,150 @@
 
 #include "annotation/definition.h"
 #include "annotation/overview.h"
-#include "annotation/draft.h"
-#include "annotation/incomplete.h"
+#include <math.h>
+#include <stdio.h>
+#include <stdlib.h>
+#include "exception/throw.h"
 
-;;DRAFT
-;;INCOMPLETE
 ;;DEFINITION
 /**
- * Picture — reserved R4 class home, not an implementation.
- *
- * Image-display widget with borrowed Image backing, UV crop and contain/cover/stretch policy.
- *
- * This draft currently owns no storage or borrowed resources and executes no
- * behavior. Before implementation, specify lifetime/ownership, failure results,
- * constructor arities and applicable property/event contracts. Rendering,
- * platform resources and scheduling stay with their existing R1/R3 owners.
- * Widget behavior belongs in its class; shared operations belong in properties/.
- * No blanket event opt-in, fabricated success result or duplicate driver is
- * introduced by this scaffold. The draft marker stays until real lab evidence
- * supports the implemented scope; appearance approval belongs to the user.
+ * Picture is a minimal borrowed-image widget owning one standalone Element.
+ * Native initial size, explicit stretching and ordinary Element paint are the
+ * implemented scope, not the legacy crop/fit API. Parent attachment borrows the
+ * wrapper's Element: teardown must destroy this wrapper before the parent's
+ * tree. Destroy detaches first so the parent cannot double-free the Element.
+ * Image ownership never transfers. Retained lists may outlive the wrapper but
+ * must not outlive the borrowed image. R3 still owns all rendering semantics.
  */
 
 ;;OVERVIEW
 /**
  * CLASS: Picture (drawable/picture.c)
- * STATUS: draft scaffold; zero implemented runtime capabilities.
- * TYPE: opaque declaration in the paired header; no struct fields defined.
- * PUBLIC API: the forward type declaration only; no callable functions declared or defined.
- * PRIVATE HELPERS: none defined.
- * IMPLEMENT NEXT: Image-display widget with borrowed Image backing, UV crop and contain/cover/stretch policy.
- * LAB PROOF NOW: source/header compilation only, never runtime readiness.
- * LAB PROOF LATER: constructors, ownership/teardown, failure/boundary cases,
- * property routing and captured-pixel/input oracles where applicable.
+ * Fields: Element *graphics (owned standalone node with borrowed image).
+ * Public: _0/_1 + chooser; destroy, graphics, image/setImage, setSize,
+ * setLocation, width/height/location, toString/toStringStruct.
+ * Private: format writes bounded cold strings. Setters validate finite geometry
+ * then forward to Element. No input/focus or automatic filter capability.
  */
+
+struct Picture {
+    Element *graphics;
+};
+
+Picture *Picture_1(const Image *image) {
+    if (image && (!Image_isValid(image) || Image_format(image) != IMAGE_FORMAT_RGBA8 ||
+                  !Image_pixels(image))) {
+        THROW("Picture requires a valid borrowed RGBA8 Image shadow");
+        return NULL;
+    }
+    Picture *picture = calloc(1, sizeof *picture);
+    if (!picture) {
+        THROW("Picture allocation failed");
+        return NULL;
+    }
+    ElementDesc desc = {.width = (float) Image_width(image),
+                        .height = (float) Image_height(image)};
+    Element *graphics = Element(&desc);
+    if (!graphics) {
+        free(picture);
+        THROW("Picture Element allocation failed");
+        return NULL;
+    }
+    (*picture).graphics = graphics;
+    Element_setImage(graphics, image);
+    return picture;
+}
+
+Picture *Picture_0(void) {
+    return Picture_1(NULL);
+}
+
+void Picture_destroy(Picture *picture) {
+    if (!picture)
+        return;
+    Element *graphics = (*picture).graphics;
+    Element_remove(graphics);
+    Element_destroy(graphics);
+    free(picture);
+}
+
+Element *Picture_graphics(const Picture *picture) {
+    return picture ? (*picture).graphics : NULL;
+}
+
+const Image *Picture_image(const Picture *picture) {
+    return Element_image(Picture_graphics(picture));
+}
+
+void Picture_setImage(Picture *picture, const Image *image) {
+    if (!picture)
+        return;
+    if (image && (!Image_isValid(image) || Image_format(image) != IMAGE_FORMAT_RGBA8 ||
+                  !Image_pixels(image))) {
+        THROW("Picture requires a valid borrowed RGBA8 Image shadow");
+        return;
+    }
+    Element_setImage((*picture).graphics, image);
+}
+
+void Picture_setSize(Picture *picture, float width, float height) {
+    if (!picture)
+        return;
+    if (!isfinite(width) || !isfinite(height) || width < 0 || height < 0) {
+        THROW("Picture size must be finite and nonnegative");
+        return;
+    }
+    Element_setSize((*picture).graphics, width, height);
+}
+
+void Picture_setLocation(Picture *picture, float x, float y) {
+    if (!picture)
+        return;
+    if (!isfinite(x) || !isfinite(y)) {
+        THROW("Picture location must be finite");
+        return;
+    }
+    Element_setOffset((*picture).graphics, x, y);
+}
+
+float Picture_width(const Picture *picture) {
+    return Element_width(Picture_graphics(picture));
+}
+float Picture_height(const Picture *picture) {
+    return Element_height(Picture_graphics(picture));
+}
+Point Picture_location(const Picture *picture) {
+    Rect rect = Element_eventBound(Picture_graphics(picture), (Rect){0});
+    return (Point){rect.x, rect.y};
+}
+
+static void format(const Picture *picture, bool structure, char *dest, size_t cap,
+                   bool *outTruncated) {
+    if (!dest && cap) {
+        if (outTruncated)
+            *outTruncated = true;
+        THROW("Picture string destination is NULL");
+        return;
+    }
+    int length;
+    if (!picture)
+        length = snprintf(dest, cap, "nullptr");
+    else if (structure)
+        length = snprintf(dest, cap, "Picture{graphics=Element(width=%g,height=%g)}",
+                          (double) Picture_width(picture), (double) Picture_height(picture));
+    else {
+        const Image *image = Picture_image(picture);
+        length = snprintf(dest, cap, "Picture(%gx%g,image=%ux%u)",
+                          (double) Picture_width(picture), (double) Picture_height(picture),
+                          Image_width(image), Image_height(image));
+    }
+    if (outTruncated)
+        *outTruncated = length < 0 || (size_t) length >= cap;
+}
+
+void Picture_toString(const Picture *picture, char *dest, size_t cap, bool *outTruncated) {
+    format(picture, false, dest, cap, outTruncated);
+}
+void Picture_toStringStruct(const Picture *picture, char *dest, size_t cap, bool *outTruncated) {
+    format(picture, true, dest, cap, outTruncated);
+}

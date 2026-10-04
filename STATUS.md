@@ -20,7 +20,8 @@ component is implemented. No visual approval is recorded here.
 | Events and pointer bridge | Typed handler registration/bubbling and native pointer forwarding code | `event_invoke_test`, `event_kinds_test`, `panel_events_test` pass synthetic/headless checks | Focus/navigation/document/control policies remain drafts; native input not exercised here |
 | Cursor selection | Per-node cursor preference/inheritance and masked hit selection | `set_cursor_test` passes headlessly | Native cursor appearance remains user-unverified |
 | Text / Label / typography | **Not implemented:** draft declarations only | Scaffold compilation is structure proof only | Fonts, string-to-glyph rendering, measurement, Label storage/API/paint, selection and editing |
-| Other widgets/layouts | **126 draft pairs:** 91 opaque class pairs + 35 procedural modules | `scaffolds.json` and `SCAFFOLDS.md` describe intent, not delivered features | Buttons, ScrollBar, Flex/Grid/List panels, inputs, themes, overlays, etc. |
+| Picture | Borrowed RGBA8 image through ordinary Element painting; native initial size, explicit stretch size and wrapper teardown | `picture_test`, `element_image_test`, and native `filter_gallery --smoke` pass; appearance remains user-owned | Crop/fit modes, automatic filter attachment, optimized texture upload |
+| Other widgets/layouts | **125 draft pairs:** 90 opaque class pairs + 35 procedural modules | `scaffolds.json` and `SCAFFOLDS.md` describe intent, not delivered features | Buttons, ScrollBar, Flex/Grid/List panels, inputs, themes, overlays, etc. |
 
 There are **16 non-draft `.c` source homes**, including header-only overload
 vocabulary and shared operation modules. This is not 16 finished widgets.

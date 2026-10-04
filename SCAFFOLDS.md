@@ -8,8 +8,9 @@ particular, text/Label has no runtime implementation and ScrollPanel is only a
 partial viewport core, not a finished scrolling control. Compilation checks for
 the drafts below do not promote them to implemented components.
 
-Added 91 opaque class pairs and 35 procedural operation/bridge pairs.
-Every new pair is explicitly **draft / incomplete**: zero storage and zero callable API.
+Originally added 91 opaque class pairs and 35 procedural operation/bridge pairs.
+Picture is now implemented: 90 class drafts plus 35 procedural drafts remain.
+Every remaining draft is explicitly **draft / incomplete**: zero storage and zero callable API.
 Existing files are untouched. No IDs, event opt-ins, constructors returning fake success,
 OS backends, independent schedulers or duplicate Color/Window implementations were added.
 
@@ -40,7 +41,6 @@ OS backends, independent schedulers or duplicate Color/Window implementations we
 | `InputDialog` | `src/dialog/input_dialog.c` / `.h` | Dialog composition for a text prompt, bounded input, submit/cancel results and focus return. |
 | `OptionDialog` | `src/dialog/option_dialog.c` / `.h` | Dialog composition for action choices and explicit result/cancellation ownership. |
 | `Object3D` | `src/drawable/object_3d.c` / `.h` | UI scene-node wrapper for borrowed mesh/material resources and transform hierarchy; GPU mesh ownership remains in graphvex. |
-| `Picture` | `src/drawable/picture.c` / `.h` | Image-display widget with borrowed Image backing, UV crop and contain/cover/stretch policy. |
 | `Viewer3D` | `src/drawable/viewer_3d.c` / `.h` | Scene3D viewer composition with orbit camera, lighting controls and Object3D content. |
 | `Emoji text support` | `src/emoji/emoji.c` / `.h` | Text fallback/emoji presentation policy for Label and rich-text content; shaping and native font capabilities remain borrowed. |
 | `Action events` | `src/event/action.c` / `.h` | Abstract UI command dispatch and activation policy using borrowed handler/context lifetimes. |
@@ -161,6 +161,12 @@ OS backends, independent schedulers or duplicate Color/Window implementations we
 | Color representation | `graphvex/graphics/graphics.h` | Reuse Color; color/color is a helper-policy placeholder, not another class. |
 
 ## Legacy names
+
+Picture now lives outside the draft inventory. It borrows RGBA8 CPU shadows,
+starts at native image size and stretches to its Element rectangle. Crop/fit
+modes are not implemented. See `tests/darling/drawable/picture_test.c` and the
+one-Frame `filter_gallery` application; scope filters are CPU-prepared, not
+automatic widget attachments. Destroy the Picture wrapper before its parent.
 
 Container-era names map to the modern Panel compositions; do not create two competing types.
 

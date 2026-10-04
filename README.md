@@ -4,6 +4,22 @@ The remastered C23 retained UI framework over graphvex (R3) and hotcwap (R1).
 The live substrate includes Frame, Panel, shared properties/events/cursors and
 a **partial ScrollPanel viewport core**. Most higher-level components are drafts.
 
+## Rendering ownership
+
+Darling provides widget interfaces, tree construction, layout policy, input/focus
+and the native-window/application bridge. **Graphvex owns graphical element
+composition**, isolation, filter execution and rendering bounds. Darling consumes
+that R3 compositor; it does not implement a competing rendering/filter engine.
+Scene widgets supply independently produced scene images to Graphvex composition.
+
+The event bound remains the resolved layout/hit geometry; the absolute bound
+describes expanded paint, including descendants/effects. A blur halo does not
+enlarge mouse targeting or move layout. See Graphvex's
+[ownership and bounds laws](../../drivers/graphvex/graphvex-preferences.md).
+The first compositor slice is a CPU image-group API; automatic widget-stack and
+GPU compositor integration are not yet implied. Existing Frame painting remains
+a migration bridge, not an alternate architectural owner.
+
 **Start with [STATUS.md](STATUS.md)** for the current implementation checklist,
 known text/scrolling gaps and next steps. [SCAFFOLDS.md](SCAFFOLDS.md) inventories
 draft intent; compiling those files does not mean their widgets work.
