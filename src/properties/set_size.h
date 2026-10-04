@@ -11,6 +11,10 @@
 //
 //   Panel_setSize(panel, width, height);
 //   Frame_setSize(frame, widthPx, heightPx); // resize targets, then revalidate
+// Changed positive Frame extents publish immediately, bypassing ordinary/focus
+// FPS pacing for this geometry update only. The prior cap is restored afterward.
+// Unchanged or invalid extents do not render or publish. Owner-thread operation;
+// no promise that a GPU failure or CA submission is already visible on-screen.
 
 typedef struct Panel Panel;
 typedef struct Frame Frame;

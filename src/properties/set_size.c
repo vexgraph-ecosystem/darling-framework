@@ -16,7 +16,11 @@
  * bound (Property), so an element that aliases a Property resizes together, and
  * the rippling layout is picked up by the next revalidation rather than here.
  * Frame sizing first updates its private render targets through the widget's
- * resize seam, then invokes the revalidation cascade. An unchanged or invalid
+ * resize seam, then immediately invokes the revalidation cascade without the
+ * ordinary content/focus FPS cap. Geometry publication cannot wait for a later
+ * Application poll while AppKit is inside its modal resize tracking loop. The
+ * current cap is restored afterward; ordinary content remains demand-paced.
+ * An unchanged or invalid
  * extent is a no-op: it neither rebuilds targets nor publishes another frame.
  * ============================================================================
  */
@@ -46,5 +50,11 @@ Panel *Panel_setSize_3(Panel *panel, float width, float height) {
 }
 
 void Frame_setSize_3(Frame *frame, int widthPx, int heightPx) {
-    if (Frame_resizeTargets(frame, widthPx, heightPx)) Frame_revalidate(frame);
+    if (!Frame_resizeTargets(frame, widthPx, heightPx))
+        return;
+    Surface *surface = Frame_surface(frame);
+    int fps = Surface_getFPSCap(surface);
+    Surface_setFPSCap(surface, -1);
+    Frame_revalidate(frame);
+    Surface_setFPSCap(surface, fps);
 }
