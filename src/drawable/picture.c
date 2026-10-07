@@ -10,6 +10,8 @@
 ;;DEFINITION
 /**
  * Picture is a minimal borrowed-image widget owning one standalone Element.
+ * A drawable Image may carry a CPU shadow or a completed GPU texture; Picture
+ * never demands a readback just to display a filter result.
  * Native initial size, explicit stretching and ordinary Element paint are the
  * implemented scope, not the legacy crop/fit API. Parent attachment borrows the
  * wrapper's Element: teardown must destroy this wrapper before the parent's
@@ -24,7 +26,8 @@
  * Fields: Element *graphics (owned standalone node with borrowed image).
  * Public: _0/_1 + chooser; destroy, graphics, image/setImage, setSize,
  * setLocation, width/height/location, toString/toStringStruct.
- * Private: format writes bounded cold strings. Setters validate finite geometry
+ * Private: format writes bounded cold strings. CPU/GPU drawable admission
+ * rejects metadata-only Images. Setters validate finite geometry
  * then forward to Element. No input/focus or automatic filter capability.
  */
 
@@ -34,8 +37,8 @@ struct Picture {
 
 Picture *Picture_1(const Image *image) {
     if (image && (!Image_isValid(image) || Image_format(image) != IMAGE_FORMAT_RGBA8 ||
-                  !Image_pixels(image))) {
-        THROW("Picture requires a valid borrowed RGBA8 Image shadow");
+                  !Image_isDrawable(image))) {
+        THROW("Picture requires a valid borrowed drawable RGBA8 Image");
         return NULL;
     }
     Picture *picture = calloc(1, sizeof *picture);
@@ -81,8 +84,8 @@ void Picture_setImage(Picture *picture, const Image *image) {
     if (!picture)
         return;
     if (image && (!Image_isValid(image) || Image_format(image) != IMAGE_FORMAT_RGBA8 ||
-                  !Image_pixels(image))) {
-        THROW("Picture requires a valid borrowed RGBA8 Image shadow");
+                  !Image_isDrawable(image))) {
+        THROW("Picture requires a valid borrowed drawable RGBA8 Image");
         return;
     }
     Element_setImage((*picture).graphics, image);
