@@ -1,5 +1,19 @@
 # darling-framework
 
+## CLion: CMake is IDE metadata only
+
+Open this repository root as a CMake project. `CMakeLists.txt` provides C23
+source targets, include paths and flags for navigation, diagnostics and inlay
+hints. Targets are excluded from the default build; no linking, dependency
+downloads or application runner are wired into it. Set `VEXSPOKE_SOURCE_DIR`
+and `GRAPHVEX_SOURCE_DIR` to local `src/` checkouts, and `HOTCWAP_SOURCE_DIR`
+to the Hotcwap root containing `window/`. Missing headers stay real IDE errors;
+no fake declarations are generated. IDE appearance is user-verified.
+
+Build with [b](https://github.com/vex-graph/b), not this adapter. From the
+Vexgraph workspace root: `./tools/b build darling`. IDE metadata is not widget
+readiness, appearance approval or proof of standalone runtime dependency closure.
+
 The remastered C23 retained UI framework over graphvex (R3) and hotcwap (R1).
 The live substrate includes Frame, Panel, shared properties/events/cursors and
 a **partial ScrollPanel viewport core**. Most higher-level components are drafts.
@@ -31,8 +45,7 @@ attachment ergonomics are unfinished. The user owns all visual approval.
 ## Build
 
 ```sh
-./tools/b build          # inside the worktree: builds this repo with its graph
-b/b build c .            # standalone: the bundled build system, C adapter
+./tools/b build darling # from the Vexgraph workspace root
 ```
 
 <details>
