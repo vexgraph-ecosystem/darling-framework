@@ -18,7 +18,18 @@ The remastered C23 retained UI framework over graphvex (R3) and hotcwap (R1).
 The live substrate includes Frame, Panel, shared properties/events/cursors and
 a **partial ScrollPanel viewport core**. Most higher-level components are drafts.
 
-## Rendering ownership
+## R2 computation and storage
+
+Vexspoke owns CPU computation, math, algorithms, synchronization and behavior.
+Relational Engine owns memory/storage, stable row chunks, variable bindings and
+native C search over Rust-owned spans. Migration is staged: existing Vexspoke
+memory/container ABI and its default allocator remain until explicit migration
+and owner proof. Darling's include allowlist stays Vexspoke + Graphvex + Hotcwap;
+this split does not grant a direct engine dependency. R1 owns lifetimes/residency;
+GPU shaders/dispatch remain Graphvex R3. No C/Rust atomic-layout compatibility,
+automatic schema migration or Rust-backed widget implementation is implied.
+
+## Rendering ownership and bounds
 
 Darling provides widget interfaces, tree construction, layout policy, input/focus
 and the native-window/application bridge. **Graphvex owns graphical element
@@ -29,7 +40,7 @@ Scene widgets supply independently produced scene images to Graphvex composition
 The event bound remains the resolved layout/hit geometry; the absolute bound
 describes expanded paint, including descendants/effects. A blur halo does not
 enlarge mouse targeting or move layout. See Graphvex's
-[ownership and bounds laws](../../drivers/graphvex/graphvex-preferences.md).
+[ownership and bounds laws](../graphvex/graphvex-preferences.md).
 The first compositor slice is a CPU image-group API; automatic widget-stack and
 GPU compositor integration are not yet implied. Existing Frame painting remains
 a migration bridge, not an alternate architectural owner.
