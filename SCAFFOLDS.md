@@ -1,6 +1,6 @@
 # Darling current-system scaffolds
 
-This maps `repos/.ecosystem/darling.md` into the current remastered framework.
+This maps `../../ecosystem/darling.md` into the current remastered framework.
 Its older green/yellow percentages are historical intent, not proof that these new files work.
 
 Read [STATUS.md](STATUS.md) first for current implementation readiness. In
