@@ -22,10 +22,10 @@ a **partial ScrollPanel viewport core**. Most higher-level components are drafts
 
 Vexspoke owns CPU computation, math, algorithms, synchronization and behavior.
 Relational Engine owns memory/storage, stable row chunks, variable bindings and
-native C search over Rust-owned spans. Migration is staged: existing Vexspoke
-memory/container ABI and its default allocator remain until explicit migration
-and owner proof. Darling's include allowlist stays Vexspoke + Graphvex + Hotcwap;
-this split does not grant a direct engine dependency. R1 owns lifetimes/residency;
+native C search over Rust-owned spans. Native IO/NIO is now supplied by RE in
+default builds, preserving the C ABI, not rewritten into Rust. Broader collection
+migration remains staged. Darling may borrow RE + Vexspoke + Graphvex + Hotcwap.
+R1 owns lifetimes/residency;
 GPU shaders/dispatch remain Graphvex R3. No C/Rust atomic-layout compatibility,
 automatic schema migration or Rust-backed widget implementation is implied.
 
