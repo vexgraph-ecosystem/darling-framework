@@ -14,6 +14,33 @@ Build with [b](https://github.com/vex-graph/b), not this adapter. From the
 Vexgraph workspace root: `./tools/b build darling`. IDE metadata is not widget
 readiness, appearance approval or proof of standalone runtime dependency closure.
 
+## Current State
+
+**Role:** R4 retained UI toolkit — widget interfaces, tree construction, layout
+policy, input/focus and the native-window/application bridge over the graphvex
+(R3) compositor and hotcwap (R1) windows.
+
+**Implemented and proven (macOS arm64, window tests opt-in):** `frame.c` (the
+retained UI host: window + panel/element tree, Surface/Board revalidation,
+double-buffered IOSurface GPU present with RGBA fallback, capture/PNG, Application
+lifecycle, FPS policy), `panel.c` ownership, `scroll_panel.c` (partial viewport:
+clamp/clip/revalidate/events), nine `properties/*` operations, `event_invoke.c`
+dispatch, `hit.c` resolver, `pointer.c` synthetic+OS input, and `picture.c`.
+Owner tests exist under `tests/darling/`; `BATTLE_TESTS.md` records a full run.
+
+**Draft / not implemented (source-verified):** of 142 `.c` files, **125 are
+37-line `;;DRAFT`/`;;INCOMPLETE` scaffolds with zero API** — all buttons, most
+inputs, every layout panel, overlays, dialogs, kit/game/scene/spatial widgets,
+theme, bridges, and **Text/Label/typography**. `event/focus.c` and
+`layout/container.c` are drafts (no focus traversal, no layout-policy module).
+The real CPU image-group compositor is graphvex's, not here.
+
+**Platforms proven:** macOS arm64 only; Linux/Windows native execution unproven.
+Visual approval is the user's.
+
+**Evidence:** `tests/darling/` (window-based, opt-in) and `tests/test-checklist.md`
+— most `src/**` rows are still ❌ untested; test files existing is not per-file proof.
+
 The remastered C23 retained UI framework over graphvex (R3) and hotcwap (R1).
 The live substrate includes Frame, Panel, shared properties/events/cursors and
 a **partial ScrollPanel viewport core**. Most higher-level components are drafts.
@@ -32,8 +59,10 @@ automatic schema migration or Rust-backed widget implementation is implied.
 ## Rendering ownership and bounds
 
 Darling provides widget interfaces, tree construction, layout policy, input/focus
-and the native-window/application bridge. **Graphvex owns graphical element
-composition**, isolation, filter execution and rendering bounds. Darling consumes
+and the native-window/application bridge. In this generation only the
+window/application bridge (`frame.c`), the panel tree and pointer input are
+implemented; layout policy (`layout/container.c`) and focus (`event/focus.c`)
+are drafts. **Graphvex owns graphical element composition**, isolation, filter execution and rendering bounds. Darling consumes
 that R3 compositor; it does not implement a competing rendering/filter engine.
 Scene widgets supply independently produced scene images to Graphvex composition.
 
@@ -58,6 +87,26 @@ attachment ergonomics are unfinished. The user owns all visual approval.
 ```sh
 ./tools/b build darling # from the Vexgraph workspace root
 ```
+
+## Scope and Limitations
+
+**Scope:** R4 widget interfaces, tree construction, layout policy, input/focus and
+the native-window/application bridge. Graphvex owns graphical element composition,
+filters and render bounds; Darling consumes that R3 compositor.
+
+**Deliberately not covered:**
+- No competing renderer/compositor: the real CPU image-group compositor is
+  graphvex's; Darling's `src/compositor/compositor.c` is a draft.
+- No text/label engine in this generation (Text/Label are drafts).
+- No R1/R5 or `api-haven` ownership.
+
+**Known limits and gaps:**
+- 125 of 142 `.c` files are drafts with zero API; only Frame/Panel/ScrollPanel,
+  the nine properties, event dispatch, hit, pointer and picture are implemented.
+- No focus traversal (`event/focus.c` draft) and no layout-policy module
+  (`layout/container.c` draft); ScrollPanel lacks default wheel handling, a
+  scrollbar and typed attachment ergonomics.
+- macOS arm64 only; all visual appearance is user-owned.
 
 <details>
 <summary>Historical darling-editor vision — not current framework capabilities</summary>
