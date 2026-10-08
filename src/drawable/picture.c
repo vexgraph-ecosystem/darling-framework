@@ -39,12 +39,12 @@ Picture *Picture_1(const Image *image) {
     if (image && (!Image_isValid(image) || Image_format(image) != IMAGE_FORMAT_RGBA8 ||
                   !Image_isDrawable(image))) {
         THROW("Picture requires a valid borrowed drawable RGBA8 Image");
-        return NULL;
+        return nullptr;
     }
     Picture *picture = calloc(1, sizeof *picture);
     if (!picture) {
         THROW("Picture allocation failed");
-        return NULL;
+        return nullptr;
     }
     ElementDesc desc = {.width = (float) Image_width(image),
                         .height = (float) Image_height(image)};
@@ -52,7 +52,7 @@ Picture *Picture_1(const Image *image) {
     if (!graphics) {
         free(picture);
         THROW("Picture Element allocation failed");
-        return NULL;
+        return nullptr;
     }
     (*picture).graphics = graphics;
     Element_setImage(graphics, image);
@@ -60,7 +60,7 @@ Picture *Picture_1(const Image *image) {
 }
 
 Picture *Picture_0(void) {
-    return Picture_1(NULL);
+    return Picture_1(nullptr);
 }
 
 void Picture_destroy(Picture *picture) {
@@ -73,7 +73,7 @@ void Picture_destroy(Picture *picture) {
 }
 
 Element *Picture_graphics(const Picture *picture) {
-    return picture ? (*picture).graphics : NULL;
+    return picture ? (*picture).graphics : nullptr;
 }
 
 const Image *Picture_image(const Picture *picture) {

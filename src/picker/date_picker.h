@@ -3,7 +3,7 @@
 
 // DRAFT ONLY: DatePicker. No runtime API or storage is implemented.
 // Date-selection widget with calendar model, month navigation and future popup/month-grid composition.
-// Source of intent: repos/.ecosystem/darling.md; see SCAFFOLDS.md for the live map.
+// Source of intent: personal/ecosystem/darling.md; see SCAFFOLDS.md for the live map.
 
 // Opaque future class; no constructors, events or accessors are promised yet.
 typedef struct DatePicker DatePicker;

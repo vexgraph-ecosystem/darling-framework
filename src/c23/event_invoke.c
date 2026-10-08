@@ -94,12 +94,12 @@ enum {
     GRP_DOCUMENT,
 };
 
-static Binding *s_bindings = NULL;
+static Binding *s_bindings = nullptr;
 static int s_count = 0;
 static int s_capacity = 0;
 
 static Element *bind(Element *element, int group, const void *handlers, size_t size) {
-    if (!element) return NULL;
+    if (!element) return nullptr;
     for (int i = 0; i < s_count; i++) {
         if (s_bindings[i].element == element && s_bindings[i].group == group) {
             memcpy(&s_bindings[i].h, handlers, size);
@@ -133,7 +133,7 @@ static const Binding *find(const Element *element, int group) {
             return &s_bindings[i];
         }
     }
-    return NULL;
+    return nullptr;
 }
 
 static int group_of(int kind) {
@@ -162,7 +162,7 @@ static bool invoke(const Binding *b, const Event *event) {
         case GRP_MOUSE: {
             const Mouse mouse = { ev.x, ev.y, ev.key };
             const MouseEvent *h = &binding.h.mouse;
-            void (*fn)(Element *, const Mouse *, void *) = NULL;
+            void (*fn)(Element *, const Mouse *, void *) = nullptr;
             switch (ev.kind) {
                 case EV_MOUSE_DOWN:  fn = (*h).onDown;  break;
                 case EV_MOUSE_UP:    fn = (*h).onUp;    break;
@@ -186,7 +186,7 @@ static bool invoke(const Binding *b, const Event *event) {
         case GRP_KEY: {
             const Key key = { ev.key };
             const KeyEvent *h = &binding.h.key;
-            void (*fn)(Element *, const Key *, void *) = NULL;
+            void (*fn)(Element *, const Key *, void *) = nullptr;
             if (ev.kind == EV_KEY_DOWN) fn = (*h).onDown;
             else if (ev.kind == EV_KEY_UP) fn = (*h).onUp;
             if (fn) { fn(element, &key, (*h).userdata); return true; }
@@ -194,16 +194,16 @@ static bool invoke(const Binding *b, const Event *event) {
         case GRP_TOUCH: {
             const Touch touch = { ev.x, ev.y, ev.key };
             const TouchEvent *h = &binding.h.touch;
-            void (*fn)(Element *, const Touch *, void *) = NULL;
+            void (*fn)(Element *, const Touch *, void *) = nullptr;
             if (ev.kind == EV_TOUCH_DOWN) fn = (*h).onDown;
             else if (ev.kind == EV_TOUCH_MOVE) fn = (*h).onMove;
             else if (ev.kind == EV_TOUCH_UP) fn = (*h).onUp;
             if (fn) { fn(element, &touch, (*h).userdata); return true; }
         } break;
         case GRP_DOCUMENT: {
-            const Document document = { NULL, 0u, 0u };
+            const Document document = { nullptr, 0u, 0u };
             const DocumentEvent *h = &binding.h.document;
-            void (*fn)(Element *, const Document *, void *) = NULL;
+            void (*fn)(Element *, const Document *, void *) = nullptr;
             if (ev.kind == EV_DOCUMENT_CHANGED) fn = (*h).onChanged;
             else if (ev.kind == EV_DOCUMENT_SELECTED) fn = (*h).onSelected;
             if (fn) { fn(element, &document, (*h).userdata); return true; }

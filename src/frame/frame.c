@@ -141,9 +141,9 @@ struct Frame {
 };
 
 // ── the live-frame set (the runner + ownership) ─────────────────────────────
-static Frame **s_live = NULL;
+static Frame **s_live = nullptr;
 static int s_liveCount = 0, s_liveCap = 0;
-static Frame *s_active = NULL;   // most recently created (CAPTURE)
+static Frame *s_active = nullptr;   // most recently created (CAPTURE)
 static void frame_pollApplication(Application *application, void *userdata);
 
 static void live_add(Frame *f) {
@@ -241,7 +241,7 @@ static void frame_gpu_close(Frame *f) {
         if ((*f).targets[i] >= 0) VulkanBackend_removeSurface((*f).targets[i]);
         (*f).targets[i] = -1;
         if ((*f).surfaces[i]) Window_destroyPresentSurface((*f).window, (*f).surfaces[i]);
-        (*f).surfaces[i] = NULL;
+        (*f).surfaces[i] = nullptr;
     }
     (*f).gpu = false;
 }
@@ -263,15 +263,15 @@ Frame *Frame_3(const char *title, int widthPx, int heightPx) {
     int wpx = widthPx > 0 ? widthPx : 800;
     int hpx = heightPx > 0 ? heightPx : 600;
     Frame *f = calloc(1, sizeof *f);
-    if (!f) return NULL;
+    if (!f) return nullptr;
     (*f).targets[0] = (*f).targets[1] = -1;
     (*f).fpsCap = 60; (*f).fpsFocusLost = 1;
     (*f).window = Window_create(title ? title : "darling", wpx, hpx);
-    if (!(*f).window) { free(f); return NULL; }
+    if (!(*f).window) { free(f); return nullptr; }
     // The present seam: its retained Image is the capture target, and its host
     // blit publishes to the window. The borrowed native is the content view.
     (*f).surface = Surface_2(Window_contentView((*f).window), (uint32_t)wpx, (uint32_t)hpx);
-    if (!(*f).surface) { Window_destroy((*f).window); free(f); return NULL; }
+    if (!(*f).surface) { Window_destroy((*f).window); free(f); return nullptr; }
     Surface_onPresent((*f).surface, frame_on_present, f);
     // Prefer the zero-copy GPU seam; it falls back silently when unavailable.
     if (!frame_gpu_open(f, wpx, hpx)) frame_gpu_close(f);
@@ -283,7 +283,7 @@ Frame *Frame_3(const char *title, int widthPx, int heightPx) {
     Element_setSize((*f).root, (float)Window_width((*f).window), (float)Window_height((*f).window));
     (*f).dl = DisplayList_0();
     (*f).contentBoard = Board_0();
-    if (!(*f).dl || !(*f).contentBoard) { Frame_destroy(f); return NULL; }
+    if (!(*f).dl || !(*f).contentBoard) { Frame_destroy(f); return nullptr; }
     Board_addRevalidator((*f).contentBoard, frame_on_revalidate, f);
     Surface_addBoard((*f).surface, (*f).contentBoard);
     Window_setResizeRenderHook((*f).window, frame_on_resize, f);
@@ -291,7 +291,7 @@ Frame *Frame_3(const char *title, int widthPx, int heightPx) {
     s_active = f;
     Pointer_track(f);
     Application *application = Application_current();
-    if (application && !Frame_attachApplication(f, application)) { Frame_destroy(f); return NULL; }
+    if (application && !Frame_attachApplication(f, application)) { Frame_destroy(f); return nullptr; }
     Surface_setFPSCap((*f).surface, Frame_getEffectiveFPSCap(f));
     return f;
 }
@@ -304,12 +304,12 @@ void Frame_destroy(Frame *frame) {
     if ((*frame).application) {
         Application_removePollEvent((*frame).application, frame_pollApplication, frame);
         Application_removeWindow((*frame).application, (*frame).window);
-        (*frame).application = NULL;
+        (*frame).application = nullptr;
     }
     while ((*frame).childCount > 0) Frame_close((*frame).children[(*frame).childCount - 1]);
     if ((*frame).owner) child_remove((*frame).owner, frame);
     live_remove(frame);
-    if (s_active == frame) s_active = NULL;
+    if (s_active == frame) s_active = nullptr;
     fire_close_hooks(frame);   // let input drop its registrations before we free
     Frame_removePanels(frame);
     free((*frame).panels);
@@ -331,9 +331,9 @@ void Frame_destroy(Frame *frame) {
 void Frame_close(Frame *f) { Frame_destroy(f); }
 
 // ── basics ──────────────────────────────────────────────────────────────────
-Window *Frame_window(const Frame *frame) { return frame ? (*frame).window : NULL; }
-Surface *Frame_surface(const Frame *frame) { return frame ? (*frame).surface : NULL; }
-Board *Frame_contentBoard(const Frame *frame) { return frame ? (*frame).contentBoard : NULL; }
+Window *Frame_window(const Frame *frame) { return frame ? (*frame).window : nullptr; }
+Surface *Frame_surface(const Frame *frame) { return frame ? (*frame).surface : nullptr; }
+Board *Frame_contentBoard(const Frame *frame) { return frame ? (*frame).contentBoard : nullptr; }
 void Frame_setTitle(Frame *frame, const char *title) {
     if (frame && (*frame).window) Window_setTitle((*frame).window, title);
 }
@@ -393,7 +393,7 @@ void Frame_hide(Frame *f) {
 }
 
 bool Frame_isClosed(const Frame *f) { return !f || (*f).closed || Window_shouldClose((*f).window); }
-Frame *Frame_owner(const Frame *f) { return f ? (*f).owner : NULL; }
+Frame *Frame_owner(const Frame *f) { return f ? (*f).owner : nullptr; }
 
 void Frame_setOwner(Frame *f, Frame *owner) {
     if (!f || f == owner) return;
@@ -405,7 +405,7 @@ void Frame_setOwner(Frame *f, Frame *owner) {
 // close this frame and every child (deepest-first), then free it
 
 // ── children (panels) ───────────────────────────────────────────────────────
-Element *Frame_element(const Frame *frame) { return frame ? (*frame).root : NULL; }
+Element *Frame_element(const Frame *frame) { return frame ? (*frame).root : nullptr; }
 
 // The ownership seam properties/add.c and properties/remove.c call. Frames own
 // their panels directly (there is no Frame-as-Panel), so this is the only place
@@ -438,7 +438,7 @@ void Frame_clearPanels(Frame *frame) {
 int Frame_count(const Frame *frame) { return frame ? (*frame).count : 0; }
 
 Panel *Frame_panel(const Frame *frame, int index) {
-    if (!frame || index < 0 || index >= (*frame).count) return NULL;
+    if (!frame || index < 0 || index >= (*frame).count) return nullptr;
     return (*frame).panels[index];
 }
 
@@ -533,7 +533,7 @@ bool Frame_attachApplication(Frame *f, Application *application) {
     if (Application_isRunning(application)) Frame_show(f);
     return true;
 }
-Application *Frame_application(const Frame *f) { return f ? (*f).application : NULL; }
+Application *Frame_application(const Frame *f) { return f ? (*f).application : nullptr; }
 void Frame_destroyApplicationFrames(Application *application) {
     for (int i = 0; i < s_liveCount; ) {
         if ((*s_live[i]).application == application) Frame_destroy(s_live[i]);
@@ -601,7 +601,7 @@ void Frame_runAll(Frame *root) {
         if ((*f).application != app) continue;
         Application_removePollEvent(app, frame_pollApplication, f);
         Application_removeWindow(app, (*f).window);
-        (*f).application = NULL;
+        (*f).application = nullptr;
     }
     Application_free(app);
 }
@@ -612,16 +612,16 @@ void Frame_run(Frame *frame) { Frame_runAll(frame); }
 Frame *Frame_active(void) { return s_active; }
 
 Image *Frame_capture(Frame *frame) {
-    if (!frame) return NULL;
-    if (!Frame_prepareRevalidate(frame)) return NULL;
+    if (!frame) return nullptr;
+    if (!Frame_prepareRevalidate(frame)) return nullptr;
     Surface_revalidateNow((*frame).surface);
     if (!(*frame).gpu) return Surface_presentImage((*frame).surface);
     // GPU seam: read the FRONT IOSurface back into a CPU Image (on demand only)
-    if ((*frame).lastW <= 0 || (*frame).lastH <= 0) return NULL;
+    if ((*frame).lastW <= 0 || (*frame).lastH <= 0) return nullptr;
     if (!(*frame).shot) (*frame).shot = Image_0();
-    if (!(*frame).shot) return NULL;
+    if (!(*frame).shot) return nullptr;
     if (!Image_ensureShadow((*frame).shot, (uint32_t)(*frame).lastW, (uint32_t)(*frame).lastH))
-        return NULL;
+        return nullptr;
     Window_readPresentSurface((*frame).window, (*frame).surfaces[(*frame).front],
                               Image_pixels((*frame).shot), Image_stride((*frame).shot));
     return (*frame).shot;

@@ -40,7 +40,7 @@
  */
 
 Panel *Panel_remove_1(Panel *child) {
-    if (!child) return NULL;
+    if (!child) return nullptr;
     Element *cg = Panel_graphics(child);
     if (cg) Element_remove(cg);
     Panel *parent = Panel_parent(child);

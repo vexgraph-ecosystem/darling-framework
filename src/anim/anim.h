@@ -3,7 +3,7 @@
 
 // DRAFT ONLY: Anim. No runtime API or storage is implemented.
 // Owner-driven property-animation player with easing/spring policies; no independent tick thread or duplicated scheduler.
-// Source of intent: repos/.ecosystem/darling.md; see SCAFFOLDS.md for the live map.
+// Source of intent: personal/ecosystem/darling.md; see SCAFFOLDS.md for the live map.
 
 // Opaque future class; no constructors, events or accessors are promised yet.
 typedef struct Anim Anim;

@@ -80,13 +80,13 @@ struct Panel {
     int ownedCount, ownedCap;
 };
 
-Panel *Panel_0(void) { return Panel_1(NULL); }
+Panel *Panel_0(void) { return Panel_1(nullptr); }
 
 Panel *Panel_1(const ElementDesc *desc) {
     Panel *p = calloc(1, sizeof *p);
-    if (!p) return NULL;
+    if (!p) return nullptr;
     (*p).graphics = Element(desc);
-    if (!(*p).graphics) { free(p); return NULL; }
+    if (!(*p).graphics) { free(p); return nullptr; }
     return p;
 }
 
@@ -115,7 +115,7 @@ void Panel_destroy(Panel *panel) {
 }
 
 Element *Panel_graphics(const Panel *panel) {
-    return panel ? (*panel).graphics : NULL;
+    return panel ? (*panel).graphics : nullptr;
 }
 
 // ── the ownership seam (called by properties/add.c, properties/remove.c) ────
@@ -139,7 +139,7 @@ bool Panel_disownChild(Panel *parent, Panel *child) {
         memmove(&(*parent).owned[i], &(*parent).owned[i + 1],
                 (size_t)((*parent).ownedCount - i - 1) * sizeof *(*parent).owned);
         (*parent).ownedCount--;
-        (*child).parent = NULL;
+        (*child).parent = nullptr;
         return true;
     }
     return false;
@@ -150,7 +150,7 @@ int Panel_childCount(const Panel *panel) {
 }
 
 Element *Panel_childElement(const Panel *panel, int index) {
-    return panel ? Element_child((*panel).graphics, index) : NULL;
+    return panel ? Element_child((*panel).graphics, index) : nullptr;
 }
 
 // ── geometry ────────────────────────────────────────────────────────────────
@@ -194,9 +194,9 @@ float Panel_height(const Panel *panel) { return panel ? Element_height((*panel).
 float Panel_radius(const Panel *panel) { return panel ? Element_radius((*panel).graphics) : 0.0f; }
 int Panel_anchor(const Panel *panel) { return panel ? Element_anchor((*panel).graphics) : 0; }
 int Panel_pivot(const Panel *panel) { return panel ? Element_pivot((*panel).graphics) : 0; }
-const char *Panel_tag(const Panel *panel) { return panel ? Element_tag((*panel).graphics) : NULL; }
+const char *Panel_tag(const Panel *panel) { return panel ? Element_tag((*panel).graphics) : nullptr; }
 bool Panel_isVisible(const Panel *panel) { return panel ? Element_isVisible((*panel).graphics) : false; }
-Panel *Panel_parent(const Panel *panel) { return panel ? (*panel).parent : NULL; }
+Panel *Panel_parent(const Panel *panel) { return panel ? (*panel).parent : nullptr; }
 
 // ── events ──────────────────────────────────────────────────────────────────
 // The `##` IS the class: these become Panel_addMouseEvent, Panel_addScrollEvent,

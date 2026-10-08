@@ -52,10 +52,10 @@ Panel *Panel_add_2(Panel *parent, Panel *child) {
 }
 
 Panel *Panel_add_3(Panel *parent, Panel *child, int index) {
-    if (!parent || !child) return NULL;
+    if (!parent || !child) return nullptr;
     Element *pg = Panel_graphics(parent);
     Element *cg = Panel_graphics(child);
-    if (!pg || !cg) return NULL;
+    if (!pg || !cg) return nullptr;
     if (index < 0) Element_add(pg, cg);
     else           Element_addAt(pg, cg, index);
     Panel_ownChild(parent, child);
@@ -68,14 +68,14 @@ Panel *Frame_add_2(Frame *frame, Panel *panel) {
 }
 
 Panel *Frame_add_3(Frame *frame, Panel *panel, int index) {
-    if (!frame || !panel) return NULL;
-    if (!Frame_ownPanel(frame, panel, index)) { Panel_destroy(panel); return NULL; }
+    if (!frame || !panel) return nullptr;
+    if (!Frame_ownPanel(frame, panel, index)) { Panel_destroy(panel); return nullptr; }
     return panel;
 }
 
 Panel *Frame_addPanel(Frame *frame, const ElementDesc *desc) {
-    if (!frame) return NULL;
+    if (!frame) return nullptr;
     Panel *panel = Panel_1(desc);
-    if (!panel) return NULL;
+    if (!panel) return nullptr;
     return Frame_add_2(frame, panel);
 }

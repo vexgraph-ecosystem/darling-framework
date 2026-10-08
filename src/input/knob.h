@@ -3,7 +3,7 @@
 
 // DRAFT ONLY: Knob. No runtime API or storage is implemented.
 // Rotary range-control Panel with angle math, detents, fine adjustment and value readout.
-// Source of intent: repos/.ecosystem/darling.md; see SCAFFOLDS.md for the live map.
+// Source of intent: personal/ecosystem/darling.md; see SCAFFOLDS.md for the live map.
 
 // Opaque future class; no constructors, events or accessors are promised yet.
 typedef struct Knob Knob;

@@ -74,9 +74,9 @@ ScrollPanel *ScrollPanel_1(float viewSize) { return ScrollPanel_2(viewSize, view
 
 ScrollPanel *ScrollPanel_2(float viewW, float viewH) {
     ScrollPanel *sp = calloc(1, sizeof *sp);
-    if (!sp) return NULL;
+    if (!sp) return nullptr;
     (*sp).viewport = Element();
-    if (!(*sp).viewport) { free(sp); return NULL; }
+    if (!(*sp).viewport) { free(sp); return nullptr; }
     Element_setSize((*sp).viewport, viewW, viewH);
     Element_setClip((*sp).viewport, true);
     (*sp).viewW = viewW;
@@ -90,8 +90,8 @@ void ScrollPanel_destroy(ScrollPanel *sp) {
     free(sp);
 }
 
-Element *ScrollPanel_graphics(const ScrollPanel *sp) { return sp ? (*sp).viewport : NULL; }
-Element *ScrollPanel_content(const ScrollPanel *sp) { return sp ? (*sp).content : NULL; }
+Element *ScrollPanel_graphics(const ScrollPanel *sp) { return sp ? (*sp).viewport : nullptr; }
+Element *ScrollPanel_content(const ScrollPanel *sp) { return sp ? (*sp).content : nullptr; }
 
 void ScrollPanel_setContent(ScrollPanel *sp, Element *content) {
     if (!sp) return;

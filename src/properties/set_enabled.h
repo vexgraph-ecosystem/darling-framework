@@ -3,6 +3,6 @@
 
 // DRAFT ONLY: set_enabled. No runtime API or storage is implemented.
 // Future control enabled-state operation with input and appearance policy.
-// Source of intent: repos/.ecosystem/darling.md; see SCAFFOLDS.md for the live map.
+// Source of intent: personal/ecosystem/darling.md; see SCAFFOLDS.md for the live map.
 
 #endif // DARLING_PROPERTIES_SET_ENABLED_H

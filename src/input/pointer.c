@@ -87,29 +87,29 @@ typedef struct {
     bool tracked;
 } Cursor;
 
-static Cursor **s_cursors = NULL;
+static Cursor **s_cursors = nullptr;
 static int s_curCount = 0, s_curCap = 0;
 
-static Binding *s_bindings = NULL;
+static Binding *s_bindings = nullptr;
 static int s_bindCount = 0, s_bindCap = 0;
 
 static Binding *find_binding(Element *graphics) {
     for (int i = 0; i < s_bindCount; i++)
         if (s_bindings[i].graphics == graphics) return &s_bindings[i];
-    return NULL;
+    return nullptr;
 }
 
 static Cursor *cursor_for(Element *root) {
     for (int i = 0; i < s_curCount; i++)
         if ((*s_cursors[i]).root == root) return s_cursors[i];
-    return NULL;
+    return nullptr;
 }
 
 static Cursor *cursor_open(Element *root) {
     Cursor *c = cursor_for(root);
     if (c) return c;
     c = calloc(1, sizeof *c);
-    if (!c) return NULL;
+    if (!c) return nullptr;
     (*c).root = root;
     if (s_curCount == s_curCap) {
         s_curCap = s_curCap ? s_curCap * 2 : 4;
@@ -123,7 +123,7 @@ static Cursor *cursor_open(Element *root) {
 static Binding *bound_at(Element *root, float x, float y) {
     Element *e = Element_hit(root, x, y);
     while (e && !find_binding(e)) e = Element_parent(e);
-    return e ? find_binding(e) : NULL;
+    return e ? find_binding(e) : nullptr;
 }
 
 static void sleep_seconds(double s) {
@@ -136,9 +136,9 @@ static void sleep_seconds(double s) {
 
 // ── actions ─────────────────────────────────────────────────────────────────
 Panel *Pointer_hover(Element *root, float x, float y) {
-    if (!root) return NULL;
+    if (!root) return nullptr;
     Binding *b = bound_at(Element_root(root), x, y);
-    return b ? (*b).panel : NULL;
+    return b ? (*b).panel : nullptr;
 }
 
 void Pointer_press(Element *root, float x, float y) {
@@ -147,7 +147,7 @@ void Pointer_press(Element *root, float x, float y) {
     Cursor *c = cursor_open(root);
     if (!c) return;
     Binding *b = bound_at(root, x, y);
-    (*c).pressed = b ? (*b).graphics : NULL;
+    (*c).pressed = b ? (*b).graphics : nullptr;
     if ((*c).pressed) Element_setPressed((*c).pressed, true);
     Frame_invalidateElement(root);
 }
@@ -160,7 +160,7 @@ void Pointer_release(Element *root, float x, float y) {
     Binding *b = bound_at(root, x, y);
     if (b && (*b).graphics == (*c).pressed && (*b).fn) (*b).fn((*b).panel, (*b).userdata);
     if ((*c).pressed) Element_setPressed((*c).pressed, false);
-    (*c).pressed = NULL;
+    (*c).pressed = nullptr;
     Frame_invalidateElement(root);
 }
 
@@ -284,7 +284,7 @@ static void cleanup_on_close(Frame *frame, void *userdata) {
     }
     for (int i = 0; i < s_bindCount; ) {
         Element *g = s_bindings[i].graphics;
-        Element *r = g ? Element_root(g) : NULL;
+        Element *r = g ? Element_root(g) : nullptr;
         if (r != root) { i++; continue; }
         memmove(&s_bindings[i], &s_bindings[i + 1],
                 (size_t)(s_bindCount - i - 1) * sizeof *s_bindings);
@@ -309,5 +309,5 @@ void Pointer_track(Frame *frame) {
     (*c).handler.onMouseZoom = track_zoom;
     (*c).handler.onMouseRepeat = track_none0;
     Window_addMouseAdapter(Frame_window(frame), &(*c).handler);
-    Frame_onClose(frame, cleanup_on_close, NULL);
+    Frame_onClose(frame, cleanup_on_close, nullptr);
 }
