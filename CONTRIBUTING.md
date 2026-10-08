@@ -6,15 +6,15 @@ one real, Git-ignored workspace-root `../../../preferences.md`. There is no loca
 Darling lawbook in this checkout; that is an explicit reading gap, not an exemption.
 
 R2 comprises Vexspoke CPU computation/behavior and Relational Engine
-memory/storage/native C search. Migration is staged; existing Vexspoke
-memory/container ABI and default allocator remain. Darling's include allowlist
-stays Vexspoke + Graphvex + Hotcwap. R1 owns lifetimes/residency; Graphvex R3 owns
-GPU shaders, dispatch and graphics composition. No direct engine dependency,
-C/Rust atomic-layout compatibility or automatic schema migration is implied.
+memory/storage/native C search. Production native IO/NIO now comes from RE by
+default, preserving C allocation semantics, not rewritten into Rust. Broader
+collection migration remains staged. Darling may borrow RE + Vexspoke + Graphvex
+and Hotcwap. R1 owns lifetimes/residency; Graphvex R3 owns GPU shaders, dispatch and
+composition. No C/Rust atomic-layout compatibility or schema migration is implied.
 
 ## Non-Negotiable Invariants
-1. **Rule 1 (No Arrow Sugar)**: Always write `(*ptr).field`. Never use `->`.
-2. **Rule 3 (One Class Per File)**: Each `.h`/`.c` pair contains exactly one class struct.
-3. **Rule 10 (Two-Layer Access Cap)**: Maximum 2 member hops per expression (`(*a).b`).
-4. **Rule 23 (Living Overview Blueprint)**: Implementation files begin with `;;OVERVIEW` detailing struct fields and function registry.
-5. **Rule 24 (Symmetric Getters/Setters)**: Complete mutator and accessor pairs for every stored struct field.
+- **Semantic Consistency Law (Reference form)**: Always write `(*ptr).field`, never arrow access.
+- **Single Class Per File Law (Java Law)**: Each `.h`/`.c` pair contains exactly one class.
+- **Semantic Consistency Law (Access depth)**: Maximum two member hops per expression.
+- **Living Documentation Law**: Keep implementation blueprints current.
+- **Single Class Per File Law (Java Law)**: Complete symmetric field accessors.
