@@ -43,6 +43,7 @@
  * ============================================================================
  */
 
+// Sums ancestor offsets for node i, stopping at an invalid link or bounded walk.
 static void node_origin(const HitNode *n, int count, int i, float *ox, float *oy) {
     float x = 0.0f, y = 0.0f;
     int cur = i, guard = 0;
@@ -55,6 +56,7 @@ static void node_origin(const HitNode *n, int count, int i, float *ox, float *oy
     *oy = y;
 }
 
+// Counts valid parent links above a node for hit-priority tie breaking.
 static int node_depth(const HitNode *n, int count, int i) {
     int d = 0, cur = n[i].parent, guard = 0;
     while (cur >= 0 && cur < count && guard++ <= count) {
@@ -64,6 +66,7 @@ static int node_depth(const HitNode *n, int count, int i) {
     return d;
 }
 
+// Checks visibility from the candidate through its valid ancestors.
 static bool node_visible_chain(const HitNode *n, int count, int i) {
     int cur = i, guard = 0;
     while (cur >= 0 && cur < count && guard++ <= count) {
@@ -88,6 +91,7 @@ static bool node_clip_chain(const HitNode *n, int count, int i, float px, float 
     return true;
 }
 
+// Resolves the topmost eligible node and returns its window, parent, and local coordinates.
 bool Hit_resolve(const HitNode *nodes, int count, float winX, float winY, Hit *out) {
     if (!nodes || count <= 0 || !out) return false;
     (*out).id = -1;
