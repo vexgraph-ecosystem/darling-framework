@@ -93,18 +93,21 @@ static int s_curCount = 0, s_curCap = 0;
 static Binding *s_bindings = nullptr;
 static int s_bindCount = 0, s_bindCap = 0;
 
+// Finds the click binding associated with an Element, if registered.
 static Binding *find_binding(Element *graphics) {
     for (int i = 0; i < s_bindCount; i++)
         if (s_bindings[i].graphics == graphics) return &s_bindings[i];
     return nullptr;
 }
 
+// Finds the cursor state record for an Element root.
 static Cursor *cursor_for(Element *root) {
     for (int i = 0; i < s_curCount; i++)
         if ((*s_cursors[i]).root == root) return s_cursors[i];
     return nullptr;
 }
 
+// Returns existing cursor state for root or allocates and registers a record.
 static Cursor *cursor_open(Element *root) {
     Cursor *c = cursor_for(root);
     if (c) return c;
@@ -126,6 +129,7 @@ static Binding *bound_at(Element *root, float x, float y) {
     return e ? find_binding(e) : nullptr;
 }
 
+// Pauses for a requested duration, resuming the remainder after an interrupt.
 static void sleep_seconds(double s) {
     if (s <= 0.0) return;
     struct timespec ts;
@@ -135,12 +139,14 @@ static void sleep_seconds(double s) {
 }
 
 // ── actions ─────────────────────────────────────────────────────────────────
+// Returns the nearest bound Panel beneath the supplied root-space point.
 Panel *Pointer_hover(Element *root, float x, float y) {
     if (!root) return nullptr;
     Binding *b = bound_at(Element_root(root), x, y);
     return b ? (*b).panel : nullptr;
 }
 
+// Marks the bound panel under the point pressed and invalidates its root.
 void Pointer_press(Element *root, float x, float y) {
     if (!root) return;
     root = Element_root(root);
@@ -152,6 +158,7 @@ void Pointer_press(Element *root, float x, float y) {
     Frame_invalidateElement(root);
 }
 
+// Clears pressed state and invokes the click callback when released on the same binding.
 void Pointer_release(Element *root, float x, float y) {
     if (!root) return;
     root = Element_root(root);
@@ -164,22 +171,26 @@ void Pointer_release(Element *root, float x, float y) {
     Frame_invalidateElement(root);
 }
 
+// Invalidates the root after pointer movement so hover state can be repainted.
 void Pointer_move(Element *root, float x, float y) {
     (void)x; (void)y;
     if (root) Frame_invalidateElement(Element_root(root));
 }
 
+// Synthesizes a press followed by a release at one point.
 void Pointer_click(Element *root, float x, float y) {
     Pointer_press(root, x, y);
     Pointer_release(root, x, y);
 }
 
+// Holds the pointer pressed for the requested duration, then releases it.
 void Pointer_hold(Element *root, float x, float y, double seconds) {
     Pointer_press(root, x, y);
     sleep_seconds(seconds);
     Pointer_release(root, x, y);
 }
 
+// Synthesizes a press, interpolated movement, and release along a drag path.
 void Pointer_drag(Element *root, float x, float y, float toX, float toY, double seconds) {
     if (!root) return;
     const int steps = 30;
@@ -193,6 +204,7 @@ void Pointer_drag(Element *root, float x, float y, float toX, float toY, double 
 }
 
 // ── handlers ────────────────────────────────────────────────────────────────
+// Registers or replaces the click callback associated with a Panel's Element.
 void Pointer_onClick(Panel *panel, PointerFn fn, void *userdata) {
     Element *graphics = Panel_graphics(panel);
     if (!panel || !graphics) return;
@@ -205,6 +217,7 @@ void Pointer_onClick(Panel *panel, PointerFn fn, void *userdata) {
     s_bindings[s_bindCount++] = (Binding){graphics, panel, fn, userdata};
 }
 
+// Adds a Panel to the frame and registers its click callback, returning the Panel.
 Panel *Pointer_addButton(Frame *frame, const ElementDesc *desc, PointerFn fn, void *userdata) {
     Panel *p = Frame_addPanel(frame, desc);
     if (p) Pointer_onClick(p, fn, userdata);
@@ -222,6 +235,7 @@ static void track_dispatch(Cursor *c, int kind, float x, float y,
     Element_dispatchEvent((*c).root, &event);
 }
 
+// Updates the native window cursor to match the element under the pointer.
 static void track_cursor(Cursor *c, float x, float y) {
     Window *window = Frame_window((*c).frame);
     if (!window) return;
@@ -229,6 +243,7 @@ static void track_cursor(Cursor *c, float x, float y) {
     if (Window_getCursorType(window) != type) Window_setCursorType(window, type);
 }
 
+// Bridges a native mouse-down into element events and the legacy press action.
 static void track_down(void *self, int mouseEvent, uint64_t nanos) {
     (void)nanos;
     Cursor *c = self;
@@ -236,6 +251,7 @@ static void track_down(void *self, int mouseEvent, uint64_t nanos) {
     track_dispatch(c, EV_MOUSE_DOWN, x, y, 0, 0, 1.0f, Mouse_button(mouseEvent));
     Pointer_press((*c).root, x, y);
 }
+// Bridges a native mouse-up into element events and the legacy release action.
 static void track_up(void *self, int mouseEvent, uint64_t nanos) {
     (void)nanos;
     Cursor *c = self;
@@ -243,34 +259,41 @@ static void track_up(void *self, int mouseEvent, uint64_t nanos) {
     track_dispatch(c, EV_MOUSE_UP, x, y, 0, 0, 1.0f, Mouse_button(mouseEvent));
     Pointer_release((*c).root, x, y);
 }
+// Bridges native pointer motion to event dispatch, repaint, and cursor tracking.
 static void track_move(void *self, double x, double y) {
     Cursor *c = self;
     track_dispatch(c, EV_MOUSE_MOVE, (float)x, (float)y, 0, 0, 1.0f, 0);
     Pointer_move((*c).root, (float)x, (float)y);
     track_cursor(c, (float)x, (float)y);
 }
+// Accepts repeat callbacks for the adapter interface; repeat events need no action.
 static void track_none0(void *self, int ev, uint64_t t) { (void)self; (void)ev; (void)t; }
+// Bridges native movement deltas to a mouse-move event at the current pointer.
 static void track_mod(void *self, double dx, double dy) {
     Cursor *c = self;
     track_dispatch(c, EV_MOUSE_MOVE, (float)Mouse_x(), (float)Mouse_y(),
                    (float)dx, (float)dy, 1.0f, 0);
 }
+// Bridges native drag motion to event dispatch and cursor tracking.
 static void track_dragf(void *self, int ev, double x, double y) {
     Cursor *c = self;
     track_dispatch(c, EV_MOUSE_DRAG, (float)x, (float)y, 0, 0, 1.0f, Mouse_button(ev));
     track_cursor(c, (float)x, (float)y);
 }
+// Bridges native scroll deltas to the element event dispatcher.
 static void track_scroll(void *self, double dx, double dy) {
     Cursor *c = self;
     track_dispatch(c, EV_SCROLL, (float)Mouse_x(), (float)Mouse_y(),
                    (float)dx, (float)dy, 1.0f, 0);
 }
+// Bridges native magnification gestures to the element event dispatcher.
 static void track_zoom(void *self, double magnification) {
     Cursor *c = self;
     track_dispatch(c, EV_ZOOM, (float)Mouse_x(), (float)Mouse_y(),
                    0, 0, (float)magnification, 0);
 }
 
+// Releases cursor and click-binding records belonging to a closing frame root.
 static void cleanup_on_close(Frame *frame, void *userdata) {
     (void)userdata;
     Element *root = Frame_element(frame);
@@ -292,6 +315,7 @@ static void cleanup_on_close(Frame *frame, void *userdata) {
     }
 }
 
+// Installs the native mouse adapter and close cleanup once for this frame.
 void Pointer_track(Frame *frame) {
     if (!frame) return;
     Element *root = Frame_element(frame);
