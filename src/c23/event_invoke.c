@@ -98,6 +98,7 @@ static Binding *s_bindings = nullptr;
 static int s_count = 0;
 static int s_capacity = 0;
 
+// Stores one typed handler record for an Element and event group.
 static Element *bind(Element *element, int group, const void *handlers, size_t size) {
     if (!element) return nullptr;
     for (int i = 0; i < s_count; i++) {
@@ -120,13 +121,20 @@ static Element *bind(Element *element, int group, const void *handlers, size_t s
     return element;
 }
 
+// Registers the mouse handlers for an Element.
 Element *Element_addMouseEvent(Element *element, MouseEvent handlers)       { return bind(element, GRP_MOUSE,    &handlers, sizeof handlers); }
+// Registers the scroll handler for an Element.
 Element *Element_addScrollEvent(Element *element, ScrollEvent handlers)     { return bind(element, GRP_SCROLL,   &handlers, sizeof handlers); }
+// Registers the zoom handler for an Element.
 Element *Element_addZoomEvent(Element *element, ZoomEvent handlers)         { return bind(element, GRP_ZOOM,     &handlers, sizeof handlers); }
+// Registers the keyboard handlers for an Element.
 Element *Element_addKeyEvent(Element *element, KeyEvent handlers)           { return bind(element, GRP_KEY,      &handlers, sizeof handlers); }
+// Registers the touch handlers for an Element.
 Element *Element_addTouchEvent(Element *element, TouchEvent handlers)       { return bind(element, GRP_TOUCH,    &handlers, sizeof handlers); }
+// Registers the document handlers for an Element.
 Element *Element_addDocumentEvent(Element *element, DocumentEvent handlers) { return bind(element, GRP_DOCUMENT, &handlers, sizeof handlers); }
 
+// Finds the handler record for one Element and group without mutating bindings.
 static const Binding *find(const Element *element, int group) {
     for (int i = 0; i < s_count; i++) {
         if (s_bindings[i].element == element && s_bindings[i].group == group) {
@@ -136,6 +144,7 @@ static const Binding *find(const Element *element, int group) {
     return nullptr;
 }
 
+// Maps each event kind to its handler-binding group, or -1 when unsupported.
 static int group_of(int kind) {
     switch (kind) {
         case EV_MOUSE_DOWN: case EV_MOUSE_UP: case EV_MOUSE_MOVE:
@@ -212,6 +221,7 @@ static bool invoke(const Binding *b, const Event *event) {
     return false;
 }
 
+// Dispatches to the hit target (pointer events) or root and bubbles handlers to ancestors.
 bool Element_dispatchEvent(Element *root, const Event *event) {
     if (!root || !event) return false;
     const Event ev = *event;
@@ -232,6 +242,7 @@ bool Element_dispatchEvent(Element *root, const Event *event) {
     return ran;
 }
 
+// Reports whether element is root or one of its descendants.
 static bool under(Element *element, Element *root) {
     for (; element; element = Element_parent(element)) {
         if (element == root) return true;
@@ -239,6 +250,7 @@ static bool under(Element *element, Element *root) {
     return false;
 }
 
+// Removes registered handlers attached anywhere in the given element subtree.
 void Element_clearEvents(Element *root) {
     if (!root) return;
     for (int i = 0; i < s_count;) {
@@ -250,6 +262,7 @@ void Element_clearEvents(Element *root) {
     }
 }
 
+// Returns the number of currently registered event bindings.
 int Element_eventBindingCount(void) {
     return s_count;
 }
