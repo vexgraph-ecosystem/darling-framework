@@ -47,10 +47,12 @@
  * ============================================================================
  */
 
+// Appends child to parent and transfers wrapper ownership to the parent.
 Panel *Panel_add_2(Panel *parent, Panel *child) {
     return Panel_add_3(parent, child, -1);
 }
 
+// Inserts child at index, or appends for a negative index; returns the child on success.
 Panel *Panel_add_3(Panel *parent, Panel *child, int index) {
     if (!parent || !child) return nullptr;
     Element *pg = Panel_graphics(parent);
@@ -63,16 +65,19 @@ Panel *Panel_add_3(Panel *parent, Panel *child, int index) {
 }
 
 // A Frame owns its panels directly (the frame's content Element is the root).
+// Appends a Panel to the frame and transfers ownership on success.
 Panel *Frame_add_2(Frame *frame, Panel *panel) {
     return Frame_add_3(frame, panel, -1);
 }
 
+// Inserts a Panel into the frame; destroys it if frame ownership cannot be recorded.
 Panel *Frame_add_3(Frame *frame, Panel *panel, int index) {
     if (!frame || !panel) return nullptr;
     if (!Frame_ownPanel(frame, panel, index)) { Panel_destroy(panel); return nullptr; }
     return panel;
 }
 
+// Constructs a Panel from desc and appends it to the frame.
 Panel *Frame_addPanel(Frame *frame, const ElementDesc *desc) {
     if (!frame) return nullptr;
     Panel *panel = Panel_1(desc);

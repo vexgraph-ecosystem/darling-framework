@@ -146,6 +146,7 @@ static int s_liveCount = 0, s_liveCap = 0;
 static Frame *s_active = nullptr;   // most recently created (CAPTURE)
 static void frame_pollApplication(Application *application, void *userdata);
 
+// Adds a live Frame to the process-local runner registry.
 static void live_add(Frame *f) {
     if (s_liveCount == s_liveCap) {
         s_liveCap = s_liveCap ? s_liveCap * 2 : 4;
@@ -154,6 +155,7 @@ static void live_add(Frame *f) {
     s_live[s_liveCount++] = f;
 }
 
+// Removes a Frame from the live runner registry if present.
 static void live_remove(Frame *f) {
     for (int i = 0; i < s_liveCount; i++) {
         if (s_live[i] != f) continue;
@@ -163,6 +165,7 @@ static void live_remove(Frame *f) {
     }
 }
 
+// Records a child Frame in its owner's close-order list.
 static void child_add(Frame *owner, Frame *child) {
     if ((*owner).childCount == (*owner).childCap) {
         (*owner).childCap = (*owner).childCap ? (*owner).childCap * 2 : 4;
@@ -171,6 +174,7 @@ static void child_add(Frame *owner, Frame *child) {
     (*owner).children[(*owner).childCount++] = child;
 }
 
+// Removes a child Frame from its owner's close-order list.
 static void child_remove(Frame *owner, Frame *child) {
     for (int i = 0; i < (*owner).childCount; i++) {
         if ((*owner).children[i] != child) continue;
@@ -181,6 +185,7 @@ static void child_remove(Frame *owner, Frame *child) {
     }
 }
 
+// Runs registered close callbacks once, then clears the callback count.
 static void fire_close_hooks(Frame *f) {
     for (int i = 0; i < (*f).closeCount; i++) (*f).closeFns[i](f, (*f).closeUd[i]);
     (*f).closeCount = 0;
@@ -196,6 +201,7 @@ static void frame_on_resize(void *userdata) {
 // window as an RGBA buffer. Used off-Apple or when the GPU seam is unavailable.
 static void frame_renderContent(Frame *frame);
 
+// Revalidates the frame's element tree and renders after its Board changes.
 static void frame_on_revalidate(Board *board, void *userdata) {
     (void) board;
     Frame *frame = userdata;
@@ -203,6 +209,7 @@ static void frame_on_revalidate(Board *board, void *userdata) {
     frame_renderContent(frame);
 }
 
+// Publishes the completed GPU surface or captured RGBA image to the host window.
 static bool frame_on_present(Surface *surface, void *userdata) {
     Frame *f = userdata;
     if (!f || !(*f).window || !(*f).paintReady) return false;
@@ -253,9 +260,12 @@ static void frame_gpu_reopen(Frame *f, int wpx, int hpx) {
         frame_gpu_close(f);   // leave gpu false; the RGBA fallback carries on
 }
 
+// Creates a default titled frame at the default pixel dimensions.
 Frame *Frame_0(void) { return Frame_3("darling", 800, 600); }
+// Creates a frame with the supplied title and default pixel dimensions.
 Frame *Frame_1(const char *title) { return Frame_3(title, 800, 600); }
 
+// Creates a window-backed Frame, preferring the GPU surface seam with RGBA fallback.
 Frame *Frame_3(const char *title, int widthPx, int heightPx) {
     Graphics_register(VulkanBackend_row());
     Graphics_use(BACKEND_VULKAN);
@@ -331,22 +341,31 @@ void Frame_destroy(Frame *frame) {
 void Frame_close(Frame *f) { Frame_destroy(f); }
 
 // ── basics ──────────────────────────────────────────────────────────────────
+// Returns the borrowed host Window, or nullptr for a null Frame.
 Window *Frame_window(const Frame *frame) { return frame ? (*frame).window : nullptr; }
+// Returns the owned presentation Surface, or nullptr for a null Frame.
 Surface *Frame_surface(const Frame *frame) { return frame ? (*frame).surface : nullptr; }
+// Returns the frame's content Board, or nullptr for a null Frame.
 Board *Frame_contentBoard(const Frame *frame) { return frame ? (*frame).contentBoard : nullptr; }
+// Forwards the title to the frame's host window when both arguments are usable.
 void Frame_setTitle(Frame *frame, const char *title) {
     if (frame && (*frame).window) Window_setTitle((*frame).window, title);
 }
+// Sets the color used to clear the frame before painting its element tree.
 void  Frame_setBackground(Frame *frame, Color color) {
     if (!frame) return;
     (*frame).background = color;
     // Paint alpha must not change the explicit OS window transparency policy.
 }
+// Compatibility spelling for Frame_setBackground.
 void  Frame_setBackgroundColor(Frame *frame, Color color) { Frame_setBackground(frame, color); }
+// Returns the paint background, or clear for a null frame.
 Color Frame_background(const Frame *frame) { return frame ? (*frame).background : COLOR_CLEAR; }
+// Sets whether the host window background is transparent.
 void  Frame_setTransparent(Frame *frame, bool transparent) {   // true = see-through
     if (frame && (*frame).window) Window_setTransparentBackground((*frame).window, transparent);
 }
+// Sets the host window's backdrop blur radius.
 void  Frame_setBlur(Frame *frame, float radius) {   // frost the WINDOW backdrop
     if (frame && (*frame).window) Window_setBackdropBlur((*frame).window, radius);
 }
@@ -355,14 +374,17 @@ void  Frame_setBlur(Frame *frame, float radius) {   // frost the WINDOW backdrop
 // The Frame forwards to the borrowed R1 window; the AppKit chrome lives there.
 bool Frame_macOS_hasLiquidGlass(void) { return Window_macOS_hasLiquidGlass(); }
 
+// Applies the macOS Liquid Glass descriptor through the borrowed host window.
 void Frame_macOS_setLiquidGlass(Frame *frame, const FrameLiquidGlassDesc *desc) {
     if (frame && (*frame).window) Window_macOS_setLiquidGlass((*frame).window, desc);
 }
 
+// Reads the host window's Liquid Glass descriptor when supported.
 bool Frame_macOS_getLiquidGlass(const Frame *frame, FrameLiquidGlassDesc *out) {
     return (frame && (*frame).window) ? Window_macOS_getLiquidGlass((*frame).window, out) : false;
 }
 
+// Registers a callback to run during Frame teardown.
 void Frame_onClose(Frame *frame, FrameCloseFn fn, void *userdata) {
     if (!frame || !fn) return;
     if ((*frame).closeCount == (*frame).closeCap) {
@@ -380,6 +402,7 @@ void Frame_onClose(Frame *frame, FrameCloseFn fn, void *userdata) {
 }
 
 // ── windows ─────────────────────────────────────────────────────────────────
+// Shows the host window and renders its current contents once.
 void Frame_show(Frame *f) {
     if (!f || (*f).closed) return;
     Window_show((*f).window);
@@ -388,13 +411,17 @@ void Frame_show(Frame *f) {
     (*f).dirty = false;
 }
 
+// Hides the host window without destroying the Frame.
 void Frame_hide(Frame *f) {
     if (f && (*f).window) Window_hide((*f).window);
 }
 
+// Reports whether the frame is absent, destroyed, or its window requested close.
 bool Frame_isClosed(const Frame *f) { return !f || (*f).closed || Window_shouldClose((*f).window); }
+// Returns the owning Frame, if one was assigned.
 Frame *Frame_owner(const Frame *f) { return f ? (*f).owner : nullptr; }
 
+// Reassigns the frame's owner and updates the owner's child registry.
 void Frame_setOwner(Frame *f, Frame *owner) {
     if (!f || f == owner) return;
     if ((*f).owner) child_remove((*f).owner, f);
@@ -425,6 +452,7 @@ bool Frame_ownPanel(Frame *frame, Panel *panel, int index) {
     return true;
 }
 
+// Detaches and destroys all panels currently owned by the frame.
 void Frame_clearPanels(Frame *frame) {
     if (!frame) return;
     for (int i = 0; i < (*frame).count; i++) {
@@ -435,13 +463,16 @@ void Frame_clearPanels(Frame *frame) {
     (*frame).count = 0;
 }
 
+// Returns the number of panels owned by the frame.
 int Frame_count(const Frame *frame) { return frame ? (*frame).count : 0; }
 
+// Returns the panel at index, or nullptr when the frame/index is invalid.
 Panel *Frame_panel(const Frame *frame, int index) {
     if (!frame || index < 0 || index >= (*frame).count) return nullptr;
     return (*frame).panels[index];
 }
 
+// Returns the frame's native-pixel layout bounds, using current window size before first render.
 Rect Frame_root(const Frame *frame) {
     if (!frame) return (Rect){0, 0, 0, 0};
     // the layout root IS the window (native px); before the first render, fall
@@ -454,6 +485,7 @@ Rect Frame_root(const Frame *frame) {
     return (Rect){0, 0, (float)w, (float)h};
 }
 
+// Appends the root element tree's paint commands to the supplied display list.
 void Frame_paint(const Frame *frame, DisplayList *dl) {
     if (!frame || !dl || !(*frame).root) return;
     Element_paint((*frame).root, Frame_root(frame), dl);
@@ -490,24 +522,32 @@ bool Frame_prepareRevalidate(Frame *frame) {
 // Compatibility entry: the cascade itself lives in properties/revalidate.c.
 void Frame_render(Frame *frame) { Frame_revalidate(frame); }
 
+// Returns the configured fallback FPS cap.
 int Frame_getFPSCap(const Frame *f) { return f ? (*f).fpsCap : 0; }
+// Returns the optional FPS cap used while the window is focused.
 int Frame_getFPSCapWhenFocusGain(const Frame *f) { return f ? (*f).fpsFocusGain : 0; }
+// Returns the optional FPS cap used while the window is unfocused.
 int Frame_getFPSCapWhenFocusLost(const Frame *f) { return f ? (*f).fpsFocusLost : 0; }
+// Selects the focus-specific cap when set, otherwise the configured fallback.
 int Frame_getEffectiveFPSCap(const Frame *f) {
     if (!f) return 0;
     int override = Window_isFocused((*f).window) ? (*f).fpsFocusGain : (*f).fpsFocusLost;
     return override ? override : (*f).fpsCap;
 }
+// Sets the fallback cap for positive rates, or -1 for uncapped operation.
 void Frame_setFPSCap(Frame *f, int fps) {
     if (f && (fps == -1 || fps > 0)) { (*f).fpsCap = fps; Surface_setFPSCap((*f).surface, Frame_getEffectiveFPSCap(f)); }
 }
+// Sets the focused cap override; zero uses the fallback cap.
 void Frame_setFPSCapWhenFocusGain(Frame *f, int fps) {
     if (f && fps >= -1) { (*f).fpsFocusGain = fps; Surface_setFPSCap((*f).surface, Frame_getEffectiveFPSCap(f)); }
 }
+// Sets the unfocused cap override; zero uses the fallback cap.
 void Frame_setFPSCapWhenFocusLost(Frame *f, int fps) {
     if (f && fps >= -1) { (*f).fpsFocusLost = fps; Surface_setFPSCap((*f).surface, Frame_getEffectiveFPSCap(f)); }
 }
 
+// Polls one attached frame, rendering dirty content and servicing its Surface.
 static void frame_pollApplication(Application *application, void *userdata) {
     (void)application;
     Frame *f = userdata;
@@ -521,6 +561,7 @@ static void frame_pollApplication(Application *application, void *userdata) {
     Surface_poll((*f).surface);
 }
 
+// Registers this frame's window and poll callback with an Application.
 bool Frame_attachApplication(Frame *f, Application *application) {
     if (!f || !application || ((*f).application && (*f).application != application)) return false;
     if ((*f).application == application) return true;
@@ -533,7 +574,9 @@ bool Frame_attachApplication(Frame *f, Application *application) {
     if (Application_isRunning(application)) Frame_show(f);
     return true;
 }
+// Returns the borrowed Application attached to this Frame, if any.
 Application *Frame_application(const Frame *f) { return f ? (*f).application : nullptr; }
+// Destroys every live frame attached to the specified Application.
 void Frame_destroyApplicationFrames(Application *application) {
     for (int i = 0; i < s_liveCount; ) {
         if ((*s_live[i]).application == application) Frame_destroy(s_live[i]);
@@ -541,6 +584,7 @@ void Frame_destroyApplicationFrames(Application *application) {
     }
 }
 
+// Paints and submits the frame into its GPU seam or retained RGBA fallback.
 static void frame_renderContent(Frame *frame) {
     if (!frame || !(*frame).window || (*frame).closed) return;
     (*frame).paintReady = false;
@@ -571,6 +615,7 @@ static void frame_renderContent(Frame *frame) {
     (*frame).paintReady = Graphics_capture(Surface_presentImage((*frame).surface));
 }
 
+// Marks frame content dirty for the next Application poll.
 void Frame_invalidate(Frame *frame) { if (frame) (*frame).dirty = true; }
 
 // the input layer works in ELEMENTS; this is how it reaches the owning Frame
@@ -606,11 +651,14 @@ void Frame_runAll(Frame *root) {
     Application_free(app);
 }
 
+// Compatibility entry that runs the application lifecycle for live frames.
 void Frame_run(Frame *frame) { Frame_runAll(frame); }
 
 // ── screenshots ─────────────────────────────────────────────────────────────
+// Returns the most recently created live Frame, if one is active.
 Frame *Frame_active(void) { return s_active; }
 
+// Captures the current frame into its retained Image; GPU readback is on demand.
 Image *Frame_capture(Frame *frame) {
     if (!frame) return nullptr;
     if (!Frame_prepareRevalidate(frame)) return nullptr;
@@ -627,6 +675,7 @@ Image *Frame_capture(Frame *frame) {
     return (*frame).shot;
 }
 
+// Captures the current frame and writes its pixels as a PNG at path.
 bool Frame_savePNG(Frame *frame, const char *path) {
     Image *img = Frame_capture(frame);
     if (!img || !path) return false;

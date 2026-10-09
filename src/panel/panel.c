@@ -80,8 +80,10 @@ struct Panel {
     int ownedCount, ownedCap;
 };
 
+// Creates a Panel with a default Element descriptor.
 Panel *Panel_0(void) { return Panel_1(nullptr); }
 
+// Creates a Panel from a borrowed Element descriptor.
 Panel *Panel_1(const ElementDesc *desc) {
     Panel *p = calloc(1, sizeof *p);
     if (!p) return nullptr;
@@ -90,6 +92,7 @@ Panel *Panel_1(const ElementDesc *desc) {
     return p;
 }
 
+// Creates a Panel with the requested Element dimensions.
 Panel *Panel_2(float width, float height) {
     ElementDesc d = {0};
     d.width = width;
@@ -105,6 +108,7 @@ static void panel_freeWrapper(Panel *panel) {
     free(panel);
 }
 
+// Destroys this wrapper subtree and its owned Element tree.
 void Panel_destroy(Panel *panel) {
     if (!panel) return;
     if ((*panel).parent) Panel_disownChild((*panel).parent, panel);   // never leave a dangling slot
@@ -114,6 +118,7 @@ void Panel_destroy(Panel *panel) {
     free(panel);
 }
 
+// Returns the wrapped Element, or nullptr for a null Panel.
 Element *Panel_graphics(const Panel *panel) {
     return panel ? (*panel).graphics : nullptr;
 }
@@ -132,6 +137,7 @@ void Panel_ownChild(Panel *parent, Panel *child) {
     (*child).parent = parent;
 }
 
+// Detaches child from parent without destroying either wrapper.
 bool Panel_disownChild(Panel *parent, Panel *child) {
     if (!parent || !child) return false;
     for (int i = 0; i < (*parent).ownedCount; i++) {
@@ -145,57 +151,77 @@ bool Panel_disownChild(Panel *parent, Panel *child) {
     return false;
 }
 
+// Returns the attached Element child count, or zero for a null wrapper.
 int Panel_childCount(const Panel *panel) {
     return panel ? Element_count((*panel).graphics) : 0;
 }
 
+// Returns the indexed child Element, or nullptr when the wrapper/index is invalid.
 Element *Panel_childElement(const Panel *panel, int index) {
     return panel ? Element_child((*panel).graphics, index) : nullptr;
 }
 
 // ── geometry ────────────────────────────────────────────────────────────────
 // Panel_setSize is in properties/set_size.c (grouped by property).
+// Sets the Element's x/y offset.
 void Panel_setOffset(Panel *panel, float x, float y) {
     if (panel) Element_setOffset((*panel).graphics, x, y);
 }
+// Sets the Element's anchor mode.
 void Panel_setAnchor(Panel *panel, int anchor) {
     if (panel) Element_setAnchor((*panel).graphics, anchor);
 }
+// Sets the Element's pivot mode.
 void Panel_setPivot(Panel *panel, int pivot) {
     if (panel) Element_setPivot((*panel).graphics, pivot);
 }
+// Assigns the Element's tag.
 void Panel_setTag(Panel *panel, const char *tag) {
     if (panel) Element_setTag((*panel).graphics, tag);
 }
 
 // ── visual ──────────────────────────────────────────────────────────────────
+// Sets the Element's corner radius.
 void Panel_setRadius(Panel *panel, float radius) {
     if (panel) Element_setRadius((*panel).graphics, radius);
 }
+// Sets the Element's background color.
 void Panel_setBackground(Panel *panel, Color color) {
     if (panel) Element_setBackground((*panel).graphics, color);
 }
+// Sets the Element's border color and width.
 void Panel_setBorder(Panel *panel, Color color, float width) {
     if (panel) Element_setBorder((*panel).graphics, color, width);
 }
+// Sets the Element's shadow offset and blur.
 void Panel_setShadow(Panel *panel, float offsetX, float offsetY, float blur) {
     if (panel) Element_setShadow((*panel).graphics, offsetX, offsetY, blur);
 }
+// Sets the Element's shadow color.
 void Panel_setShadowColor(Panel *panel, Color color) {
     if (panel) Element_setShadowColor((*panel).graphics, color);
 }
+// Sets whether the Element is visible.
 void Panel_setVisible(Panel *panel, bool visible) {
     if (panel) Element_setVisible((*panel).graphics, visible);
 }
 
 // ── queries ─────────────────────────────────────────────────────────────────
+// Returns the Element width, or zero for a null wrapper.
 float Panel_width(const Panel *panel) { return panel ? Element_width((*panel).graphics) : 0.0f; }
+// Returns the element height, or zero for a null wrapper.
 float Panel_height(const Panel *panel) { return panel ? Element_height((*panel).graphics) : 0.0f; }
+// Returns the corner radius, or zero for a null wrapper.
 float Panel_radius(const Panel *panel) { return panel ? Element_radius((*panel).graphics) : 0.0f; }
+// Returns the anchor mode, or zero for a null wrapper.
 int Panel_anchor(const Panel *panel) { return panel ? Element_anchor((*panel).graphics) : 0; }
+// Returns the pivot mode, or zero for a null wrapper.
 int Panel_pivot(const Panel *panel) { return panel ? Element_pivot((*panel).graphics) : 0; }
+// Returns the Element tag, or nullptr when the wrapper is absent.
 const char *Panel_tag(const Panel *panel) { return panel ? Element_tag((*panel).graphics) : nullptr; }
+// Returns the Element's visibility state.
 bool Panel_isVisible(const Panel *panel) { return panel ? Element_isVisible((*panel).graphics) : false; }
+// Returns the owning wrapper, or nullptr when the panel is a root or absent.
 Panel *Panel_parent(const Panel *panel) { return panel ? (*panel).parent : nullptr; }
 
 // ── events ──────────────────────────────────────────────────────────────────

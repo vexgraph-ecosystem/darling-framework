@@ -35,6 +35,7 @@ struct Picture {
     Element *graphics;
 };
 
+// Creates a Picture that borrows an optional drawable RGBA8 image.
 Picture *Picture_1(const Image *image) {
     if (image && (!Image_isValid(image) || Image_format(image) != IMAGE_FORMAT_RGBA8 ||
                   !Image_isDrawable(image))) {
@@ -59,10 +60,12 @@ Picture *Picture_1(const Image *image) {
     return picture;
 }
 
+// Creates an empty Picture with no borrowed image.
 Picture *Picture_0(void) {
     return Picture_1(nullptr);
 }
 
+// Detaches and destroys the Element wrapper; the borrowed Image remains owned by its caller.
 void Picture_destroy(Picture *picture) {
     if (!picture)
         return;
@@ -72,14 +75,17 @@ void Picture_destroy(Picture *picture) {
     free(picture);
 }
 
+// Returns the owned Element, or nullptr for a null Picture.
 Element *Picture_graphics(const Picture *picture) {
     return picture ? (*picture).graphics : nullptr;
 }
 
+// Returns the borrowed Image currently assigned to the Picture.
 const Image *Picture_image(const Picture *picture) {
     return Element_image(Picture_graphics(picture));
 }
 
+// Replaces the borrowed drawable RGBA8 image after validating its metadata.
 void Picture_setImage(Picture *picture, const Image *image) {
     if (!picture)
         return;
@@ -91,6 +97,7 @@ void Picture_setImage(Picture *picture, const Image *image) {
     Element_setImage((*picture).graphics, image);
 }
 
+// Sets finite, nonnegative display dimensions; invalid dimensions are rejected.
 void Picture_setSize(Picture *picture, float width, float height) {
     if (!picture)
         return;
@@ -101,6 +108,7 @@ void Picture_setSize(Picture *picture, float width, float height) {
     Element_setSize((*picture).graphics, width, height);
 }
 
+// Sets the element offset when both coordinates are finite.
 void Picture_setLocation(Picture *picture, float x, float y) {
     if (!picture)
         return;
@@ -111,12 +119,15 @@ void Picture_setLocation(Picture *picture, float x, float y) {
     Element_setOffset((*picture).graphics, x, y);
 }
 
+// Returns the displayed width, or the Element safe default for a null Picture.
 float Picture_width(const Picture *picture) {
     return Element_width(Picture_graphics(picture));
 }
+// Returns the displayed height, or the Element safe default for a null Picture.
 float Picture_height(const Picture *picture) {
     return Element_height(Picture_graphics(picture));
 }
+// Returns the event-bound origin of the Picture's Element.
 Point Picture_location(const Picture *picture) {
     Rect rect = Element_eventBound(Picture_graphics(picture), (Rect){0});
     return (Point){rect.x, rect.y};
@@ -146,9 +157,11 @@ static void format(const Picture *picture, bool structure, char *dest, size_t ca
         *outTruncated = length < 0 || (size_t) length >= cap;
 }
 
+// Writes a bounded value summary and reports whether it was truncated.
 void Picture_toString(const Picture *picture, char *dest, size_t cap, bool *outTruncated) {
     format(picture, false, dest, cap, outTruncated);
 }
+// Writes a bounded one-level field projection and reports truncation.
 void Picture_toStringStruct(const Picture *picture, char *dest, size_t cap, bool *outTruncated) {
     format(picture, true, dest, cap, outTruncated);
 }
