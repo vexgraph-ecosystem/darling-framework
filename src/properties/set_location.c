@@ -41,17 +41,20 @@
  * ============================================================================
  */
 
+// Sets the panel offset without changing its anchor or pivot.
 Panel *Panel_setLocation_3(Panel *panel, float x, float y) {
     if (panel) Element_setOffset(Panel_graphics(panel), x, y);
     return panel;
 }
 
+// Sets the panel offset and the anchor used against its parent.
 Panel *Panel_setLocation_4(Panel *panel, float x, float y, int anchor) {
     Panel_setLocation_3(panel, x, y);
     if (panel) Element_setAnchor(Panel_graphics(panel), anchor);
     return panel;
 }
 
+// Sets the panel offset, parent anchor, and panel pivot together.
 Panel *Panel_setLocation_5(Panel *panel, float x, float y, int anchor, int pivot) {
     Panel_setLocation_4(panel, x, y, anchor);
     if (panel) Element_setPivot(Panel_graphics(panel), pivot);
