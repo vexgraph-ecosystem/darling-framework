@@ -1,6 +1,6 @@
 # Darling current-system scaffolds
 
-This maps `../../ecosystem/darling.md` into the current remastered framework.
+This maps `../../gist/readiness/darling.md` into the current remastered framework.
 Its older green/yellow percentages are historical intent, not proof that these new files work.
 
 Read [STATUS.md](STATUS.md) first for current implementation readiness. In
@@ -164,7 +164,7 @@ OS backends, independent schedulers or duplicate Color/Window implementations we
 
 Picture now lives outside the draft inventory. It borrows RGBA8 CPU shadows,
 starts at native image size and stretches to its Element rectangle. Crop/fit
-modes are not implemented. See `tests/darling/drawable/picture_test.c` and the
+modes are not implemented. See `../../tests/darling/drawable/picture_test.c` and the
 one-Frame `filter_gallery` application; scope filters are CPU-prepared, not
 automatic widget attachments. Destroy the Picture wrapper before its parent.
 
@@ -185,7 +185,7 @@ Container-era names map to the modern Panel compositions; do not create two comp
 2. Implement one coherent class pair and its symmetric field accessors; shared operations go in `properties/`.
 3. Opt in to only the events the actual widget supports. Allocate class identities only when the type becomes real.
 4. Keep Element/Property geometry, R3 graphics and R1 native resource ownership canonical.
-5. Add mirrored owner tests and integration pixel/input/lifetime tests in `tests/darling/`.
+5. Add mirrored owner tests and integration pixel/input/lifetime tests in `../../tests/darling`.
 6. Record automated lab evidence with exact timestamps and stated gaps; the user owns visual approval.
 7. Remove draft/incomplete markers only for the scope truly implemented and tested.
 

@@ -12,7 +12,7 @@ double-buffered IOSurface GPU present with RGBA fallback, capture/PNG, Applicati
 lifecycle, FPS policy), `panel.c` ownership, `scroll_panel.c` (partial viewport:
 clamp/clip/revalidate/events), nine `properties/*` operations, `event_invoke.c`
 dispatch, `hit.c` resolver, `pointer.c` synthetic+OS input, and `picture.c`.
-Owner tests exist under `tests/darling/`; `BATTLE_TESTS.md` records a full run.
+Owner tests exist under `../../tests/darling`; `BATTLE_TESTS.md` records a full run.
 
 **Draft / not implemented (source-verified):** of 142 `.c` files, **125 are
 37-line `;;DRAFT`/`;;INCOMPLETE` scaffolds with zero API** — all buttons, most
@@ -24,7 +24,7 @@ The real CPU image-group compositor is graphvex's, not here.
 **Platforms proven:** macOS arm64 only; Linux/Windows native execution unproven.
 Visual approval is the user's.
 
-**Evidence:** `tests/darling/` (window-based, opt-in) and `tests/test-checklist.md`
+**Evidence:** `../../tests/darling` (window-based, opt-in) and `../../gist/test-checklist.md`
 — most `src/**` rows are still ❌ untested; test files existing is not per-file proof.
 
 The remastered C23 retained UI framework over graphvex (R3) and hotcwap (R1).
@@ -55,7 +55,7 @@ Scene widgets supply independently produced scene images to Graphvex composition
 The event bound remains the resolved layout/hit geometry; the absolute bound
 describes expanded paint, including descendants/effects. A blur halo does not
 enlarge mouse targeting or move layout. See Graphvex's
-[ownership and bounds laws](../graphvex/graphvex-preferences.md).
+[ownership and bounds laws](../../drivers/graphvex/graphvex-preferences.md).
 The first compositor slice is a CPU image-group API; automatic widget-stack and
 GPU compositor integration are not yet implied. Existing Frame painting remains
 a migration bridge, not an alternate architectural owner.

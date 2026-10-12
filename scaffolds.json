@@ -1,6 +1,6 @@
 {
   "schema": 1,
-  "intent": "repos/.ecosystem/darling.md",
+  "intent": "gist/readiness/darling.md",
   "readiness": "draft scaffolds only; no runtime or visual readiness",
   "entries": [
     {

@@ -2,7 +2,7 @@
 
 **Implemented contract, 2026-10-04; scoped macOS lab evidence only.**
 Every Darling C test/executable now enters Application lifetime, either directly
-or through `tests/darling/test_application.h`. Manual viewers are compiled, not
+or through `../../tests/darling/test_application.h`. Manual viewers are compiled, not
 automatically launched for evidence. Linux/Windows native execution remains unverified.
 
 ;;INTENTION("Application is the lifetime boundary for Darling test executables;
@@ -124,7 +124,7 @@ Implemented class-named operations, with symmetric getters:
 
 ## Ownership and compatibility
 
-`ecosystem/hotcwap/kernel/application.h` and `.c` currently provide:
+`../../host-behavior/hotcwap/kernel/application.h` and `.c` currently provide:
 
 - `Application_start`: blocking begin/service/close/join lifetime.
 - `Application_close` / `Application_stop`: thread-safe close requests.

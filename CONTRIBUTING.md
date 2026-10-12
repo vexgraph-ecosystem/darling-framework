@@ -2,7 +2,7 @@
 
 All code in `darling-framework` must comply with the
 [workspace constitution](https://gist.github.com/vex-graph/4132a6c45cb6d3797c3e8eff2e94035a),
-one real, Git-ignored workspace-root `../../../preferences.md`. There is no local
+one real, Git-ignored workspace `../../gist/PREFERENCES.md`. There is no local
 Darling lawbook in this checkout; that is an explicit reading gap, not an exemption.
 
 R2 comprises Vexspoke CPU computation/behavior and Relational Engine
