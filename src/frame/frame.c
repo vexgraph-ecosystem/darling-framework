@@ -280,7 +280,7 @@ Frame *Frame_3(const char *title, int widthPx, int heightPx) {
     if (!(*f).window) { free(f); return nullptr; }
     // The present seam: its retained Image is the capture target, and its host
     // blit publishes to the window. The borrowed native is the content view.
-    (*f).surface = Surface_2(Window_contentView((*f).window), (uint32_t)wpx, (uint32_t)hpx);
+    (*f).surface = Surface(Window_contentView((*f).window), (uint32_t)wpx, (uint32_t)hpx);
     if (!(*f).surface) { Window_destroy((*f).window); free(f); return nullptr; }
     Surface_onPresent((*f).surface, frame_on_present, f);
     // Prefer the zero-copy GPU seam; it falls back silently when unavailable.

@@ -169,10 +169,14 @@ void ScrollPanel_setOffset(ScrollPanel *sp, float x, float y) {
     ScrollPanel_revalidate(sp);
 }
 
-// Writes the current offsets to each non-null output pointer.
-void ScrollPanel_getOffset(const ScrollPanel *sp, float *outX, float *outY) {
-    if (outX) *outX = sp ? (*sp).offsetX : 0.0f;
-    if (outY) *outY = sp ? (*sp).offsetY : 0.0f;
+// Returns the current horizontal offset.
+float ScrollPanel_getOffsetX(const ScrollPanel *sp) {
+    return sp ? (*sp).offsetX : 0.0f;
+}
+
+// Returns the current vertical offset.
+float ScrollPanel_getOffsetY(const ScrollPanel *sp) {
+    return sp ? (*sp).offsetY : 0.0f;
 }
 
 // Applies a relative scroll delta through the clamping setter.

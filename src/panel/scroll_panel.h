@@ -46,7 +46,8 @@ float ScrollPanel_contentHeight(const ScrollPanel *scroll);
 
 // The offset is end-clamped: [0, max(0, content - viewport)] per axis.
 void ScrollPanel_setOffset(ScrollPanel *scroll, float x, float y);
-void ScrollPanel_getOffset(const ScrollPanel *scroll, float *outX, float *outY);  // dest-last
+float ScrollPanel_getOffsetX(const ScrollPanel *scroll);
+float ScrollPanel_getOffsetY(const ScrollPanel *scroll);
 void ScrollPanel_scrollBy(ScrollPanel *scroll, float dx, float dy);
 float ScrollPanel_maxX(const ScrollPanel *scroll);
 float ScrollPanel_maxY(const ScrollPanel *scroll);

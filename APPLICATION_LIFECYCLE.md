@@ -124,7 +124,7 @@ Implemented class-named operations, with symmetric getters:
 
 ## Ownership and compatibility
 
-`../../host-behavior/hotcwap/kernel/application.h` and `.c` currently provide:
+`../hotcwap/kernel/application.h` and `.c` currently provide:
 
 - `Application_start`: blocking begin/service/close/join lifetime.
 - `Application_close` / `Application_stop`: thread-safe close requests.

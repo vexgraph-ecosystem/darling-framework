@@ -55,7 +55,7 @@ Scene widgets supply independently produced scene images to Graphvex composition
 The event bound remains the resolved layout/hit geometry; the absolute bound
 describes expanded paint, including descendants/effects. A blur halo does not
 enlarge mouse targeting or move layout. See Graphvex's
-[ownership and bounds laws](../../drivers/graphvex/graphvex-preferences.md).
+[ownership and bounds laws](../graphvex/graphvex-preferences.md).
 The first compositor slice is a CPU image-group API; automatic widget-stack and
 GPU compositor integration are not yet implied. Existing Frame painting remains
 a migration bridge, not an alternate architectural owner.
