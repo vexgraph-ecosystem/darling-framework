@@ -323,15 +323,16 @@ void Pointer_track(Frame *frame) {
     if (!c || (*c).tracked) return;
     (*c).tracked = true;
     (*c).frame = frame;
-    (*c).handler.self = c;
-    (*c).handler.onMouseDown = track_down;
-    (*c).handler.onMouseUp = track_up;
-    (*c).handler.onMouseMove = track_move;
-    (*c).handler.onMouseMoveDelta = track_mod;
-    (*c).handler.onMouseDrag = track_dragf;
-    (*c).handler.onMouseScroll = track_scroll;
-    (*c).handler.onMouseZoom = track_zoom;
-    (*c).handler.onMouseRepeat = track_none0;
-    Window_addMouseAdapter(Frame_window(frame), &(*c).handler);
+    MouseHandler *handler = &(*c).handler;
+    (*handler).self = c;
+    (*handler).onMouseDown = track_down;
+    (*handler).onMouseUp = track_up;
+    (*handler).onMouseMove = track_move;
+    (*handler).onMouseMoveDelta = track_mod;
+    (*handler).onMouseDrag = track_dragf;
+    (*handler).onMouseScroll = track_scroll;
+    (*handler).onMouseZoom = track_zoom;
+    (*handler).onMouseRepeat = track_none0;
+    Window_addMouseAdapter(Frame_window(frame), handler);
     Frame_onClose(frame, cleanup_on_close, nullptr);
 }
