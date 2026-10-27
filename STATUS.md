@@ -3,7 +3,7 @@
 Source audit: **2026-10-04**. This is the current remastered framework, not the
 retired implementation in `_trash/`. Update this file when a capability changes.
 Per-file executed commands, content hashes and actual Unix completion timestamps
-live in the workspace's `../../gist/test-checklist.md`.
+live in the workspace's `../../../metadata/gists/test-checklist.md`.
 
 **Three different things:** implemented behavior, a passing scoped lab check,
 and user visual approval. A ✅ for scaffold compilation does **not** mean the
@@ -87,5 +87,5 @@ whole-platform or visual approval.
 
 `panel_test`, `scroll_panel_test`, `panel_events_test`, `properties_test`,
 `set_cursor_test`, `event_invoke_test` and `event_kinds_test`: **7 passed**.
-Commands and timestamps are recorded in `../../gist/test-checklist.md`. No window,
+Commands and timestamps are recorded in `../../../metadata/gists/test-checklist.md`. No window,
 demo, visual tour, whole-suite claim or text-rendering readiness was exercised.

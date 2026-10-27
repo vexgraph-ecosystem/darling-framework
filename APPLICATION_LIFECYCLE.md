@@ -2,7 +2,7 @@
 
 **Implemented contract, 2026-10-04; scoped macOS lab evidence only.**
 Every Darling C test/executable now enters Application lifetime, either directly
-or through `../../tests/darling/test_application.h`. Manual viewers are compiled, not
+or through `../../../tests/darling/test_application.h`. Manual viewers are compiled, not
 automatically launched for evidence. Linux/Windows native execution remains unverified.
 
 ;;INTENTION("Application is the lifetime boundary for Darling test executables;

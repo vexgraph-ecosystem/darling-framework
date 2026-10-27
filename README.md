@@ -12,7 +12,8 @@ double-buffered IOSurface GPU present with RGBA fallback, capture/PNG, Applicati
 lifecycle, FPS policy), `panel.c` ownership, `scroll_panel.c` (partial viewport:
 clamp/clip/revalidate/events), nine `properties/*` operations, `event_invoke.c`
 dispatch, `hit.c` resolver, `pointer.c` synthetic+OS input, and `picture.c`.
-Owner tests exist under `../../tests/darling`; `BATTLE_TESTS.md` records a full run.
+Owner tests live under `../../../tests/darling`; use the shared checklist for
+recorded execution evidence.
 
 **Draft / not implemented (source-verified):** of 142 `.c` files, **125 are
 37-line `;;DRAFT`/`;;INCOMPLETE` scaffolds with zero API** — all buttons, most
@@ -24,7 +25,7 @@ The real CPU image-group compositor is graphvex's, not here.
 **Platforms proven:** macOS arm64 only; Linux/Windows native execution unproven.
 Visual approval is the user's.
 
-**Evidence:** `../../tests/darling` (window-based, opt-in) and `../../gist/test-checklist.md`
+**Evidence:** `../../../tests/darling` (window-based, opt-in) and `../../../metadata/gists/test-checklist.md`
 — most `src/**` rows are still ❌ untested; test files existing is not per-file proof.
 
 The remastered C23 retained UI framework over graphvex (R3) and hotcwap (R1).

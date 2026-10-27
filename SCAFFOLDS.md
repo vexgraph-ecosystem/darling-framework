@@ -185,7 +185,7 @@ Container-era names map to the modern Panel compositions; do not create two comp
 2. Implement one coherent class pair and its symmetric field accessors; shared operations go in `properties/`.
 3. Opt in to only the events the actual widget supports. Allocate class identities only when the type becomes real.
 4. Keep Element/Property geometry, R3 graphics and R1 native resource ownership canonical.
-5. Add mirrored owner tests and integration pixel/input/lifetime tests in `../../tests/darling`.
+5. Add mirrored owner tests and integration pixel/input/lifetime tests in `../../../tests/darling`.
 6. Record automated lab evidence with exact timestamps and stated gaps; the user owns visual approval.
 7. Remove draft/incomplete markers only for the scope truly implemented and tested.
 
